@@ -32,12 +32,16 @@ func nativeChapterAvailable(drama nativeDrama, chapter Chapter) bool {
 }
 
 func nativeDownloadAvailable(job nativeDownloadJob) bool {
-	return nativeChapterAvailable(job.Drama, job.Chapter)
+	source := canonicalProviderSource(job.Drama.Source)
+	if source == "" {
+		source = sourceFromDramaID(job.Drama.ID)
+	}
+	return source != sourceBilibili && nativeChapterAvailable(job.Drama, job.Chapter)
 }
 
 func nativeAuthorizeInput(input nativeInput) error {
 	switch input.Action {
-	case "recommendations", "cachedRecommendations", "suggestions", "danmaku":
+	case "recommendations", "cachedRecommendations", "suggestions":
 		if !nativeSourceAvailable(sourceHongguo) {
 			return errNativeBuildSource
 		}
@@ -59,6 +63,17 @@ func nativeAuthorizeInput(input nativeInput) error {
 			return errNativeBuildSource
 		}
 		if (input.Action == "resolve" || input.Action == "preload" || input.Action == "prepareHandoff") && !nativeChapterAvailable(input.Drama, input.Chapter) {
+			return errNativeBuildSource
+		}
+		if input.Action == "enqueueDownloads" && sourceFromDramaID(input.Drama.ID) == sourceBilibili {
+			return errors.New("哔哩哔哩站源当前不支持下载")
+		}
+	case "bilibiliAccount":
+		if canonicalProviderSource(input.Source) != sourceBilibili || !nativeSourceAvailable(sourceBilibili) {
+			return errNativeBuildSource
+		}
+	case "bilibiliCreator", "bilibiliComments":
+		if !nativeDramaAvailable(input.Drama) || sourceFromDramaID(input.Drama.ID) != sourceBilibili {
 			return errNativeBuildSource
 		}
 	}

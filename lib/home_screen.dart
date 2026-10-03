@@ -163,7 +163,15 @@ class _HomeScreenState extends State<HomeScreen> {
       ];
     }
     return [
-      CatalogCategory.all,
+      _group.id == 'douyin'
+          ? const CatalogCategory('', '推荐')
+          : _group.id == 'douyin-live'
+          ? const CatalogCategory('', '精选')
+          : _group.id == 'douyin-series'
+          ? const CatalogCategory('', '推荐')
+          : _group.id == 'douyin-theater'
+          ? const CatalogCategory('', '综艺')
+          : CatalogCategory.all,
       ..._categories.where((entry) => entry.id.isNotEmpty),
     ];
   }
@@ -484,6 +492,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _toggleSearch() {
+    if (!_canSearch) return;
     if (AppLayout.isTelevision(context)) {
       _televisionSearch();
       return;
@@ -498,6 +507,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _openRankings() {
+    if (!_catalogTools) return;
     _pauseCatalog();
     Navigator.push<void>(
       context,
@@ -512,6 +522,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _televisionSearch() async {
+    if (!_canSearch) return;
     final query = await showDialog<String>(
       context: context,
       builder: (_) => TelevisionSearchDialog(
@@ -708,6 +719,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _selectionMode = false;
       _selectedDramas.clear();
       _source = source;
+      _searchVisible = false;
       _items = [];
       _catalogDisplayOffset = 0;
       _hasMore = true;
@@ -769,6 +781,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _chooseCatalogView() async {
+    if (!_catalogTools) return;
     final selected = await chooseCatalogView(context, widget.store.catalogView);
     if (selected != null && mounted) {
       await saveUserChange(
@@ -834,11 +847,24 @@ class _HomeScreenState extends State<HomeScreen> {
       } else if (!_discoveryInitialized) {
         _discoveryInitialized = true;
         if (widget.store.sources.isNotEmpty) {
-          _load(cacheOnly: true);
+          unawaited(_loadInitialDiscovery());
           _loadCategories();
         }
       }
     }
+  }
+
+  Future<void> _loadInitialDiscovery() async {
+    final sourceId = _group.sources.length == 1 ? _group.sources.single.id : '';
+    await _load(cacheOnly: true);
+    if (!mounted ||
+        sourceId != SourceSite.douyin.id ||
+        _group.sources.length != 1 ||
+        _group.sources.single.id != sourceId ||
+        _items.isNotEmpty) {
+      return;
+    }
+    await _load();
   }
 
   void _setFeedCleanMode(bool enabled) {
@@ -854,6 +880,8 @@ class _HomeScreenState extends State<HomeScreen> {
   });
 
   void _selectDrama(Drama drama) {
+    if (!_catalogTools || !SourceSite.byId(drama.source).supportsDownloads)
+      return;
     if (!widget.store.canDownload ||
         !widget.repository.supportsDownloads ||
         !widget.store.allowsSource(drama.source)) {
@@ -894,10 +922,17 @@ class _HomeScreenState extends State<HomeScreen> {
     drama: drama,
     store: widget.store,
     onContinue: () => _openDrama(drama, resume: true),
-    onDownload: widget.repository.supportsDownloads && widget.store.canDownload
+    onDownload:
+        SourceSite.byId(drama.source).supportsDownloads &&
+            widget.repository.supportsDownloads &&
+            widget.store.canDownload
         ? () => _openDrama(drama, download: true)
         : null,
-    onSelect: widget.repository.supportsDownloads && widget.store.canDownload
+    onSelect:
+        _catalogTools &&
+            SourceSite.byId(drama.source).supportsDownloads &&
+            widget.repository.supportsDownloads &&
+            widget.store.canDownload
         ? () => _selectDrama(drama)
         : null,
   );
@@ -909,11 +944,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }) {
     final following = widget.store.following(drama.id);
     final canSelect =
-        widget.store.canDownload && widget.repository.supportsDownloads;
+        _catalogTools &&
+        SourceSite.byId(drama.source).supportsDownloads &&
+        widget.store.canDownload &&
+        widget.repository.supportsDownloads;
     return DramaTile(
       key: ValueKey(drama.id),
       drama: drama,
       repository: widget.repository,
+      subtitle:
+          SourceSite.byId(drama.source).supportsCreator &&
+              drama.creatorName.trim().isNotEmpty
+          ? drama.creatorName.trim()
+          : null,
       focusNode: focusNode,
       onFocus: onFocus,
       onTap: () => _selectionMode ? _selectDrama(drama) : _openDrama(drama),
@@ -945,24 +988,26 @@ class _HomeScreenState extends State<HomeScreen> {
       _group.sources.any((source) => source.id == 'huangdou');
   bool get _hideVip => _supportsVipFilter && widget.store.hideVip;
 
+  bool get _catalogTools =>
+      _group.sources.every((source) => source.supportsCatalogTools);
+  bool get _canSearch => _group.sources.any((source) => source.onlineSearch);
+
   List<Drama> get _visible {
     final query = _search.text.trim().toLowerCase();
-    final sorted = sortCatalog(
-      _items.where((drama) {
-        if (!widget.store.allowsSource(drama.source)) return false;
-        if (_category.startsWith('local:') &&
-            categoryName(drama.category) != _category.substring(6)) {
-          return false;
-        }
-        if (_hideVip && drama.source == 'huangdou' && drama.vip) {
-          return false;
-        }
-        return _onlineSearch ||
-            query.isEmpty ||
-            matchesDramaQuery(drama, query);
-      }),
-      widget.store.catalogView,
-    );
+    final filtered = _items.where((drama) {
+      if (!widget.store.allowsSource(drama.source)) return false;
+      if (_category.startsWith('local:') &&
+          categoryName(drama.category) != _category.substring(6)) {
+        return false;
+      }
+      if (_hideVip && drama.source == 'huangdou' && drama.vip) {
+        return false;
+      }
+      return _onlineSearch || query.isEmpty || matchesDramaQuery(drama, query);
+    });
+    final sorted = _catalogTools
+        ? sortCatalog(filtered, widget.store.catalogView)
+        : filtered.toList();
     if (sorted.length < 2 || _catalogDisplayOffset == 0) return sorted;
     final offset = _catalogDisplayOffset % sorted.length;
     return List<Drama>.generate(
@@ -974,7 +1019,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
-    animation: widget.store,
+    animation: widget.store.viewChanges,
     builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
         final television = AppLayout.isTelevision(context);
@@ -1062,7 +1107,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           icon: const Icon(Icons.sync_rounded),
                         ),
                       if (_tab == 1) ...[
-                        if (!_showRecommendations)
+                        if (_catalogTools && !_showRecommendations)
                           IconButton(
                             tooltip:
                                 '排序与筛选 · ${widget.store.catalogView.sort.label}',
@@ -1075,15 +1120,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                 : null,
                             icon: const Icon(Icons.sort_rounded),
                           ),
-                        IconButton(
-                          key: const ValueKey('open-rankings'),
-                          tooltip: '榜单',
-                          onPressed: widget.store.sources.isEmpty
-                              ? null
-                              : _openRankings,
-                          icon: const Icon(Icons.leaderboard_outlined),
-                        ),
-                        if (!_showRecommendations &&
+                        if (_catalogTools)
+                          IconButton(
+                            key: const ValueKey('open-rankings'),
+                            tooltip: '榜单',
+                            onPressed: widget.store.sources.isEmpty
+                                ? null
+                                : _openRankings,
+                            icon: const Icon(Icons.leaderboard_outlined),
+                          ),
+                        if (_catalogTools &&
+                            !_showRecommendations &&
                             widget.store.canDownload &&
                             widget.repository.supportsDownloads)
                           IconButton(
@@ -1093,16 +1140,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                 setState(() => _selectionMode = true),
                             icon: const Icon(Icons.checklist_rounded),
                           ),
-                        IconButton(
-                          key: const ValueKey('toggle-search'),
-                          tooltip: _searchVisible ? '收起搜索' : '搜索',
-                          icon: Icon(
-                            _searchVisible
-                                ? Icons.search_off_rounded
-                                : Icons.search_rounded,
+                        if (_canSearch)
+                          IconButton(
+                            key: const ValueKey('toggle-search'),
+                            tooltip: _searchVisible ? '收起搜索' : '搜索',
+                            icon: Icon(
+                              _searchVisible
+                                  ? Icons.search_off_rounded
+                                  : Icons.search_rounded,
+                            ),
+                            onPressed: _toggleSearch,
                           ),
-                          onPressed: _toggleSearch,
-                        ),
                       ],
                       if (_tab == 1 &&
                           !_showRecommendations &&

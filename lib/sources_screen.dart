@@ -1,3 +1,7 @@
+import 'source_subscriptions_screen.dart';
+import 'douyin_settings_screen.dart';
+import 'douyin_source.dart';
+import 'bilibili_settings_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -50,6 +54,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
   final _statuses = <String, SourceStatus>{};
   final _errors = <String, String>{};
   final _pending = <String>{};
+  final _visibilityPending = <String>{};
   final _revisions = <String, int>{};
   final _expandedHealth = <String>{};
   final _expandedSections = <String>{};
@@ -70,8 +75,14 @@ class _SourcesScreenState extends State<SourcesScreen> {
         )) {
       _expandedSections.add('source-group-huangguo');
     }
+    if (widget.initialSource != null &&
+        SourceSite.byId(widget.initialSource!).isDouyin) {
+      _expandedSections.add('source-group-douyin');
+    }
     unawaited(_refresh());
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed)
+        return;
       _ticks++;
       if (_statuses.values.any((status) => status.retryAt != null)) {
         setState(() {});
@@ -113,6 +124,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
           revision != (_revisions[source.id] ?? 0)) {
         return;
       }
+      if (_statuses[source.id]?.revision == status.revision &&
+          !_errors.containsKey(source.id))
+        return;
       setState(() {
         _statuses[source.id] = status;
         _errors.remove(source.id);
@@ -128,22 +142,140 @@ class _SourcesScreenState extends State<SourcesScreen> {
     }
   }
 
-  Future<void> _setVisible(SourceSite source, bool visible) async {
-    try {
-      await widget.store.setSourceVisible(source.id, visible);
-      if (visible) {
-        unawaited(_refreshSource(source));
+  List<SourceSite> get _douyinSources =>
+      SourceSite.values.where((source) => source.isDouyin).toList();
+
+  List<SourceGroup> _managementGroups(List<SourceSite> sources) {
+    final groups = <SourceGroup>[];
+    var douyinAdded = false;
+    for (final group in SourceGroup.fromSources(sources)) {
+      if (group.sources.any((source) => source.isDouyin)) {
+        if (!douyinAdded) {
+          groups.add(SourceGroup('douyin-family', '抖音', _douyinSources));
+          douyinAdded = true;
+        }
       } else {
-        _revisions[source.id] = (_revisions[source.id] ?? 0) + 1;
-        unawaited(_cancelHiddenSourceJob(source));
+        groups.add(group);
+      }
+    }
+    return groups;
+  }
+
+  Future<void> _configureDouyin() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => DouyinSettingsScreen(
+          store: widget.store,
+          repository: widget.repository,
+        ),
+      ),
+    );
+    if (mounted) {
+      for (final source in _douyinSources) {
+        if (widget.store.allowsSource(source.id)) {
+          unawaited(_refreshSource(source));
+        }
+      }
+    }
+  }
+
+  Future<void> _configureBilibili() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => BilibiliSettingsScreen(
+          store: widget.store,
+          repository: widget.repository,
+        ),
+      ),
+    );
+    if (mounted && widget.store.allowsSource(SourceSite.bilibili.id)) {
+      unawaited(_refreshSource(SourceSite.bilibili));
+    }
+  }
+
+  Future<void> _setVisible(SourceSite source, bool visible) =>
+      _setVisibility([source], visible);
+
+  Future<void> _setVisibility(List<SourceSite> sources, bool visible) async {
+    if (sources.any((source) => _visibilityPending.contains(source.id))) return;
+    final epoch = widget.store.profileEpoch;
+    final ids = sources.map((source) => source.id).toSet();
+    setState(() => _visibilityPending.addAll(ids));
+    try {
+      if (visible && sources.any((source) => source.isDouyin)) {
+        var cookie = await DouyinSource.storage.read(
+          key: DouyinSource.cookieKey(widget.store.profile.id),
+        );
+        if (!mounted ||
+            epoch != widget.store.profileEpoch ||
+            widget.store.locked)
+          return;
+        if (cookie?.isNotEmpty != true) {
+          await _configureDouyin();
+          if (!mounted ||
+              epoch != widget.store.profileEpoch ||
+              widget.store.locked)
+            return;
+          cookie = await DouyinSource.storage.read(
+            key: DouyinSource.cookieKey(widget.store.profile.id),
+          );
+          if (cookie?.isNotEmpty != true) return;
+        }
+      }
+      if (!mounted || epoch != widget.store.profileEpoch || widget.store.locked)
+        return;
+      await widget.store.setSourcesVisible({
+        for (final source in sources) source.id: visible,
+      });
+      if (!mounted || epoch != widget.store.profileEpoch) return;
+      for (final source in sources) {
+        if (visible) {
+          unawaited(_refreshSource(source));
+        } else {
+          _revisions[source.id] = (_revisions[source.id] ?? 0) + 1;
+          unawaited(_cancelHiddenSourceJob(source));
+        }
       }
     } catch (error) {
-      if (mounted) {
+      if (mounted && epoch == widget.store.profileEpoch) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('保存站源显示设置失败：$error')));
       }
+    } finally {
+      if (mounted) setState(() => _visibilityPending.removeAll(ids));
     }
+  }
+
+  Widget _douyinVisibility() {
+    final sources = _douyinSources;
+    final enabled = sources
+        .where((source) => widget.store.allowsSource(source.id))
+        .length;
+    final busy = sources.any(
+      (source) => _visibilityPending.contains(source.id),
+    );
+    return ListTile(
+      key: const ValueKey('visible-douyin-family'),
+      title: const Text('抖音'),
+      subtitle: Text('已开启 $enabled/${sources.length} · 子项在下方管理'),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            tooltip: '统一配置抖音 Cookie',
+            icon: const Icon(Icons.manage_accounts_outlined),
+            onPressed: busy ? null : _configureDouyin,
+          ),
+          Switch(
+            value: enabled > 0,
+            onChanged: busy
+                ? null
+                : (visible) => _setVisibility(sources, visible),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _cancelHiddenSourceJob(SourceSite source) async {
@@ -285,12 +417,32 @@ class _SourcesScreenState extends State<SourcesScreen> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.store,
     builder: (context, _) {
-      final sources = widget.store.sources.toList()
-        ..sort((a, b) {
-          final aFirst = a.id == widget.initialSource ? 0 : 1;
-          final bFirst = b.id == widget.initialSource ? 0 : 1;
-          return aFirst.compareTo(bFirst);
-        });
+      final sources =
+          SourceSite.values
+              .where(
+                (source) =>
+                    source.isDouyin || widget.store.allowsSource(source.id),
+              )
+              .toList()
+            ..sort((a, b) {
+              final aFirst = a.id == widget.initialSource ? 0 : 1;
+              final bFirst = b.id == widget.initialSource ? 0 : 1;
+              final priority = aFirst.compareTo(bFirst);
+              return priority != 0
+                  ? priority
+                  : SourceSite.values
+                        .indexOf(a)
+                        .compareTo(SourceSite.values.indexOf(b));
+            });
+      final visibleGroups = SourceSite.values
+          .where((source) => widget.store.allowsSource(source.id))
+          .map((source) => source.isDouyin ? 'douyin-family' : source.id)
+          .toSet()
+          .length;
+      final totalGroups = SourceSite.values
+          .map((source) => source.isDouyin ? 'douyin-family' : source.id)
+          .toSet()
+          .length;
       final viewPaddingBottom = MediaQuery.viewPaddingOf(context).bottom;
       final paddingBottom = MediaQuery.paddingOf(context).bottom;
       final bottomInset = viewPaddingBottom > paddingBottom
@@ -300,8 +452,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
         appBar: AppBar(
           title: const Text('站源管理'),
           actions: [
+            IconButton(tooltip: '站源订阅与更新', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SourceSubscriptionsScreen(store: widget.store))), icon: const Icon(Icons.extension_outlined)),
             IconButton(
-              tooltip: '一键更新',
+              tooltip: '同步全部内容',
               onPressed:
                   _bulkOperation == null &&
                       widget.repository.supportsSourceManagement
@@ -328,6 +481,8 @@ class _SourcesScreenState extends State<SourcesScreen> {
               child: ListView(
                 padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
                 children: [
+                  Card.outlined(child: ListTile(leading: const Icon(Icons.extension_outlined), title: const Text('站源订阅'), subtitle: const Text('从 GitHub 或独立链接导入，检查和更新站源程序'), trailing: const Icon(Icons.chevron_right), onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SourceSubscriptionsScreen(store: widget.store))))),
+                  const SizedBox(height: 12),
                   const Padding(
                     padding: EdgeInsets.only(bottom: 16),
                     child: Text(
@@ -338,26 +493,50 @@ class _SourcesScreenState extends State<SourcesScreen> {
                     section: 'source-visibility',
                     icon: Icons.visibility_outlined,
                     title: '显示的站源',
-                    subtitle:
-                        '已显示 ${sources.length}/${SourceSite.values.length} · 点击选择隐藏',
+                    subtitle: '已显示 $visibleGroups/$totalGroups · 点击选择隐藏',
                     children: [
                       for (final source in SourceSite.values)
-                        SwitchListTile(
-                          key: ValueKey('visible-${source.id}'),
-                          title: Text(source.name),
-                          value: widget.store.allowsSource(source.id),
-                          onChanged: (visible) => _setVisible(source, visible),
-                        ),
+                        if (source.id == SourceSite.douyin.id)
+                          _douyinVisibility()
+                        else if (!source.isDouyin)
+                          ListTile(
+                            key: ValueKey('visible-${source.id}'),
+                            title: Text(source.name),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Switch(
+                                  value: widget.store.allowsSource(source.id),
+                                  onChanged: (visible) =>
+                                      _setVisible(source, visible),
+                                ),
+                              ],
+                            ),
+                          ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  if (sources.isEmpty)
+                  if (widget.store.sources.isEmpty)
                     const Padding(
                       padding: EdgeInsets.all(24),
-                      child: Text('当前已隐藏所有站源，可在上方重新显示'),
+                      child: Text('没有已开启的站源，请先导入订阅或开启已安装站源'),
                     ),
-                  for (final group in SourceGroup.fromSources(sources))
-                    if (group.id == 'huangguo')
+                  for (final group in _managementGroups(sources))
+                    if (group.id == 'douyin-family')
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: _expandableSection(
+                          section: 'source-group-douyin',
+                          icon: Icons.video_library_outlined,
+                          title: '抖音',
+                          subtitle: '短视频、直播、短剧、放映厅 · 共用一个 Cookie',
+                          children: [
+                            for (final source in group.sources)
+                              _sourceCard(source),
+                          ],
+                        ),
+                      )
+                    else if (group.id == 'huangguo')
                       _expandableSection(
                         section: 'source-group-huangguo',
                         icon: Icons.hub_outlined,
@@ -382,6 +561,24 @@ class _SourcesScreenState extends State<SourcesScreen> {
   );
 
   Widget _sourceCard(SourceSite source) {
+    final visible = widget.store.allowsSource(source.id);
+    if (source.isDouyin && !visible) {
+      return Card(
+        elevation: 0,
+        child: ListTile(
+          title: Text(
+            source.id == SourceSite.douyin.id ? '抖音短视频' : source.name,
+          ),
+          subtitle: const Text('已关闭'),
+          trailing: Switch(
+            value: false,
+            onChanged: _visibilityPending.contains(source.id)
+                ? null
+                : (value) => _setVisible(source, value),
+          ),
+        ),
+      );
+    }
     final status = _statuses[source.id];
     final pending = _pending.contains(source.id);
     final busy = pending || status?.running == true;
@@ -413,11 +610,26 @@ class _SourcesScreenState extends State<SourcesScreen> {
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    source.name,
+                    source.id == SourceSite.douyin.id ? '抖音短视频' : source.name,
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
-                Text('${status?.count ?? 0} 部'),
+                Text(
+                  '${status?.count ?? 0} ${source.id == SourceSite.douyinLive.id ? '个直播间' : '部'}',
+                ),
+                if (source.id == SourceSite.bilibili.id)
+                  IconButton(
+                    tooltip: '哔哩哔哩 Cookie 设置',
+                    onPressed: _configureBilibili,
+                    icon: const Icon(Icons.key_outlined),
+                  ),
+                if (source.isDouyin)
+                  Switch(
+                    value: visible,
+                    onChanged: _visibilityPending.contains(source.id)
+                        ? null
+                        : (value) => _setVisible(source, value),
+                  ),
               ],
             ),
             const SizedBox(height: 8),
@@ -448,34 +660,57 @@ class _SourcesScreenState extends State<SourcesScreen> {
                     onPressed: pending ? null : () => _run(source, 'cancel'),
                     child: const Text('停止'),
                   ),
-                PopupMenuButton<String>(
-                  tooltip: '${source.name}更多操作',
-                  enabled: enabled,
-                  onSelected: (operation) => _run(source, operation),
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: 'more',
-                      enabled: status?.hasMore ?? true,
-                      child: const Text('继续加载一页'),
-                    ),
-                    PopupMenuItem(
-                      value: 'allPages',
-                      enabled: status?.hasMore ?? true,
-                      child: const Text('加载后续所有页'),
-                    ),
-                    const PopupMenuItem(value: 'metadata', child: Text('补齐资料')),
-                    if (source.id == 'huangdou')
+                if (source.isDouyin && source.id != SourceSite.douyin.id)
+                  PopupMenuButton<String>(
+                    tooltip: '${source.name}更多操作',
+                    enabled: enabled,
+                    onSelected: (operation) => _run(source, operation),
+                    itemBuilder: (_) => [
                       PopupMenuItem(
-                        value: 'vipMetadata',
-                        enabled: (status?.unknownVip ?? 0) > 0,
-                        child: Text('补齐 VIP 资料（${status?.unknownVip ?? 0} 部）'),
+                        value: 'more',
+                        enabled: status?.hasMore ?? true,
+                        child: const Text('继续加载一页'),
                       ),
-                    const PopupMenuItem(
-                      value: 'checkCatalog',
-                      child: Text('仅检测目录'),
-                    ),
-                  ],
-                ),
+                      const PopupMenuItem(
+                        value: 'checkCatalog',
+                        child: Text('仅检测目录'),
+                      ),
+                    ],
+                  )
+                else if (source.id != SourceSite.douyin.id)
+                  PopupMenuButton<String>(
+                    tooltip: '${source.name}更多操作',
+                    enabled: enabled,
+                    onSelected: (operation) => _run(source, operation),
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: 'more',
+                        enabled: status?.hasMore ?? true,
+                        child: const Text('继续加载一页'),
+                      ),
+                      PopupMenuItem(
+                        value: 'allPages',
+                        enabled: status?.hasMore ?? true,
+                        child: const Text('加载后续所有页'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'metadata',
+                        child: Text('补齐资料'),
+                      ),
+                      if (source.id == 'huangdou')
+                        PopupMenuItem(
+                          value: 'vipMetadata',
+                          enabled: (status?.unknownVip ?? 0) > 0,
+                          child: Text(
+                            '补齐 VIP 资料（${status?.unknownVip ?? 0} 部）',
+                          ),
+                        ),
+                      const PopupMenuItem(
+                        value: 'checkCatalog',
+                        child: Text('仅检测目录'),
+                      ),
+                    ],
+                  ),
               ],
             ),
             if (busy) ...[

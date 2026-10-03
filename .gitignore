@@ -3,6 +3,7 @@
 .pub-cache/
 build/
 dist/
+/*.apk
 android/.gradle/
 android/local.properties
 android/app/src/main/jniLibs/

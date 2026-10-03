@@ -18,7 +18,7 @@ match = re.search(r'^version:\s*([\w.+-]+)\s*$', (root / 'pubspec.yaml').read_te
 if not match:
     raise SystemExit('pubspec.yaml 缺少合法版本号。')
 version = match.group(1)
-output = root / 'dist' / options.platform
+output = root if options.platform == 'android' else root / 'dist' / options.platform
 output.mkdir(parents=True, exist_ok=True)
 artifacts = []
 
@@ -34,9 +34,12 @@ if options.platform == 'android':
             missing = set(required) - names
             if missing:
                 raise SystemExit('APK 缺少原生库：' + ', '.join(sorted(missing)))
-        target = output / f'{variant.slug}-{version}-{abi}.apk'
+        target = output / f'RealDrama-{version}-{abi}.apk'
         shutil.copy2(source, target)
         artifacts.append(target)
+    for previous in output.glob('RealDrama-*-arm64-v8a.apk'):
+        if previous not in artifacts:
+            previous.unlink()
 else:
     bundle = root / 'build' / 'windows' / 'x64' / 'runner' / 'Release'
     required = ['zhenguojian.exe', 'duanju_core.dll', 'flutter_windows.dll', 'libffmpegkit.dll',
@@ -55,12 +58,14 @@ else:
                 archive.write(source, relative)
     artifacts.append(target)
 
-checksums = []
-for artifact in sorted(output.glob(f'*-{version}-*')):
-    digest = hashlib.sha256()
-    with artifact.open('rb') as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-            digest.update(chunk)
-    checksums.append(f'{digest.hexdigest()}  {artifact.name}')
+for artifact in artifacts:
     print(artifact)
-(output / 'SHA256SUMS.txt').write_text('\n'.join(checksums) + '\n', encoding='ascii')
+if options.platform == 'windows':
+    checksums = []
+    for artifact in sorted(output.glob(f'*-{version}-*')):
+        digest = hashlib.sha256()
+        with artifact.open('rb') as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                digest.update(chunk)
+        checksums.append(f'{digest.hexdigest()}  {artifact.name}')
+    (output / 'SHA256SUMS.txt').write_text('\\n'.join(checksums) + '\\n', encoding='ascii')

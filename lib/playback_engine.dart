@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'models.dart';
+import 'playback_preferences.dart';
 import 'video_output_size.dart' show videoDisplaySize;
 
 @immutable
@@ -62,6 +64,18 @@ abstract class PlaybackEngine extends ChangeNotifier {
   @protected
   void publish(PlaybackSnapshot value) {
     if (_closed) return;
+    final previous = _snapshot;
+    if (previous.position == value.position &&
+        previous.duration == value.duration &&
+        previous.buffer == value.buffer &&
+        previous.playing == value.playing &&
+        previous.buffering == value.buffering &&
+        previous.completed == value.completed &&
+        previous.rate == value.rate &&
+        previous.volume == value.volume &&
+        previous.width == value.width &&
+        previous.height == value.height)
+      return;
     _snapshot = value;
     notifyListeners();
   }
@@ -114,6 +128,58 @@ class MediaKitPlaybackEngine extends PlaybackEngine {
   final VideoController? video;
   final List<StreamSubscription<dynamic>> _subscriptions = [];
   bool _closing = false;
+  PlaybackPreferences _preferences = const PlaybackPreferences();
+  Future<void> _configurationTail = Future<void>.value();
+  (bool, HardwareDecoder, bool)? _appliedConfiguration;
+
+  Future<void> configure(PlaybackPreferences preferences) {
+    _preferences = preferences;
+    final next = _configurationTail.then((_) async {
+      if (_closing) return;
+      final native = player.platform;
+      if (native is! NativePlayer) return;
+      await native.waitForPlayerInitialization;
+      await native.waitForVideoControllerInitializationIfAttached;
+      if (_closing) return;
+      final current = _preferences;
+      final configuration = (
+        current.hardwareDecoding,
+        current.hardwareDecoder,
+        current.lowMemory,
+      );
+      if (configuration == _appliedConfiguration) return;
+      final decoder = current.hardwareDecoder;
+      final compatible = Platform.isAndroid
+          ? decoder != HardwareDecoder.d3d11 &&
+                decoder != HardwareDecoder.d3d11Copy
+          : Platform.isWindows
+          ? decoder != HardwareDecoder.mediaCodec &&
+                decoder != HardwareDecoder.mediaCodecCopy
+          : decoder == HardwareDecoder.automatic ||
+                decoder == HardwareDecoder.copy;
+      final hwdec = !current.hardwareDecoding || Platform.isIOS
+          ? 'no'
+          : compatible
+          ? decoder.mpvValue
+          : 'auto-safe';
+      try {
+        await native.setProperty('hwdec', hwdec);
+      } catch (_) {
+        if (_closing) return;
+        await native.setProperty('hwdec', 'no');
+      }
+      if (_closing) return;
+      await native.setProperty('demuxer-max-bytes', '${current.bufferBytes}');
+      if (_closing) return;
+      await native.setProperty(
+        'demuxer-max-back-bytes',
+        '${current.lowMemory ? 0 : current.bufferBytes}',
+      );
+      _appliedConfiguration = configuration;
+    });
+    _configurationTail = next.catchError((Object _) {});
+    return next;
+  }
 
   @override
   Player get mediaKitPlayer => player;
@@ -146,6 +212,7 @@ class MediaKitPlaybackEngine extends PlaybackEngine {
     required Duration position,
     required bool play,
   }) async {
+    await configure(_preferences);
     final platform = player.platform;
     if (platform is NativePlayer) {
       await platform.setProperty(
@@ -207,6 +274,7 @@ class MediaKitPlaybackEngine extends PlaybackEngine {
   Future<void> close() async {
     if (_closing) return;
     _closing = true;
+    await _configurationTail;
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }

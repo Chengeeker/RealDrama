@@ -134,6 +134,15 @@ func mergeNativeDrama(previous, fresh nativeDrama) nativeDrama {
 	if fresh.SourceID == "" {
 		fresh.SourceID = previous.SourceID
 	}
+	if fresh.CreatorID == "" {
+		fresh.CreatorID = previous.CreatorID
+	}
+	if fresh.CreatorName == "" {
+		fresh.CreatorName = previous.CreatorName
+	}
+	if fresh.CreatorAvatar == "" {
+		fresh.CreatorAvatar = previous.CreatorAvatar
+	}
 	if fresh.Title == "" || fresh.Title == "短剧" {
 		fresh.Title = previous.Title
 	}

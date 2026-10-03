@@ -50,9 +50,11 @@ class PlayerInteractions extends ChangeNotifier {
   bool _disposed = false;
   double _unmutedVolume = 100;
   String _feedback = '';
+  bool _speedFeedback = false;
   DateTime _ignoreTapUntil = DateTime(2000);
 
   String get feedback => _feedback;
+  bool get speedFeedback => _speedFeedback;
   bool get boosting => _boosting;
   bool get suppressTap => DateTime.now().isBefore(_ignoreTapUntil);
   Future<void> get pendingRates => _rates;
@@ -62,16 +64,21 @@ class PlayerInteractions extends ChangeNotifier {
     if (!player.state.playing) cancel();
   }
 
-  void hint(String message, {bool persistent = false}) {
+  void hint(String message, {bool persistent = false, bool speed = false}) {
     if (_disposed) return;
     _hintTimer?.cancel();
-    if (_feedback != message) {
+    if (_feedback != message || _speedFeedback != speed) {
       _feedback = message;
+      _speedFeedback = speed;
       notifyListeners();
     }
     if (!persistent && message.isNotEmpty) {
       _hintTimer = Timer(const Duration(milliseconds: 1200), () {
-        hint(_boosting ? _holdSpeedHint : '', persistent: true);
+        hint(
+          _boosting ? _holdSpeedHint : '',
+          persistent: true,
+          speed: _boosting,
+        );
       });
     }
   }
@@ -105,7 +112,7 @@ class PlayerInteractions extends ChangeNotifier {
       _held = true;
       onHoldStart?.call();
       unawaited(_setRate(holdSpeed));
-      hint(_holdSpeedHint, persistent: true);
+      hint(_holdSpeedHint, persistent: true, speed: true);
     });
   }
 
@@ -118,7 +125,7 @@ class PlayerInteractions extends ChangeNotifier {
     _boosting = false;
     if (boosted) {
       unawaited(_setRate(baseSpeed()));
-      if (!silent) hint('恢复 ${baseSpeed()} 倍速');
+      if (!silent) hint('恢复 ${baseSpeed()} 倍速', speed: true);
     } else if (tap && wasKeyboard) {
       seek(5);
     }

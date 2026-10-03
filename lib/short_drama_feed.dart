@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'catalog_browser.dart';
 import 'core_bridge.dart';
 import 'detail_screen.dart';
+import 'douyin_creator_screen.dart';
+import 'douyin_comments_sheet.dart';
+import 'douyin_author_panel.dart';
 import 'app_haptics.dart';
 import 'feed_preferences.dart';
 import 'feed_recommendations.dart';
@@ -17,6 +20,67 @@ import 'models.dart';
 import 'player_screen.dart';
 import 'playback_preloader.dart';
 import 'widgets.dart';
+
+typedef _FeedBatch = ({
+  List<Drama> items,
+  List<WatchEntry> history,
+  List<Drama> favorites,
+  List<FeedWatchSignal> session,
+  Map<String, int> exposures,
+  List<Drama> recent,
+  Set<String> known,
+  Set<String> unavailable,
+  Set<String> allowed,
+  Set<String> requestSelected,
+  Map<String, FeedCategoryFilter> filters,
+  Set<String> excluded,
+  Map<String, int> weights,
+  int seed,
+  bool random,
+});
+
+List<Drama> _prepareFeedBatch(_FeedBatch batch) {
+  String identity(Drama drama) => '${drama.source}:${drama.id}';
+  String title(Drama drama) => drama.title.toLowerCase().replaceAll(
+    RegExp(r'[\s·•_\-—:：，,。.!！?？()（）\[\]【】]'),
+    '',
+  );
+  final recentIds = batch.recent.map(identity).toSet();
+  final recentTitles = batch.recent
+      .map(title)
+      .where((value) => value.isNotEmpty)
+      .toSet();
+  final seen = {...batch.known};
+  final candidates = <Drama>[];
+  for (final drama in batch.items) {
+    final id = identity(drama);
+    if (!batch.allowed.contains(drama.source) ||
+        batch.unavailable.contains(id) ||
+        recentIds.contains(id) ||
+        recentTitles.contains(title(drama)) ||
+        !seen.add(id))
+      continue;
+    if (batch.filters[drama.source]?.allows(
+          drama,
+          selectedByRequest: batch.requestSelected.contains(drama.source),
+        ) !=
+        true)
+      continue;
+    candidates.add(drama);
+  }
+  return FeedRecommendations.rank(
+    candidates: candidates,
+    history: batch.history,
+    favorites: batch.favorites,
+    session: batch.session,
+    exposures: batch.exposures,
+    recent: batch.recent.reversed.take(24),
+    randomSeed: batch.seed,
+    excluded: batch.excluded,
+    manualWeights: batch.weights,
+    randomMode: batch.random,
+  );
+}
 
 const _hongguoFeedCategoryIds = ['short_play', 'comic_series', 'ai_series'];
 const _hongguoFeedCategoryNames = {
@@ -72,7 +136,6 @@ class ShortDramaFeedScreen extends StatefulWidget {
 class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   final _pages = PageController();
   final _feedActive = ValueNotifier<bool>(false);
-  final _danmakuActions = FeedDanmakuActions();
   final _exposures = <String, int>{};
   final _viewed = <Drama>[];
   final _unavailableThisSession = <String>{};
@@ -97,9 +160,14 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   final Map<int, bool> _batchHasMore = {};
   DateTime _pageStarted = DateTime.now();
   String _feedSignature = '';
+  Object? _rulesKey;
+  Future<void> _acceptTail = Future<void>.value();
   String _candidateSignature = '';
   int _profileEpoch = -1;
   int _homeQuality = 0;
+  bool _lowMemory = false;
+  int get _playerRadius => _lowMemory ? 0 : 2;
+  int get _prefetchRadius => _lowMemory ? 0 : 2;
   int _exposureHistoryRevision = -1;
   _ShortDramaPageControls? _pageControls;
   bool _cleanScreen = false;
@@ -186,8 +254,10 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     _browser = CatalogBrowser(widget.repository);
     _candidateSignature = _currentCandidateSignature;
     _feedSignature = _currentFeedSignature;
+    _rulesKey = widget.store.feedRuleKey;
     _profileEpoch = widget.store.profileEpoch;
     _homeQuality = widget.store.playbackPreferences.homeQuality;
+    _lowMemory = widget.store.playbackPreferences.lowMemory;
     widget.store.addListener(_storeChanged);
     _applySystemUi(false);
     unawaited(_load(rotate: true));
@@ -198,6 +268,8 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.active != widget.active) {
       _feedActive.value = widget.active;
+      if (!widget.active) _playbackPreloader.clear();
+      if (widget.active) _primeNearbyDetails();
       if (!widget.active) {
         _applySystemUi(false);
       } else if (_cleanScreen) {
@@ -226,18 +298,26 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     _applySystemUi(false);
     _pages.dispose();
     _feedActive.dispose();
-    _danmakuActions.dispose();
     _playbackPreloader.dispose();
     unawaited(_browser.cancel());
     super.dispose();
   }
 
   void _storeChanged() {
+    final lowMemory = widget.store.playbackPreferences.lowMemory;
+    if (lowMemory != _lowMemory && mounted) {
+      setState(() => _lowMemory = lowMemory);
+      _playbackPreloader.clear();
+      _primeNearbyDetails();
+    }
     final homeQuality = widget.store.playbackPreferences.homeQuality;
     if (homeQuality != _homeQuality) {
       _homeQuality = homeQuality;
       _playbackPreloader.clear();
     }
+    final rulesKey = widget.store.feedRuleKey;
+    if (rulesKey == _rulesKey || !mounted) return;
+    _rulesKey = rulesKey;
     final signature = _currentFeedSignature;
     if (signature == _feedSignature || !mounted) return;
     final candidateSignature = _currentCandidateSignature;
@@ -290,84 +370,107 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     unawaited(_load(rotate: true));
   }
 
-  void _accept(
+  Future<void> _accept(
     CatalogPage page, {
     required bool hasMore,
     Map<String, String> requestedCategories = const {},
     String? warning,
   }) {
-    if (!mounted) return;
-    if (warning != null && warning.isNotEmpty) _feedWarnings.add(warning);
-    if (page.warning.isNotEmpty) _feedWarnings.add(page.warning);
-    final known = _items.map(_identity).toSet();
-    final unavailable = widget.store.unavailableFeedDramas;
+    final generation = _generation;
+    final next = _acceptTail
+        .catchError((Object _) {})
+        .then(
+          (_) => _processPage(
+            page,
+            hasMore: hasMore,
+            requestedCategories: requestedCategories,
+            warning: warning,
+            generation: generation,
+          ),
+        );
+    _acceptTail = next;
+    return next;
+  }
+
+  Future<void> _processPage(
+    CatalogPage page, {
+    required bool hasMore,
+    required Map<String, String> requestedCategories,
+    required String? warning,
+    required int generation,
+  }) async {
+    if (!mounted || generation != _generation) return;
+    final ruleKey = widget.store.feedRuleKey;
     final preferences = widget.store.homeFeedPreferences;
-    final selectedCategoriesBySource = {
+    final recommendation = widget.store.feedRecommendationPreferences;
+    final filters = {
       for (final entry in preferences.entries)
-        entry.key: entry.value.categories.values.toList(),
+        if (entry.value.enabled && entry.value.categories.isNotEmpty)
+          entry.key: FeedCategoryFilter(entry.value.categories.values, {
+            if (entry.key != SourceSite.bilibili.id)
+              ...entry.value.excludedCategories.values,
+            if (entry.key == SourceSite.hongguo.id)
+              for (final category in _hongguoFeedCategoryNames.entries)
+                if (!entry.value.categories.containsKey(category.key))
+                  category.value,
+          }),
     };
-    final excludedCategoriesBySource = {
-      for (final entry in preferences.entries)
-        entry.key: <String>{
-          ...entry.value.excludedCategories.values,
-          if (entry.key == SourceSite.hongguo.id)
-            for (final category in _hongguoFeedCategoryNames.entries)
-              if (!entry.value.categories.containsKey(category.key))
-                category.value,
-        },
-    };
-    final candidates = page.items.where((drama) {
-      final preference = preferences[drama.source];
-      final requestCategory = requestedCategories[drama.source];
-      final categoryExcluded = FeedRecommendations.matchesCategory(
-        drama,
-        excludedCategoriesBySource[drama.source] ?? const <String>{},
-      );
-      final categorySelected =
-          !categoryExcluded &&
-          (FeedRecommendations.matchesCategory(
-                drama,
-                selectedCategoriesBySource[drama.source] ?? const <String>[],
-              ) ||
-              requestCategory != null &&
-                  preference?.categories.containsKey(requestCategory) == true);
-      return widget.store.allowsSource(drama.source) &&
-          drama.source != SourceSite.stripchat.id &&
-          preference?.enabled == true &&
-          preference!.categories.isNotEmpty &&
-          categorySelected &&
-          !unavailable.contains(_identity(drama)) &&
-          !_unavailableThisSession.contains(_identity(drama)) &&
-          !known.contains(_identity(drama));
-    }).toList();
-    final recentIds = _viewed.map(_identity).toSet();
-    final recentTitles = _viewed
-        .map((drama) => _normalizeTitle(drama.title))
-        .where((title) => title.isNotEmpty)
-        .toSet();
-    final freshCandidates = candidates.where((drama) {
-      return !recentIds.contains(_identity(drama)) &&
-          !recentTitles.contains(_normalizeTitle(drama.title));
-    }).toList();
-    final ranked = FeedRecommendations.rank(
-      candidates: freshCandidates,
+    final ranked = await compute(_prepareFeedBatch, (
+      items: page.items,
       history: widget.store.history,
       favorites: widget.store.favorites,
       session: widget.store.feedSessionSignals,
-      exposures: _exposures,
-      recent: _viewed.reversed.take(24),
-      randomSeed: _seed,
+      exposures: Map<String, int>.of(_exposures),
+      recent: List<Drama>.of(_viewed),
+      known: _items.map(_identity).toSet(),
+      unavailable: {
+        ...widget.store.unavailableFeedDramas,
+        ..._unavailableThisSession,
+      },
+      allowed: widget.store.sources
+          .map((source) => source.id)
+          .where((source) => source != SourceSite.stripchat.id)
+          .toSet(),
+      requestSelected: {
+        for (final entry in requestedCategories.entries)
+          if (preferences[entry.key]?.categories.containsKey(entry.value) ==
+              true)
+            entry.key,
+      },
+      filters: filters,
       excluded: widget.store.feedNotInterested,
-      manualWeights: widget.store.feedRecommendationPreferences.manualWeights,
-      randomMode: widget.store.feedRecommendationPreferences.randomMode,
-    );
+      weights: recommendation.manualWeights,
+      seed: _seed,
+      random: recommendation.randomMode,
+    ));
+    if (!mounted || generation != _generation) return;
+    if (ruleKey != widget.store.feedRuleKey) {
+      await _processPage(
+        page,
+        hasMore: hasMore,
+        requestedCategories: requestedCategories,
+        warning: warning,
+        generation: generation,
+      );
+      return;
+    }
+    if (warning != null && warning.isNotEmpty) _feedWarnings.add(warning);
+    if (page.warning.isNotEmpty) _feedWarnings.add(page.warning);
+    final known = _items.map(_identity).toSet();
+    final accepted = ranked
+        .where(
+          (drama) =>
+              !known.contains(_identity(drama)) &&
+              !_unavailableThisSession.contains(_identity(drama)),
+        )
+        .toList();
     setState(() {
-      _items = [..._items, ...ranked];
+      _items = [..._items, ...accepted];
       _hasMore = hasMore;
       _error = _feedWarnings.isEmpty ? null : _feedWarnings.take(3).join('；');
     });
     _primeNearbyDetails();
-    if (ranked.isNotEmpty) _emptyBatchAttempts = 0;
+    if (accepted.isNotEmpty) _emptyBatchAttempts = 0;
     if (_items.isNotEmpty &&
         !_exposures.containsKey(_identity(_items[_index]))) {
       _recordExposure(_index);
@@ -490,10 +593,12 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
           onCached: (cached) {
             if (generation == _generation && mounted) {
               _batchHasMore[index] = cached.hasMore;
-              _accept(
-                cached,
-                hasMore: _hasMoreBatches(batches.length),
-                requestedCategories: requests,
+              unawaited(
+                _accept(
+                  cached,
+                  hasMore: _hasMoreBatches(batches.length),
+                  requestedCategories: requests,
+                ).catchError((Object _) {}),
               );
             }
           },
@@ -501,7 +606,7 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
         if (!mounted || generation != _generation) return;
         _loadedBatches.add(index);
         _batchHasMore[index] = page.hasMore;
-        _accept(
+        await _accept(
           page,
           hasMore: _hasMoreBatches(batches.length),
           requestedCategories: requests,
@@ -664,13 +769,13 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   }
 
   void _primeNearbyDetails() {
-    if (_items.isEmpty) return;
-    final first = math.max(0, _index - 2);
-    final last = math.min(_items.length - 1, _index + 2);
+    if (_items.isEmpty || !widget.active || !_feedActive.value) return;
+    final first = math.max(0, _index - _playerRadius);
+    final last = math.min(_items.length - 1, _index + _prefetchRadius);
     final upcoming = [
       for (
         var index = _index + 1;
-        index <= math.min(_items.length - 1, _index + 2);
+        index <= math.min(_items.length - 1, _index + _prefetchRadius);
         index++
       )
         index,
@@ -681,7 +786,7 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     _playbackPreloader.retainDramas({
       for (
         var index = _index;
-        index <= math.min(_items.length - 1, _index + 2);
+        index <= math.min(_items.length - 1, _index + _prefetchRadius);
         index++
       )
         _identity(_items[index]),
@@ -704,7 +809,10 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   }
 
   Future<void> _warmUpcomingPlayback(int index) async {
-    if (index <= _index || index > _index + 2 || index >= _items.length) return;
+    if (index <= _index ||
+        index > _index + _prefetchRadius ||
+        index >= _items.length)
+      return;
     final drama = _items[index];
     final DramaDetail detail;
     try {
@@ -713,8 +821,10 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
       return;
     }
     if (!mounted ||
+        !widget.active ||
+        !_feedActive.value ||
         index <= _index ||
-        index > _index + 2 ||
+        index > _index + _prefetchRadius ||
         index >= _items.length ||
         _identity(_items[index]) != _identity(drama) ||
         detail.episodes.isEmpty) {
@@ -815,11 +925,18 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
         PageRouteBuilder<void>(
           transitionDuration: const Duration(milliseconds: 280),
           reverseTransitionDuration: const Duration(milliseconds: 240),
-          pageBuilder: (_, _, _) => DetailScreen(
-            drama: drama,
-            repository: widget.repository,
-            store: widget.store,
-          ),
+          pageBuilder: (_, _, _) =>
+              SourceSite.byId(drama.source).supportsCreator
+              ? DouyinCreatorScreen(
+                  drama: drama,
+                  repository: widget.repository,
+                  store: widget.store,
+                )
+              : DetailScreen(
+                  drama: drama,
+                  repository: widget.repository,
+                  store: widget.store,
+                ),
           transitionsBuilder: (_, animation, secondaryAnimation, child) {
             final incoming = animation.drive(
               Tween<Offset>(
@@ -935,7 +1052,13 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
                             ),
                           ),
                           const Spacer(),
-                          if (_pageControls case final controls?)
+                          if (_items.isNotEmpty &&
+                              {
+                                'douyin',
+                                'douyin-live',
+                              }.contains(_items[_index].source))
+                            const SizedBox.shrink()
+                          else if (_pageControls case final controls?)
                             ValueListenableBuilder<int>(
                               valueListenable: controls.episodes,
                               builder: (context, index, _) => IconButton(
@@ -952,54 +1075,6 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
                               onPressed: null,
                               icon: const Icon(Icons.grid_view_rounded),
                             ),
-                          AnimatedBuilder(
-                            animation: _danmakuActions,
-                            builder: (context, _) {
-                              final available = _danmakuActions.available;
-                              return IconButton(
-                                tooltip: !available
-                                    ? '当前短剧暂不支持弹幕'
-                                    : _danmakuActions.enabled
-                                    ? '关闭弹幕'
-                                    : '开启弹幕',
-                                onPressed:
-                                    !available || _danmakuActions.toggle == null
-                                    ? null
-                                    : () => _danmakuActions.toggle!(),
-                                color: available
-                                    ? colors.onSurface
-                                    : colors.onSurfaceVariant,
-                                icon: SizedBox.square(
-                                  dimension: 28,
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      Center(
-                                        child: Text(
-                                          '弹',
-                                          style: TextStyle(
-                                            color: colors.onSurface,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                        ),
-                                      ),
-                                      if (available && !_danmakuActions.enabled)
-                                        Positioned(
-                                          right: -2,
-                                          bottom: -2,
-                                          child: Icon(
-                                            Icons.block_rounded,
-                                            size: 12,
-                                            color: colors.onSurfaceVariant,
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
                           IconButton(
                             tooltip: '刷新推荐',
                             onPressed: _refresh,
@@ -1097,7 +1172,7 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
         PageView.builder(
           controller: _pages,
           scrollDirection: Axis.vertical,
-          allowImplicitScrolling: true,
+          allowImplicitScrolling: !_lowMemory,
           itemCount: _items.length,
           onPageChanged: _onPageChanged,
           findChildIndexCallback: (key) {
@@ -1116,12 +1191,16 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
                   child: _ShortDramaPage(
                     drama: _items[index],
                     active: index == _index,
-                    keepPlayerAlive: (index - _index).abs() <= 2,
+                    keepPlayerAlive:
+                        !{
+                          'douyin',
+                          'douyin-live',
+                        }.contains(_items[index].source) &&
+                        (index - _index).abs() <= _playerRadius,
                     detailFuture: _detailFutureFor(_items[index]),
                     repository: widget.repository,
                     store: widget.store,
                     playbackActive: _feedActive,
-                    feedDanmakuActions: _danmakuActions,
                     cleanScreen: _cleanScreen,
                     onOpenDetail: _openDetail,
                     onPageControlsChanged: _pageControlsChanged,
@@ -1168,7 +1247,6 @@ class _ShortDramaPage extends StatefulWidget {
     required this.repository,
     required this.store,
     required this.playbackActive,
-    required this.feedDanmakuActions,
     required this.cleanScreen,
     required this.onOpenDetail,
     required this.onPageControlsChanged,
@@ -1190,7 +1268,6 @@ class _ShortDramaPage extends StatefulWidget {
   final AppRepository repository;
   final LocalStore store;
   final ValueListenable<bool> playbackActive;
-  final FeedDanmakuActions feedDanmakuActions;
   final bool cleanScreen;
   final ValueChanged<Drama> onOpenDetail;
   final void Function(Drama, _ShortDramaPageControls?) onPageControlsChanged;
@@ -1215,6 +1292,7 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
   bool _playerCreated = false;
   final _episode = ValueNotifier<int>(0);
   bool _liked = false;
+  bool _commentsOpen = false;
   bool _progressRestored = false;
   bool _startupPlanTaken = false;
   PlaybackPlan? _startupPlaybackPlan;
@@ -1242,7 +1320,11 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.active != widget.active) {
       _pageActive.value = widget.active;
-      if (widget.active) _playerCreated = true;
+      if (widget.active) {
+        _playerCreated = true;
+      } else if ({'douyin', 'douyin-live'}.contains(widget.drama.source)) {
+        _playerCreated = false;
+      }
     }
     if (oldWidget.active != widget.active ||
         oldWidget.keepPlayerAlive != widget.keepPlayerAlive) {
@@ -1400,7 +1482,9 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
             final detail = snapshot.data;
             if (detail != null && detail.episodes.isNotEmpty) {
               _restoreProgress(detail);
-              if (!widget.active && !_playerCreated) {
+              if (!widget.active &&
+                  ({'douyin', 'douyin-live'}.contains(widget.drama.source) ||
+                      !_playerCreated)) {
                 return _poster(
                   context,
                   loading: false,
@@ -1439,7 +1523,6 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
                     repository: widget.repository,
                     store: widget.store,
                     immersiveFeed: true,
-                    feedDanmakuActions: widget.feedDanmakuActions,
                     hideFeedOverlays: widget.cleanScreen,
                     feedEpisode: _episode,
                     feedActive: widget.playbackActive,
@@ -1608,66 +1691,95 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
     ],
   );
 
+  Future<void> _openComments(Drama drama) async {
+    if (_commentsOpen) return;
+    _commentsOpen = true;
+    AppHaptics.light();
+    try {
+      await showDouyinComments(context, widget.repository, drama);
+    } finally {
+      _commentsOpen = false;
+    }
+  }
+
   Widget _overlay(BuildContext context, DramaDetail detail) => Stack(
     children: [
       Positioned(
         left: 16,
         right: 84,
         bottom: 27,
-        child: Semantics(
-          button: true,
-          label: '查看${widget.drama.title}详情',
-          child: Listener(
-            behavior: HitTestBehavior.opaque,
-            onPointerDown: (_) => AppHaptics.light(),
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () => widget.onOpenDetail(widget.drama),
-              onDoubleTap: _doubleTapLike,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            widget.drama.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w800,
-                              shadows: [
-                                Shadow(color: Colors.black, blurRadius: 8),
-                              ],
+        child: SourceSite.byId(widget.drama.source).supportsCreator
+            ? AnimatedBuilder(
+                animation: widget.store,
+                builder: (context, _) => DouyinAuthorPanel(
+                  drama: detail.drama,
+                  onOpen: () => widget.onOpenDetail(detail.drama),
+                  followed: widget.store.isFavorite(widget.drama.id),
+                  onFollow: () => widget.onFollow(widget.drama),
+                ),
+              )
+            : Semantics(
+                button: true,
+                label: '查看${widget.drama.title}详情',
+                child: Listener(
+                  behavior: HitTestBehavior.opaque,
+                  onPointerDown: (_) => AppHaptics.light(),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => widget.onOpenDetail(widget.drama),
+                    onDoubleTap: _doubleTapLike,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 6,
+                        horizontal: 4,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  widget.drama.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black,
+                                        blurRadius: 8,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          ValueListenableBuilder<int>(
+                            valueListenable: _episode,
+                            builder: (_, index, _) => Text(
+                              '${widget.drama.category.isEmpty ? '短剧' : widget.drama.category} · 第 ${detail.episodes[index.clamp(0, detail.episodes.length - 1)].number} 集',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                shadows: [
+                                  Shadow(color: Colors.black, blurRadius: 8),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                    ValueListenableBuilder<int>(
-                      valueListenable: _episode,
-                      builder: (_, index, _) => Text(
-                        '${widget.drama.category.isEmpty ? '短剧' : widget.drama.category} · 第 ${detail.episodes[index.clamp(0, detail.episodes.length - 1)].number} 集',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          shadows: [Shadow(color: Colors.black, blurRadius: 8)],
-                        ),
+                        ],
                       ),
                     ),
-                  ],
+                  ),
                 ),
               ),
-            ),
-          ),
-        ),
       ),
       Positioned(
         right: 12,
@@ -1689,15 +1801,25 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
                 },
               ),
               const SizedBox(height: 20),
-              _FeedAction(
-                icon: widget.store.isFavorite(widget.drama.id)
-                    ? Icons.bookmark_rounded
-                    : Icons.bookmark_border_rounded,
-                label: '追剧',
-                active: widget.store.isFavorite(widget.drama.id),
-                onTap: () => widget.onFollow(widget.drama),
-              ),
-              const SizedBox(height: 20),
+              if (!SourceSite.byId(widget.drama.source).supportsCreator)
+                _FeedAction(
+                  icon: widget.store.isFavorite(widget.drama.id)
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_border_rounded,
+                  label: '追剧',
+                  active: widget.store.isFavorite(widget.drama.id),
+                  onTap: () => widget.onFollow(widget.drama),
+                ),
+              if (!SourceSite.byId(widget.drama.source).supportsCreator)
+                const SizedBox(height: 20),
+              if ({'douyin', 'bilibili'}.contains(widget.drama.source))
+                _FeedAction(
+                  icon: Icons.chat_bubble_outline_rounded,
+                  label: '评论',
+                  onTap: () => unawaited(_openComments(detail.drama)),
+                ),
+              if ({'douyin', 'bilibili'}.contains(widget.drama.source))
+                const SizedBox(height: 20),
               _FeedAction(
                 icon: Icons.not_interested_rounded,
                 label: '不喜欢',

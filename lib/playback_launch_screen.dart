@@ -7,6 +7,7 @@ import 'follow_state.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'player_screen.dart';
+import 'douyin_live_player_screen.dart';
 import 'widgets.dart';
 
 Future<void> openPlaybackDirectly(
@@ -16,11 +17,17 @@ Future<void> openPlaybackDirectly(
   required LocalStore store,
 }) => Navigator.of(context).push<void>(
   MaterialPageRoute<void>(
-    builder: (_) => PlaybackLaunchScreen(
-      drama: drama,
-      repository: repository,
-      store: store,
-    ),
+    builder: (_) => drama.source == 'douyin-live'
+        ? DouyinLivePlayerScreen(
+            drama: drama,
+            repository: repository,
+            store: store,
+          )
+        : PlaybackLaunchScreen(
+            drama: drama,
+            repository: repository,
+            store: store,
+          ),
   ),
 );
 

@@ -11,6 +11,9 @@ type Drama struct {
 	ID                string             `json:"id"`
 	Source            string             `json:"source,omitempty"`
 	SourceID          string             `json:"sourceId,omitempty"`
+	CreatorID         string             `json:"creatorId,omitempty"`
+	CreatorName       string             `json:"creatorName,omitempty"`
+	CreatorAvatar     string             `json:"creatorAvatar,omitempty"`
 	Title             string             `json:"title"`
 	Name              string             `json:"name"`
 	Desc              string             `json:"desc"`

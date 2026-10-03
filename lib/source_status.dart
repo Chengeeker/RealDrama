@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'models.dart';
 
 DateTime? sourceTime(Object? value) {
@@ -43,7 +45,8 @@ class SourceHealth {
 
 class SourceStatus {
   SourceStatus.fromJson(Map<String, dynamic> json)
-    : source = json['source'] as String? ?? '',
+    : revision = jsonEncode(json),
+      source = json['source'] as String? ?? '',
       count = intValue(json['count']),
       unknownVip = intValue(json['unknownVip']),
       page = intValue(json['page']),
@@ -67,6 +70,7 @@ class SourceStatus {
             )
           : null;
 
+  final String revision;
   final String source, operation, stage, error, storageError;
   final int count, page, totalPages, completed, total, added, unknownVip;
   final bool hasMore, running;

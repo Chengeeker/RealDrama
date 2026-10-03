@@ -193,6 +193,12 @@ func (engine *nativeEngine) checkSource(ctx context.Context, source string, sele
 
 func (d *Downloader) sourceProbeResources(ctx context.Context, media providerMedia) (string, string, error) {
 	ctx = providerMediaContext(ctx, media.credentials)
+	if media.PlaylistType == "dash" {
+		if !isBilibiliMediaURL(media.ProbeURL) {
+			return "", "", errors.New("DASH 媒体地址无效")
+		}
+		return "", media.ProbeURL, nil
+	}
 	if media.Playlist == "" {
 		return "", media.URL, nil
 	}

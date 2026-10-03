@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"io"
 	"net"
@@ -100,7 +101,11 @@ func (stream *nativeStreamServer) nativeOpen(media providerMedia) (string, strin
 	}
 	if media.Playlist != "" {
 		entry.data = []byte(media.Playlist)
-		entry.contentType = "application/vnd.apple.mpegurl"
+		if media.PlaylistType == "dash" {
+			entry.contentType = "application/dash+xml"
+		} else {
+			entry.contentType = "application/vnd.apple.mpegurl"
+		}
 	}
 	return stream.nativeAsset(token, session, entry), token
 }
@@ -130,6 +135,8 @@ func (stream *nativeStreamServer) nativeAsset(token string, session *nativeStrea
 		extension = ".key"
 	case "video/mp4":
 		extension = ".mp4"
+	case "application/dash+xml":
+		extension = ".mpd"
 	}
 	id := hex.EncodeToString(digest[:12]) + extension
 	session.mu.Lock()
@@ -215,6 +222,63 @@ func (stream *nativeStreamServer) nativeRewrite(token string, session *nativeStr
 	return strings.Join(output, "\n"), nil
 }
 
+func (stream *nativeStreamServer) nativeRewriteDASH(token string, session *nativeStreamSession, body, base string) (string, error) {
+	baseURL, err := url.Parse(base)
+	if err != nil || !isProviderHTTPMediaURL(base) {
+		return "", errors.New("DASH 基准地址无效")
+	}
+	decoder := xml.NewDecoder(strings.NewReader(body))
+	var output bytes.Buffer
+	encoder := xml.NewEncoder(&output)
+	rewritten := 0
+	for {
+		tokenValue, decodeErr := decoder.Token()
+		if decodeErr == io.EOF {
+			break
+		}
+		if decodeErr != nil {
+			return "", errors.New("DASH 清单格式无效")
+		}
+		start, isStart := tokenValue.(xml.StartElement)
+		if !isStart || start.Name.Local != "BaseURL" {
+			if err := encoder.EncodeToken(tokenValue); err != nil {
+				return "", errors.New("DASH 清单处理失败")
+			}
+			continue
+		}
+		var reference string
+		if err := decoder.DecodeElement(&reference, &start); err != nil {
+			return "", errors.New("DASH 媒体地址格式无效")
+		}
+		relative, err := url.Parse(strings.TrimSpace(reference))
+		if err != nil {
+			return "", errors.New("DASH 媒体地址格式无效")
+		}
+		address := baseURL.ResolveReference(relative).String()
+		if !isBilibiliMediaURL(address) {
+			return "", errors.New("DASH 媒体地址不属于哔哩哔哩视频 CDN")
+		}
+		local := stream.nativeAsset(token, session, nativeStreamAsset{address: address})
+		if err := encoder.EncodeToken(start); err != nil {
+			return "", errors.New("DASH 清单处理失败")
+		}
+		if err := encoder.EncodeToken(xml.CharData(local)); err != nil {
+			return "", errors.New("DASH 清单处理失败")
+		}
+		if err := encoder.EncodeToken(xml.EndElement{Name: start.Name}); err != nil {
+			return "", errors.New("DASH 清单处理失败")
+		}
+		rewritten++
+	}
+	if rewritten == 0 {
+		return "", errors.New("DASH 清单没有媒体地址")
+	}
+	if err := encoder.Flush(); err != nil {
+		return "", errors.New("DASH 清单处理失败")
+	}
+	return output.String(), nil
+}
+
 func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, request *http.Request) {
 	if request.Method != http.MethodGet && request.Method != http.MethodHead {
 		writer.WriteHeader(http.StatusMethodNotAllowed)
@@ -261,6 +325,16 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 				return
 			}
 			writer.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+			if request.Method == http.MethodGet {
+				_, _ = io.WriteString(writer, body)
+			}
+		} else if strings.Contains(asset.contentType, "dash+xml") {
+			body, err := stream.nativeRewriteDASH(parts[0], session, string(asset.data), asset.address)
+			if err != nil {
+				http.Error(writer, err.Error(), http.StatusBadGateway)
+				return
+			}
+			writer.Header().Set("Content-Type", "application/dash+xml")
 			if request.Method == http.MethodGet {
 				_, _ = io.WriteString(writer, body)
 			}

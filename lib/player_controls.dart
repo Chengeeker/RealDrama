@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'playback_engine.dart';
 import 'player_interactions.dart';
 import 'widgets.dart';
-import 'video_enhancement.dart';
 
 class PlayerControls extends StatefulWidget {
   const PlayerControls({
@@ -27,19 +26,13 @@ class PlayerControls extends StatefulWidget {
     required this.speed,
     required this.qualityLabel,
     required this.onFocusSurface,
-    this.showDanmaku = false,
-    this.danmakuEnabled = false,
-    this.danmakuStatus = '',
     this.swipeEnabled = false,
     this.panelOpen = false,
     this.immersiveFeed = false,
     this.hideFeedOverlays = false,
+    this.live = false,
     this.onFeedDoubleTap,
     this.onSeek,
-    this.onDanmaku,
-    this.onRetryDanmaku,
-    this.onPictureInPicture,
-    this.enhancement,
   });
 
   final PlaybackEngine player;
@@ -59,25 +52,21 @@ class PlayerControls extends StatefulWidget {
   final double speed;
   final String qualityLabel;
   final VoidCallback onFocusSurface;
-  final bool showDanmaku;
-  final bool danmakuEnabled;
-  final String danmakuStatus;
   final bool swipeEnabled;
   final bool panelOpen;
   final bool immersiveFeed;
   final bool hideFeedOverlays;
+  final bool live;
   final VoidCallback? onFeedDoubleTap;
   final Future<void> Function(Duration)? onSeek;
-  final Future<void> Function()? onDanmaku;
-  final Future<void> Function()? onRetryDanmaku;
-  final Future<void> Function()? onPictureInPicture;
-  final VideoEnhancementController? enhancement;
 
   @override
   State<PlayerControls> createState() => _PlayerControlsState();
 }
 
 class _PlayerControlsState extends State<PlayerControls> {
+  Timer? _redrawTimer;
+  bool _lastBuffering = false;
   Timer? _hideTimer;
   Timer? _playbackFeedbackTimer;
   bool _visible = true;
@@ -93,20 +82,34 @@ class _PlayerControlsState extends State<PlayerControls> {
     _visible = widget.showOnPlaybackReady;
     _suppressAutoPlaybackStart = !widget.showOnPlaybackReady;
     _lastPlaying = widget.player.state.playing;
+    _lastBuffering = widget.player.state.buffering;
     widget.player.addListener(_playerChanged);
     widget.interactions.addListener(_interactionChanged);
     _scheduleHide();
   }
 
   void _playerChanged() {
-    final playing = widget.player.state.playing;
+    if (!mounted) return;
+    final state = widget.player.state;
     final wasPlaying = _lastPlaying;
-    _lastPlaying = playing;
-    if (mounted) setState(() {});
-    if (!mounted || !widget.enabled) return;
-    if (!playing) {
+    final changedPlayback =
+        state.playing != wasPlaying || state.buffering != _lastBuffering;
+    _lastPlaying = state.playing;
+    _lastBuffering = state.buffering;
+    if (changedPlayback) {
+      _redrawTimer?.cancel();
+      _redrawTimer = null;
+      setState(() {});
+    } else {
+      _redrawTimer ??= Timer(const Duration(milliseconds: 100), () {
+        _redrawTimer = null;
+        if (mounted) setState(() {});
+      });
+    }
+    if (!widget.enabled) return;
+    if (!state.playing && wasPlaying) {
       _show();
-    } else if (!wasPlaying) {
+    } else if (state.playing && !wasPlaying) {
       if (_suppressAutoPlaybackStart) {
         _suppressAutoPlaybackStart = false;
         _scheduleHide();
@@ -147,7 +150,9 @@ class _PlayerControlsState extends State<PlayerControls> {
   }
 
   void _interactionChanged() {
-    if (mounted && widget.interactions.feedback.isNotEmpty) _show();
+    if (!mounted) return;
+    setState(() {});
+    if (widget.interactions.feedback.isNotEmpty) _show();
   }
 
   void _scheduleHide() {
@@ -230,6 +235,7 @@ class _PlayerControlsState extends State<PlayerControls> {
 
   @override
   void dispose() {
+    _redrawTimer?.cancel();
     _hideTimer?.cancel();
     _playbackFeedbackTimer?.cancel();
     widget.player.removeListener(_playerChanged);
@@ -246,6 +252,7 @@ class _PlayerControlsState extends State<PlayerControls> {
     final duration = state.duration.inMilliseconds / 1000;
     final position = state.position.inMilliseconds / 1000;
     final buffered = state.buffer.inMilliseconds / 1000;
+    final showFeedPlaybackControl = !state.playing || _playbackFeedbackVisible;
     final visible =
         _visible || !state.playing || state.buffering || widget.panelOpen;
     return MouseRegion(
@@ -319,18 +326,19 @@ class _PlayerControlsState extends State<PlayerControls> {
                             if (!widget.immersiveFeed &&
                                 (widget.fullscreen || widget.swipeEnabled))
                               _topBar(),
-                            if (!state.buffering &&
+                            if (!widget.interactions.boosting &&
+                                !state.buffering &&
                                 widget.enabled &&
                                 constraints.maxHeight >=
                                     (widget.swipeEnabled ? 168 : 220))
                               IgnorePointer(
                                 ignoring:
                                     widget.immersiveFeed &&
-                                    !_playbackFeedbackVisible,
+                                    !showFeedPlaybackControl,
                                 child: AnimatedOpacity(
                                   opacity:
                                       !widget.immersiveFeed ||
-                                          _playbackFeedbackVisible
+                                          showFeedPlaybackControl
                                       ? 1
                                       : 0,
                                   duration: const Duration(milliseconds: 150),
@@ -356,7 +364,7 @@ class _PlayerControlsState extends State<PlayerControls> {
                 ),
               ),
             ),
-            if (widget.immersiveFeed && duration > 0)
+            if (widget.immersiveFeed && !widget.live && duration > 0)
               Positioned(
                 left: 16,
                 right: 16,
@@ -407,12 +415,6 @@ class _PlayerControlsState extends State<PlayerControls> {
               )
             else
               const Spacer(),
-            if (compact)
-              _overlayIconButton(
-                tooltip: '旋转与全屏',
-                onPressed: widget.onFullscreen,
-                icon: Icons.screen_rotation_alt_rounded,
-              ),
           ],
         ),
       ),
@@ -496,11 +498,6 @@ class _PlayerControlsState extends State<PlayerControls> {
     final showEpisodes = fullscreen;
     final showSpeedQuality =
         mobile || fullscreen && width >= 720 || !fullscreen && width >= 560;
-    final showDanmaku =
-        widget.showDanmaku &&
-        !widget.immersiveFeed &&
-        (mobile || fullscreen && width >= 860 || !fullscreen && width >= 680);
-    final showCompare = fullscreen && width >= 820;
     final showVolume = !widget.swipeEnabled && width >= 360;
     return Align(
       alignment: Alignment.bottomCenter,
@@ -514,8 +511,6 @@ class _PlayerControlsState extends State<PlayerControls> {
               fullscreen: fullscreen,
               showEpisodes: showEpisodes,
               showSpeedQuality: showSpeedQuality,
-              showDanmaku: showDanmaku,
-              showCompare: showCompare,
               showVolume: showVolume,
               volume: volume,
             ),
@@ -752,37 +747,10 @@ class _PlayerControlsState extends State<PlayerControls> {
     );
   }
 
-  Widget _danmakuTool() => _toolButton(
-    key: const ValueKey('player-danmaku-toggle'),
-    tooltip: widget.danmakuStatus.isEmpty
-        ? (widget.danmakuEnabled ? '关闭弹幕' : '打开弹幕')
-        : widget.danmakuStatus,
-    visualWidth: 36,
-    selected: widget.danmakuEnabled,
-    onPressed: widget.enabled
-        ? () => _panel(widget.onRetryDanmaku ?? widget.onDanmaku!)
-        : null,
-    child: widget.onRetryDanmaku != null
-        ? const Icon(Icons.refresh_rounded, size: 21)
-        : Text(
-            '弹',
-            style: TextStyle(
-              fontSize: 14,
-              height: 1,
-              fontWeight: FontWeight.w800,
-              color: widget.danmakuEnabled
-                  ? Theme.of(context).colorScheme.primary
-                  : Colors.white.withValues(alpha: .86),
-            ),
-          ),
-  );
-
   Widget _desktopControlRow({
     required bool fullscreen,
     required bool showEpisodes,
     required bool showSpeedQuality,
-    required bool showDanmaku,
-    required bool showCompare,
     required bool showVolume,
     required double volume,
   }) {
@@ -803,7 +771,6 @@ class _PlayerControlsState extends State<PlayerControls> {
           width: 52,
         ),
       ],
-      if (showDanmaku) _danmakuTool(),
       if (showEpisodes)
         _toolIcon(
           key: const ValueKey('player-episodes'),
@@ -811,7 +778,6 @@ class _PlayerControlsState extends State<PlayerControls> {
           icon: Icons.grid_view_rounded,
           onPressed: widget.enabled ? () => _panel(widget.onEpisodes) : null,
         ),
-      if (showCompare) _enhancementCompareButton(),
       if (showVolume)
         _toolIcon(
           key: const ValueKey('player-volume'),
@@ -823,18 +789,9 @@ class _PlayerControlsState extends State<PlayerControls> {
               ? () => _panel(() => _openVolume(volume))
               : null,
         ),
-      if (widget.onPictureInPicture != null)
-        _toolIcon(
-          key: const ValueKey('player-picture-in-picture'),
-          tooltip: '画中画',
-          icon: Icons.picture_in_picture_alt_rounded,
-          onPressed: widget.enabled
-              ? () => _panel(widget.onPictureInPicture!)
-              : null,
-        ),
       _toolIcon(
         key: const ValueKey('player-fullscreen'),
-        tooltip: fullscreen ? '退出全屏' : '旋转与全屏',
+        tooltip: fullscreen ? '退出全屏' : '全屏',
         icon: fullscreen
             ? Icons.fullscreen_exit_rounded
             : Icons.fullscreen_rounded,
@@ -863,7 +820,6 @@ class _PlayerControlsState extends State<PlayerControls> {
         onPressed: widget.enabled ? () => _panel(widget.onQuality) : null,
         width: 52,
       ),
-      if (widget.showDanmaku && !widget.immersiveFeed) _danmakuTool(),
       if (fullscreen)
         _toolIcon(
           key: const ValueKey('player-episodes'),
@@ -871,14 +827,14 @@ class _PlayerControlsState extends State<PlayerControls> {
           icon: Icons.grid_view_rounded,
           onPressed: widget.enabled ? () => _panel(widget.onEpisodes) : null,
         ),
-      if (widget.onPictureInPicture != null)
+      if (!widget.immersiveFeed)
         _toolIcon(
-          key: const ValueKey('player-picture-in-picture'),
-          tooltip: '画中画',
-          icon: Icons.picture_in_picture_alt_rounded,
-          onPressed: widget.enabled
-              ? () => _panel(widget.onPictureInPicture!)
-              : null,
+          key: const ValueKey('player-fullscreen'),
+          tooltip: fullscreen ? '退出全屏' : '全屏',
+          icon: fullscreen
+              ? Icons.fullscreen_exit_rounded
+              : Icons.fullscreen_rounded,
+          onPressed: widget.enabled ? widget.onFullscreen : null,
         ),
     ];
     return Padding(
@@ -999,30 +955,6 @@ class _PlayerControlsState extends State<PlayerControls> {
     );
   }
 
-  Widget _enhancementCompareButton() {
-    final enhancement = widget.enhancement;
-    if (enhancement == null) return const SizedBox.shrink();
-    return AnimatedBuilder(
-      animation: enhancement,
-      builder: (_, _) {
-        if (!enhancement.canCompare) return const SizedBox.shrink();
-        return _toolIcon(
-          key: const ValueKey('player-enhancement-compare'),
-          tooltip: enhancement.comparing ? '原画对比中，点击恢复增强' : '原画对比',
-          icon: Icons.compare_rounded,
-          onPressed: widget.enabled
-              ? () {
-                  widget.interactions.cancel();
-                  unawaited(enhancement.toggleCompare());
-                  _show();
-                }
-              : null,
-          selected: enhancement.comparing,
-        );
-      },
-    );
-  }
-
   Widget _gestureFeedback() => AnimatedBuilder(
     animation: widget.interactions,
     builder: (context, _) {
@@ -1035,7 +967,9 @@ class _PlayerControlsState extends State<PlayerControls> {
             margin: const EdgeInsets.all(16),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.black87,
+              color: Colors.black.withValues(
+                alpha: widget.interactions.speedFeedback ? .18 : .87,
+              ),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Text(feedback, textAlign: TextAlign.center),

@@ -27,6 +27,7 @@ class LocalStore extends ChangeNotifier {
   }
 
   final SharedPreferences preferences;
+  final viewChanges = ValueNotifier<int>(0);
   final Future<String> Function(String pin, String salt) _pinHasher;
   LocalSnapshot? _snapshot;
   LanDocument? _lanDocumentCache;
@@ -41,7 +42,12 @@ class LocalStore extends ChangeNotifier {
   final Map<String, Drama> _sessionSeriesCandidates = {};
   final Map<
     String,
-    ({String? encoded, String? selectedSource, Set<String> sources})
+    ({
+      String? encoded,
+      String? selectedSource,
+      String? known,
+      Set<String> sources,
+    })
   >
   _hiddenSourceCache = {};
   final Map<String, List<FeedWatchSignal>> _feedSessionSignals = {};
@@ -117,8 +123,10 @@ class LocalStore extends ChangeNotifier {
     _epoch++;
   }
 
-  void _notify() {
-    if (!_disposed) notifyListeners();
+  void _notify({bool progressOnly = false}) {
+    if (_disposed) return;
+    if (!progressOnly) viewChanges.value++;
+    notifyListeners();
   }
 
   String? _string(String key) => _snapshot?.getString(key);
@@ -154,9 +162,11 @@ class LocalStore extends ChangeNotifier {
   Set<String> _hiddenSourcesFor(String id) {
     final encoded = _string(_key('hiddenSources', id));
     final selectedSource = _string(_key('source', id));
+    final known = _string(_key('knownSources', id));
     final cached = _hiddenSourceCache[id];
     if (cached?.encoded == encoded &&
-        cached?.selectedSource == selectedSource) {
+        cached?.selectedSource == selectedSource &&
+        cached?.known == known) {
       return cached!.sources;
     }
     late final Set<String> hidden;
@@ -166,16 +176,35 @@ class LocalStore extends ChangeNotifier {
       try {
         final values = jsonDecode(encoded) as List;
         hidden = values.whereType<String>().where(SourceSite.isKnown).toSet();
-        if (SourceSite.values.every((site) => hidden.contains(site.id))) {
+        if (SourceSite.values.isNotEmpty && SourceSite.values.every((site) => hidden.contains(site.id))) {
           hidden.remove(SourceSite.values.first.id);
         }
       } catch (_) {
         hidden = _defaultHiddenSources(selectedSource);
       }
     }
+    if (known == null) hidden.add(SourceSite.douyin.id);
+    bool sourceWasKnown(String source) {
+      if (known == null) return false;
+      try {
+        final value = jsonDecode(known);
+        return value is List && value.contains(source);
+      } on FormatException {
+        return false;
+      }
+    }
+
+    for (final source in SourceSite.douyinValues.skip(1)) {
+      if (!sourceWasKnown(source.id)) hidden.add(source.id);
+    }
+    if (!sourceWasKnown(SourceSite.bilibili.id) &&
+        (known != null || hidden.isNotEmpty)) {
+      hidden.add(SourceSite.bilibili.id);
+    }
     _hiddenSourceCache[id] = (
       encoded: encoded,
       selectedSource: selectedSource,
+      known: known,
       sources: hidden,
     );
     return hidden;
@@ -189,29 +218,43 @@ class LocalStore extends ChangeNotifier {
   List<SourceSite> get sources =>
       SourceSite.values.where((site) => allowsSource(site.id)).toList();
 
-  Future<void> setSourceVisible(String source, bool visible) {
-    if (!SourceSite.isAvailable(source)) {
+  bool visibleRequested(Map<String,bool> changes) => changes.values.any((visible) => visible);
+  void refreshInstalledSources() { _hiddenSourceCache.clear(); _sourceVisibilityRevision++; _notify(); }
+
+  Future<void> setSourceVisible(String source, bool visible) =>
+      setSourcesVisible({source: visible});
+
+  Future<void> setSourcesVisible(Map<String, bool> changes) {
+    final requested = Map<String, bool>.of(changes);
+    if (requested.keys.any((source) => !SourceSite.isAvailable(source))) {
       return Future.error(StateError('站源不在当前版本中'));
     }
     final epoch = _epoch;
     return _queue(() async {
       if (locked || epoch != _epoch) throw StateError('当前用户已变更，请重试');
-      if (allowsSource(source) == visible) return;
       final hidden = hiddenSources;
-      if (visible) {
-        hidden.remove(source);
-      } else {
-        hidden.add(source);
+      var changed = false;
+      for (final entry in requested.entries) {
+        if (entry.value) {
+          changed |= hidden.remove(entry.key);
+        } else {
+          changed |= hidden.add(entry.key);
+        }
       }
+      if (!changed) return;
       final remaining = SourceSite.values
           .where((site) => !hidden.contains(site.id))
           .toList();
-      if (remaining.isEmpty) throw StateError('至少保留一个可见站源');
+      if (remaining.isEmpty && visibleRequested(requested)) throw StateError('站源不可用');
       final selected = _string(_key('source')) ?? '';
-      final fallback = remaining.first.id;
-      final sourceSelectionChanged = selected == source && !visible;
+      final fallback = remaining.firstOrNull?.id ?? '';
+      final sourceSelectionChanged =
+          selected.isNotEmpty && hidden.contains(selected);
       await _commit({
         _key('hiddenSources'): jsonEncode(hidden.toList()..sort()),
+        _key('knownSources'): jsonEncode(
+          SourceSite.values.map((s) => s.id).toList(),
+        ),
         if (sourceSelectionChanged) _key('source'): fallback,
         if (sourceSelectionChanged && catalogView.allSources)
           _key('catalogView'): jsonEncode(
@@ -459,26 +502,48 @@ class LocalStore extends ChangeNotifier {
     });
   }
 
+  (String?, Map<String, HomeFeedSourcePreference>)? _homeFeedCache;
+  (String?, FeedRecommendationPreferences)? _recommendationCache;
+  (String?, PlaybackPreferences)? _playbackCache;
+
   Map<String, HomeFeedSourcePreference> get homeFeedPreferences {
     try {
-      final decoded = jsonDecode(_string(_key('homeFeedPreferences')) ?? '{}');
+      final raw = _string(_key('homeFeedPreferences'));
+      if (_homeFeedCache?.$1 == raw && _homeFeedCache != null)
+        return _homeFeedCache!.$2;
+      final decoded = jsonDecode(raw ?? '{}');
       HomeFeedSourcePreference.validateMap(decoded, strict: false);
-      return Map.unmodifiable({
+      final result = Map<String, HomeFeedSourcePreference>.unmodifiable({
         for (final entry in (decoded as Map).entries)
           if (entry.key is String && SourceSite.isKnown(entry.key as String))
             entry.key as String: HomeFeedSourcePreference.fromJson(entry.value),
       });
+      _homeFeedCache = (raw, result);
+      return result;
     } catch (_) {
       return const {};
     }
   }
 
+  Object get feedRuleKey => (
+    profileEpoch,
+    sourceVisibilityRevision,
+    feedExposureRevision,
+    _string(_key('homeFeedPreferences')),
+    _string(_key('feedRecommendation')),
+  );
+
   FeedRecommendationPreferences get feedRecommendationPreferences {
     if (locked) return const FeedRecommendationPreferences();
     try {
-      return FeedRecommendationPreferences.fromJson(
-        jsonDecode(_string(_key('feedRecommendation')) ?? '{}'),
+      final raw = _string(_key('feedRecommendation'));
+      if (_recommendationCache?.$1 == raw && _recommendationCache != null)
+        return _recommendationCache!.$2;
+      final result = FeedRecommendationPreferences.fromJson(
+        jsonDecode(raw ?? '{}'),
       );
+      _recommendationCache = (raw, result);
+      return result;
     } catch (_) {
       return const FeedRecommendationPreferences();
     }
@@ -497,7 +562,9 @@ class LocalStore extends ChangeNotifier {
   }
 
   Future<void> setHomeFeedSourceEnabled(String source, bool enabled) {
-    if (!SourceSite.isAvailable(source) || source == SourceSite.stripchat.id) {
+    if (!SourceSite.isAvailable(source) ||
+        source == SourceSite.stripchat.id ||
+        source == SourceSite.douyinLive.id) {
       return Future.error(StateError('此站源不能用于首页短剧信息流'));
     }
     final epoch = _epoch;
@@ -527,6 +594,7 @@ class LocalStore extends ChangeNotifier {
     final name = categoryName.trim();
     if (!SourceSite.isAvailable(source) ||
         source == SourceSite.stripchat.id ||
+        source == SourceSite.douyinLive.id ||
         id.isEmpty ||
         id.length > 256 ||
         name.isEmpty ||
@@ -577,6 +645,7 @@ class LocalStore extends ChangeNotifier {
   }) {
     if (!SourceSite.isAvailable(source) ||
         source == SourceSite.stripchat.id ||
+        source == SourceSite.douyinLive.id ||
         categories.length > maxHomeFeedCategoriesPerSource ||
         availableCategories != null &&
             availableCategories.length > maxHomeFeedCategoriesPerSource ||
@@ -784,9 +853,14 @@ class LocalStore extends ChangeNotifier {
   PlaybackPreferences get playbackPreferences {
     if (locked) return const PlaybackPreferences();
     try {
-      return PlaybackPreferences.fromJson(
-        jsonDecode(_string(_key('playback')) ?? '{}') as Map<String, dynamic>,
+      final raw = _string(_key('playback'));
+      if (_playbackCache?.$1 == raw && _playbackCache != null)
+        return _playbackCache!.$2;
+      final result = PlaybackPreferences.fromJson(
+        jsonDecode(raw ?? '{}') as Map<String, dynamic>,
       );
+      _playbackCache = (raw, result);
+      return result;
     } catch (_) {
       return const PlaybackPreferences();
     }
@@ -861,7 +935,7 @@ class LocalStore extends ChangeNotifier {
     bool replace = false,
     bool trackSync = true,
     bool syncUrgent = true,
-    bool encodeSnapshotOffMainIsolate = false,
+    bool encodeSnapshotOffMainIsolate = true,
     Set<String> clearSyncProgress = const {},
   }) async {
     final snapshot = _snapshot;
@@ -1092,8 +1166,17 @@ class LocalStore extends ChangeNotifier {
           ),
         },
       }, syncUrgent: false);
-      _loadLibrary();
-      _notify();
+      _lanDocumentCache = null;
+      _history
+        ..clear()
+        ..addEntries(
+          sorted.take(300).map((entry) => MapEntry(entry.drama.id, entry)),
+        );
+      if (following != null) {
+        _followStates[entry.drama.id] = states[entry.drama.id]!;
+        _favorites[entry.drama.id] = favorites[entry.drama.id]!;
+      }
+      _notify(progressOnly: true);
     });
   }
 
@@ -1455,6 +1538,9 @@ class LocalStore extends ChangeNotifier {
             ),
             'source': _string(_key('source', profile.id)) ?? '',
             'hiddenSources': _hiddenSourcesFor(profile.id).toList()..sort(),
+            'knownSources': SourceSite.values
+                .map((source) => source.id)
+                .toList(),
             'hideVip': _bool(_key('hideVip', profile.id)) ?? true,
             'playback': jsonDecode(
               _string(_key('playback', profile.id)) ?? '{}',
@@ -1632,9 +1718,23 @@ class LocalStore extends ChangeNotifier {
       final library = libraries[profile.id] as Map;
       final syncRecords = _readBackupFollowSync(library);
       final hiddenSources = library['hiddenSources'] is List
-          ? library['hiddenSources']
+          ? List<String>.from(library['hiddenSources'] as List)
           : (_defaultHiddenSources(library['source'] as String?).toList()
               ..sort());
+      if (!(library['knownSources'] is List &&
+          (library['knownSources'] as List).contains('douyin'))) {
+        hiddenSources.add('douyin');
+      }
+      for (final source in SourceSite.douyinValues.skip(1)) {
+        if (!(library['knownSources'] is List &&
+            (library['knownSources'] as List).contains(source.id))) {
+          hiddenSources.add(source.id);
+        }
+      }
+      if (!(library['knownSources'] is List &&
+          (library['knownSources'] as List).contains(SourceSite.bilibili.id))) {
+        hiddenSources.add(SourceSite.bilibili.id);
+      }
       values.addAll({
         if (syncRecords != null)
           _key('lanRecords', profile.id): jsonEncode(
@@ -1653,6 +1753,9 @@ class LocalStore extends ChangeNotifier {
         ),
         _key('source', profile.id): library['source'] as String,
         _key('hiddenSources', profile.id): jsonEncode(hiddenSources),
+        _key('knownSources', profile.id): jsonEncode(
+          SourceSite.values.map((s) => s.id).toList(),
+        ),
         _key('hideVip', profile.id): library['hideVip'] as bool,
         _key('playback', profile.id): jsonEncode(library['playback'] ?? {}),
         _key('downloadPreferences', profile.id): jsonEncode(
@@ -1764,6 +1867,7 @@ class LocalStore extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    viewChanges.dispose();
     super.dispose();
   }
 }

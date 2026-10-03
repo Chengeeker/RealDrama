@@ -114,7 +114,15 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
       context,
       () => widget.store.setHomeFeedCategories(source.id, {
         if (shouldSelectAll) ...availableCategories,
-        if (!shouldSelectAll) ...?preference?.categories,
+        if (!shouldSelectAll)
+          for (final entry
+              in preference?.categories.entries ??
+                  const <MapEntry<String, String>>[])
+            source.id == 'douyin' && entry.key == 'short_video'
+                ? 'recommend'
+                : entry.key: source.id == 'douyin' && entry.key == 'short_video'
+                ? '推荐'
+                : availableCategories[entry.key] ?? entry.value,
       }, availableCategories: availableCategories),
     );
   }
@@ -135,7 +143,8 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
           (await widget.repository.categories(source.id, force: force))
               .where(
                 (category) =>
-                    category.id.trim().isNotEmpty && !_isAggregate(category),
+                    category.id.trim().isNotEmpty &&
+                    !_isAggregate(category, source.id),
               )
               .toList();
       if (source.id == SourceSite.hongguo.id &&
@@ -153,7 +162,8 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
         _categories[source.id] = categories
             .where(
               (category) =>
-                  category.id.trim().isNotEmpty && !_isAggregate(category),
+                  category.id.trim().isNotEmpty &&
+                  !_isAggregate(category, source.id),
             )
             .toList();
       });
@@ -211,7 +221,9 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
               drama.category.trim(),
               ...drama.tags.map((tag) => tag.trim()),
             }..removeWhere(
-              (name) => name.isEmpty || _isAggregate(CatalogCategory('', name)),
+              (name) =>
+                  name.isEmpty ||
+                  _isAggregate(CatalogCategory('', name), source),
             );
         for (final name in names) {
           final identity = _categoryIdentity(name);
@@ -226,7 +238,9 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
   String _categoryIdentity(String value) =>
       value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
 
-  bool _isAggregate(CatalogCategory category) {
+  bool _isAggregate(CatalogCategory category, String source) {
+    if (SourceSite.byId(source).isDouyin || source == 'bilibili')
+      return category.id.isEmpty;
     final id = category.id.trim().toLowerCase();
     final name = category.name.trim();
     return {'all', 'recommend', 'category:all'}.contains(id) ||

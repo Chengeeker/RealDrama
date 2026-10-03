@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 
 import 'core_bridge.dart';
 import 'local_store.dart';
@@ -39,6 +40,8 @@ class LibraryUpdater extends ChangeNotifier {
     }
     unawaited(refresh());
     _timer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed)
+        return;
       _ticks++;
       if (_statuses.values.any((status) => status.running) || _ticks % 5 == 0) {
         unawaited(refresh());
@@ -50,8 +53,11 @@ class LibraryUpdater extends ChangeNotifier {
     if (_valid) notifyListeners();
   }
 
-  void _accept(SourceStatus status, {bool submitted = false}) {
-    if (!_valid || !store.allowsSource(status.source)) return;
+  bool _accept(SourceStatus status, {bool submitted = false}) {
+    if (!_valid || !store.allowsSource(status.source)) return false;
+    final changed =
+        _statuses[status.source]?.revision != status.revision ||
+        _errors.containsKey(status.source);
     _statuses[status.source] = status;
     _errors.remove(status.source);
     final revision =
@@ -70,11 +76,13 @@ class LibraryUpdater extends ChangeNotifier {
       _delivered[status.source] = revision;
       onCatalogChanged?.call(status.source);
     }
+    return changed;
   }
 
   Future<void> refresh() async {
     if (_polling || !_valid || !repository.supportsSourceManagement) return;
     _polling = true;
+    var changed = false;
     try {
       for (final source in store.sources) {
         if (!_valid) return;
@@ -82,17 +90,18 @@ class LibraryUpdater extends ChangeNotifier {
         try {
           final status = await repository.sourceStatus(source.id);
           if (_valid && revision == (_revisions[source.id] ?? 0)) {
-            _accept(status);
+            changed = _accept(status) || changed;
           }
         } catch (error) {
           if (_valid && revision == (_revisions[source.id] ?? 0)) {
+            changed = _errors[source.id] != error.toString() || changed;
             _errors[source.id] = error.toString();
           }
         }
       }
     } finally {
       _polling = false;
-      _notify();
+      if (changed) _notify();
     }
   }
 

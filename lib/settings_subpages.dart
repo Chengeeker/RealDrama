@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -9,18 +10,16 @@ import 'app_layout.dart';
 import 'background_downloads.dart';
 import 'core_bridge.dart';
 import 'downloads_screen.dart';
-import 'detail_screen.dart';
 import 'home_feed_preferences_screen.dart';
 import 'feed_recommendation_settings_screen.dart';
 import 'local_store.dart';
-import 'models.dart';
-import 'playback_launch_screen.dart';
+import 'playback_preferences.dart';
 import 'resource_settings.dart';
 import 'resource_settings_screen.dart';
-import 'saved_library.dart';
 import 'settings_screen.dart';
 import 'sources_screen.dart';
 import 'widgets.dart';
+import 'webdav_backup.dart';
 
 class SettingsSection extends StatelessWidget {
   const SettingsSection({
@@ -82,31 +81,6 @@ class PlaybackSettingsScreen extends StatelessWidget {
 
   final AppRepository repository;
   final LocalStore store;
-
-  void _openDrama(BuildContext context, Drama drama, {bool download = false}) {
-    if (download) {
-      Navigator.push<void>(
-        context,
-        MaterialPageRoute<void>(
-          builder: (_) => DetailScreen(
-            drama: drama,
-            repository: repository,
-            store: store,
-            downloadOnOpen: true,
-          ),
-        ),
-      );
-    } else {
-      unawaited(
-        openPlaybackDirectly(
-          context,
-          drama: drama,
-          repository: repository,
-          store: store,
-        ),
-      );
-    }
-  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -170,40 +144,34 @@ class PlaybackSettingsScreen extends StatelessWidget {
                           if (b == 0) return 1;
                           return b.compareTo(a);
                         });
-                    return ListTile(
+                    return _PlaybackSelectorTile<int>(
                       key: const ValueKey('home-playback-quality'),
-                      leading: const Icon(Icons.high_quality_rounded),
-                      title: const Text('首页画质'),
-                      subtitle: Text(
-                        '当前：${preferences.homeQuality == 0 ? '自动（最高）' : '${preferences.homeQuality}P'} · 仅用于首页信息流；以源站实际提供的画质为准',
-                      ),
-                      trailing: DropdownButton<int>(
-                        value: preferences.homeQuality,
-                        underline: const SizedBox.shrink(),
-                        items: [
-                          for (final quality in qualities)
-                            DropdownMenuItem<int>(
-                              value: quality,
-                              child: Text(
-                                quality == 0 ? '自动最高' : '${quality}P',
-                              ),
+                      icon: Icons.high_quality_rounded,
+                      title: '首页画质',
+                      subtitle:
+                          '当前：${preferences.homeQuality == 0 ? '自动（最高）' : '${preferences.homeQuality}P'} · 仅用于首页信息流；以源站实际提供的画质为准',
+                      value: preferences.homeQuality,
+                      items: [
+                        for (final quality in qualities)
+                          DropdownMenuItem<int>(
+                            value: quality,
+                            child: Text(quality == 0 ? '自动最高' : '${quality}P'),
+                          ),
+                      ],
+                      onChanged: (quality) {
+                        if (quality == null ||
+                            quality == preferences.homeQuality) {
+                          return;
+                        }
+                        unawaited(
+                          saveUserChange(
+                            context,
+                            () => store.setPlaybackPreferences(
+                              preferences.copyWith(homeQuality: quality),
                             ),
-                        ],
-                        onChanged: (quality) {
-                          if (quality == null ||
-                              quality == preferences.homeQuality) {
-                            return;
-                          }
-                          unawaited(
-                            saveUserChange(
-                              context,
-                              () => store.setPlaybackPreferences(
-                                preferences.copyWith(homeQuality: quality),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
+                          ),
+                        );
+                      },
                     );
                   },
                 ),
@@ -221,38 +189,182 @@ class PlaybackSettingsScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                ListTile(
-                  key: const ValueKey('playback-recent-history'),
-                  leading: const Icon(Icons.history_rounded),
-                  title: const Text('最近观看'),
-                  subtitle: Text('当前设备 · ${store.history.length} 部'),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.push<void>(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => SavedLibrary(
-                        repository: repository,
-                        store: store,
-                        history: true,
-                        onOpen: (drama) => _openDrama(context, drama),
-                        onContinue: (drama) => _openDrama(context, drama),
-                        onDownload:
-                            store.canDownload && repository.supportsDownloads
-                            ? (drama) =>
-                                  _openDrama(context, drama, download: true)
-                            : null,
-                        bottomPadding: 24,
-                      ),
-                    ),
-                  ),
-                ),
               ],
             ),
+            _PlaybackPerformanceSettings(store: store),
           ],
         ),
       ),
     ),
   );
+}
+
+class _PlaybackPerformanceSettings extends StatefulWidget {
+  const _PlaybackPerformanceSettings({required this.store});
+  final LocalStore store;
+
+  @override
+  State<_PlaybackPerformanceSettings> createState() =>
+      _PlaybackPerformanceSettingsState();
+}
+
+class _PlaybackPerformanceSettingsState
+    extends State<_PlaybackPerformanceSettings> {
+  bool _saving = false;
+
+  Future<void> _save(
+    PlaybackPreferences Function(PlaybackPreferences) update,
+  ) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    await saveUserChange(
+      context,
+      () => widget.store.setPlaybackPreferences(
+        update(widget.store.playbackPreferences),
+      ),
+    );
+    if (mounted) setState(() => _saving = false);
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: widget.store,
+    builder: (context, _) {
+      final preferences = widget.store.playbackPreferences;
+      final supported = Platform.isAndroid || Platform.isWindows;
+      final decoders = [
+        HardwareDecoder.automatic,
+        HardwareDecoder.copy,
+        if (Platform.isAndroid) ...[
+          HardwareDecoder.mediaCodec,
+          HardwareDecoder.mediaCodecCopy,
+        ],
+        if (Platform.isWindows) ...[
+          HardwareDecoder.d3d11,
+          HardwareDecoder.d3d11Copy,
+        ],
+      ];
+      return SettingsSection(
+        title: '解码与内存',
+        children: [
+          SwitchListTile.adaptive(
+            key: const ValueKey('playback-hardware-decoding'),
+            secondary: const Icon(Icons.memory_rounded),
+            title: const Text('硬件解码'),
+            subtitle: Text(
+              supported ? '使用设备视频解码能力；不支持的格式自动回退软件解码' : '当前平台保持兼容解码模式',
+            ),
+            value: preferences.hardwareDecoding && supported,
+            onChanged: _saving || !supported
+                ? null
+                : (value) => _save(
+                    (current) => current.copyWith(hardwareDecoding: value),
+                  ),
+          ),
+          _PlaybackSelectorTile<HardwareDecoder>(
+            icon: Icons.developer_board_outlined,
+            title: '硬件解码器',
+            subtitle: '通常保留自动（安全）；复制模式可改善部分设备的硬件解码兼容性',
+            value: decoders.contains(preferences.hardwareDecoder)
+                ? preferences.hardwareDecoder
+                : HardwareDecoder.automatic,
+            items: [
+              for (final decoder in decoders)
+                DropdownMenuItem(value: decoder, child: Text(decoder.label)),
+            ],
+            onChanged: _saving || !supported || !preferences.hardwareDecoding
+                ? null
+                : (value) {
+                    if (value != null)
+                      unawaited(
+                        _save(
+                          (current) => current.copyWith(hardwareDecoder: value),
+                        ),
+                      );
+                  },
+          ),
+          SwitchListTile.adaptive(
+            key: const ValueKey('playback-low-memory'),
+            secondary: const Icon(Icons.savings_outlined),
+            title: const Text('低内存模式'),
+            subtitle: const Text(
+              '缓存从 32 MiB 降至 2 MiB，并减少首页和下一集预取；返回已离开的剧集时可能重新加载',
+            ),
+            value: preferences.lowMemory,
+            onChanged: _saving
+                ? null
+                : (value) =>
+                      _save((current) => current.copyWith(lowMemory: value)),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+class _PlaybackSelectorTile<T> extends StatelessWidget {
+  const _PlaybackSelectorTile({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+    this.hint,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final T? value;
+  final List<DropdownMenuItem<T>> items;
+  final ValueChanged<T?>? onChanged;
+  final Widget? hint;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 40,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(icon),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                DropdownButton<T>(
+                  value: value,
+                  hint: hint,
+                  underline: const SizedBox.shrink(),
+                  items: items,
+                  onChanged: onChanged,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class DownloadSettingsScreen extends StatefulWidget {
@@ -569,6 +681,22 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
             SettingsSection(
               title: '配置备份',
               children: [
+                ListTile(
+                  key: const ValueKey('webdav-backup'),
+                  leading: const Icon(Icons.cloud_sync_outlined),
+                  title: const Text('WebDAV 备份'),
+                  subtitle: const Text('上传或恢复 WebDAV 上的配置备份'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: _busy
+                      ? null
+                      : () => Navigator.push<void>(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) =>
+                                WebDavBackupScreen(store: widget.store),
+                          ),
+                        ),
+                ),
                 ListTile(
                   leading: const Icon(Icons.backup_outlined),
                   title: const Text('导出配置备份'),

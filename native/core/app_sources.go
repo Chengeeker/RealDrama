@@ -180,8 +180,12 @@ func (engine *nativeEngine) changeSourceRecord(source string, change func(*nativ
 	engine.saveSourceRecordsLocked()
 }
 
-func (engine *nativeEngine) startSourceTask(source, operation string, drama nativeDrama) (nativeSourceStatus, error) {
+func (engine *nativeEngine) startSourceTask(source, operation string, drama nativeDrama, cookies ...string) (nativeSourceStatus, error) {
 	source = canonicalProviderSource(source)
+	cookie := ""
+	if len(cookies) > 0 {
+		cookie = cookies[0]
+	}
 	if !nativeSourceAvailable(source) {
 		return nativeSourceStatus{}, errNativeBuildSource
 	}
@@ -229,6 +233,9 @@ func (engine *nativeEngine) startSourceTask(source, operation string, drama nati
 		timeout = 30 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	if source == sourceBilibili {
+		ctx = context.WithValue(ctx, bilibiliCookieContextKey{}, cookie)
+	}
 	task := &nativeSourceTask{cancel: cancel, operation: operation}
 	engine.sourceTasks[source] = task
 	previous.Operation, previous.Running, previous.Stage = operation, true, "准备中"

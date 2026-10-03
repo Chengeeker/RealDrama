@@ -6,9 +6,6 @@ import 'package:flutter/services.dart';
 import 'models.dart';
 import 'playback_engine.dart';
 import 'playback_preferences.dart';
-import 'video_enhancement.dart';
-import 'video_enhancement_preferences.dart';
-import 'video_enhancement_settings.dart';
 import 'remote_widgets.dart';
 import 'widgets.dart';
 
@@ -26,7 +23,6 @@ class TelevisionControls extends StatefulWidget {
     required this.onEpisodes,
     required this.onSettings,
     required this.onBack,
-    this.enhancement,
   });
   final PlaybackEngine player;
   final String title;
@@ -39,7 +35,6 @@ class TelevisionControls extends StatefulWidget {
   final Future<void> Function() onEpisodes;
   final Future<void> Function() onSettings;
   final VoidCallback onBack;
-  final VideoEnhancementController? enhancement;
 
   @override
   State<TelevisionControls> createState() => _TelevisionControlsState();
@@ -398,30 +393,6 @@ class _TelevisionControlsState extends State<TelevisionControls> {
                               onPressed: () =>
                                   _openPanel(widget.onEpisodes, _episodes),
                             ),
-                            if (widget.enhancement != null)
-                              AnimatedBuilder(
-                                animation: widget.enhancement!,
-                                builder: (_, _) {
-                                  final enhancement = widget.enhancement!;
-                                  if (!enhancement.canCompare) {
-                                    return const SizedBox.shrink();
-                                  }
-                                  return RemoteButton(
-                                    key: const ValueKey(
-                                      'tv-enhancement-compare',
-                                    ),
-                                    label: enhancement.comparing
-                                        ? '恢复增强'
-                                        : '原画对比',
-                                    icon: Icons.compare_rounded,
-                                    onPressed: () {
-                                      unawaited(enhancement.toggleCompare());
-                                      _focus(_play);
-                                      _scheduleHide();
-                                    },
-                                  );
-                                },
-                              ),
                             RemoteButton(
                               key: const ValueKey('tv-settings'),
                               label: '播放设置',
@@ -499,16 +470,12 @@ class TelevisionPlaybackSetting {
     this.speed,
     this.quality,
     this.autoAdvance,
-    this.danmaku,
     this.preload,
-    this.enhancement,
   });
   final double? speed;
   final int? quality;
   final bool? autoAdvance;
-  final bool? danmaku;
   final bool? preload;
-  final VideoEnhancementPreferences? enhancement;
 }
 
 class TelevisionSettingsDialog extends StatelessWidget {
@@ -520,14 +487,8 @@ class TelevisionSettingsDialog extends StatelessWidget {
     required this.favorite,
     required this.onFavorite,
     this.autoAdvance = true,
-    this.danmaku = true,
-    this.showDanmaku = false,
-    this.danmakuStatus = '',
-    this.onRetryDanmaku,
     this.preload = true,
     this.preloadStatus = '',
-    this.enhancement,
-    this.onCompareEnhancement,
   });
   final double speed;
   final int quality;
@@ -535,14 +496,8 @@ class TelevisionSettingsDialog extends StatelessWidget {
   final bool favorite;
   final VoidCallback onFavorite;
   final bool autoAdvance;
-  final bool danmaku;
-  final bool showDanmaku;
-  final String danmakuStatus;
-  final VoidCallback? onRetryDanmaku;
   final bool preload;
   final String preloadStatus;
-  final VideoEnhancementController? enhancement;
-  final VoidCallback? onCompareEnhancement;
 
   @override
   Widget build(BuildContext context) => AlertDialog(
@@ -596,35 +551,6 @@ class TelevisionSettingsDialog extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 20),
-            if (enhancement != null)
-              VideoEnhancementSettings(
-                controller: enhancement!,
-                television: true,
-                onChanged: (value) => Navigator.pop(
-                  context,
-                  TelevisionPlaybackSetting(enhancement: value),
-                ),
-                onCompare: onCompareEnhancement ?? () {},
-              ),
-            if (showDanmaku) ...[
-              RemoteButton(
-                key: const ValueKey('tv-danmaku-enabled'),
-                label: danmaku ? '弹幕：开' : '弹幕：关',
-                onPressed: () => Navigator.pop(
-                  context,
-                  TelevisionPlaybackSetting(danmaku: !danmaku),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(danmakuStatus, style: const TextStyle(fontSize: 14)),
-              if (onRetryDanmaku != null)
-                RemoteButton(
-                  key: const ValueKey('tv-danmaku-retry'),
-                  label: '重试弹幕',
-                  onPressed: onRetryDanmaku,
-                ),
-              const SizedBox(height: 20),
-            ],
             RemoteButton(
               key: const ValueKey('tv-auto-advance'),
               label: autoAdvance ? '自动连播：开' : '自动连播：关',

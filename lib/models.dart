@@ -3,21 +3,28 @@ import 'dart:convert';
 import 'app_build.dart';
 
 class SourceSite {
-  const SourceSite(this.id, this.name, this.description);
+  const SourceSite(this.id, this.name, this.description, {this.capabilities, this.family = "", this.kind = "drama"});
+  final Set<String>? capabilities;
+  final String family, kind;
   final String id;
   final String name;
   final String description;
-  bool get onlineSearch => id == 'hongguo' || pagedSearch;
-  bool get pagedSearch =>
+  bool get onlineSearch => capabilities?.contains('search') ?? (id == 'hongguo' || pagedSearch);
+  bool get supportsDownloads => capabilities?.contains('download') ?? (id != 'bilibili');
+  bool get pagedSearch => capabilities?.contains('search') ?? (
       id == 'huangju' ||
       id == 'dsd' ||
       id == 'sorani' ||
       id == 'guipian' ||
       id == 'hanxiaoquan' ||
       id == 'crj91' ||
-      id == 'stripchat';
-  bool get searchSuggestions => id == 'hongguo';
-  String get groupId => switch (id) {
+      id == 'stripchat' ||
+      id == 'bilibili');
+  bool get searchSuggestions => capabilities?.contains('suggestions') ?? (id == 'hongguo');
+  bool get supportsCatalogTools => capabilities?.contains('catalogTools') ?? (id == 'hongguo');
+  bool get supportsCreator =>
+      capabilities?.contains('creator') ?? {'douyin', 'douyin-live', 'bilibili'}.contains(id);
+  String get groupId => family.isNotEmpty && family != 'douyin' ? family : switch (id) {
     'huangguo-video' || 'huangguoai' || 'cloudfront' => 'huangguo',
     _ => id,
   };
@@ -30,6 +37,28 @@ class SourceSite {
   };
 
   static const hongguo = SourceSite('hongguo', '红果', '短剧 · 漫剧 · AI 剧');
+  static const bilibili = SourceSite(
+    'bilibili',
+    '哔哩哔哩',
+    '个性推荐 · 正在关注 · 排行 · 分 P 播放',
+  );
+  static const douyin = SourceSite('douyin', '抖音', '短视频推荐 · Cookie 登录');
+  static const douyinLive = SourceSite(
+    'douyin-live',
+    '抖音直播',
+    '直播间 · 共用抖音 Cookie',
+  );
+  static const douyinSeries = SourceSite(
+    'douyin-series',
+    '抖音短剧',
+    '短剧题材 · 共用抖音 Cookie',
+  );
+  static const douyinTheater = SourceSite(
+    'douyin-theater',
+    '抖音放映厅',
+    '电影 · 电视剧 · 综艺 · 共用抖音 Cookie',
+  );
+  bool get isDouyinVideo => isDouyin && id != douyinLive.id;
   static const dsd = SourceSite('dsd', '帝果', '分类视频 · 在线搜索');
   static const sorani = SourceSite('sorani', '青空', '番剧 · 剧场动画 · 特摄');
   static const guipian = SourceSite('guipian', '鬼片', '鬼片 · 电视剧 · 动漫');
@@ -43,7 +72,19 @@ class SourceSite {
 
   static const featuredValues = [hongguo, hanxiaoquan, guipian, sorani];
 
-  static const otherValues = [
+  static const douyinValues = [douyin, douyinLive, douyinSeries, douyinTheater];
+  bool get isDouyin => douyinValues.any((source) => source.id == id);
+  static const otherValues = [...douyinValues, ...otherValuesWithoutDouyin];
+  static const knownValues = [
+    hongguo,
+    bilibili,
+    ...douyinValues,
+    hanxiaoquan,
+    guipian,
+    sorani,
+    ...otherValuesWithoutDouyin,
+  ];
+  static const otherValuesWithoutDouyin = [
     SourceSite('huangju', '剧果', '热门 · 最新 · 分类短剧'),
     dsd,
     crj91,
@@ -52,13 +93,14 @@ class SourceSite {
     SourceSite('huangguoai', '黄果 AI', 'AI 短剧'),
     SourceSite('cloudfront', '黄果旧版', '旧 API 剧库'),
   ];
-  static const knownValues = [...featuredValues, ...otherValues];
   static const allValues = knownValues;
-  static const values = allSourcesEnabled ? knownValues : [hongguo];
+  static List<SourceSite> _installed = const [];
+  static List<SourceSite> get values => _installed;
+  static void registerInstalled(List<SourceSite> sites) { _installed = List.unmodifiable(sites); }
   static bool isAvailable(String id) => values.any((site) => site.id == id);
-  static bool isKnown(String id) => allValues.any((site) => site.id == id);
+  static bool isKnown(String id) => values.any((site) => site.id == id) || allValues.any((site) => site.id == id);
   static SourceSite byId(String id) =>
-      allValues.firstWhere((site) => site.id == id, orElse: () => hongguo);
+      values.firstWhere((site) => site.id == id, orElse: () => allValues.firstWhere((site) => site.id == id, orElse: () => SourceSite(id, id, '未安装站源')));
 }
 
 class SourceGroup {
@@ -111,6 +153,10 @@ class Drama {
     this.onlineDate = '',
     this.tags = const [],
     this.releaseStatus = '',
+    this.creatorSecUid = '',
+    this.creatorName = '',
+    this.creatorAvatar = '',
+    this.creatorId = '',
   }) : vipStatus = vip;
   final String id;
   final String source;
@@ -127,6 +173,10 @@ class Drama {
   final String onlineDate;
   final List<String> tags;
   final String releaseStatus;
+  final String creatorSecUid;
+  final String creatorName;
+  final String creatorAvatar;
+  final String creatorId;
   String get releaseLabel => switch (releaseStatus) {
     'finished' || 'completed' => '已完结',
     'ongoing' => '连载中',
@@ -154,6 +204,10 @@ class Drama {
     onlineDate: json['onlineDate'] as String? ?? '',
     tags: (json['tags'] as List? ?? const []).whereType<String>().toList(),
     releaseStatus: json['releaseStatus'] as String? ?? '',
+    creatorSecUid: json['creatorSecUid'] as String? ?? '',
+    creatorName: json['creatorName'] as String? ?? '',
+    creatorAvatar: json['creatorAvatar'] as String? ?? '',
+    creatorId: json['creatorId'] as String? ?? '',
   );
   Map<String, dynamic> toJson() => {
     'metadataSchema': 1,
@@ -171,6 +225,10 @@ class Drama {
     'onlineDate': onlineDate,
     'tags': tags,
     'releaseStatus': releaseStatus,
+    'creatorSecUid': creatorSecUid,
+    'creatorName': creatorName,
+    'creatorAvatar': creatorAvatar,
+    'creatorId': creatorId,
   };
 
   Drama merge(Drama fresh) {
@@ -214,6 +272,14 @@ class Drama {
           fresh.releaseStatus.isEmpty || fresh.releaseStatus == 'unknown'
           ? releaseStatus
           : fresh.releaseStatus,
+      creatorSecUid: fresh.creatorSecUid.isEmpty
+          ? creatorSecUid
+          : fresh.creatorSecUid,
+      creatorName: fresh.creatorName.isEmpty ? creatorName : fresh.creatorName,
+      creatorId: fresh.creatorId.isEmpty ? creatorId : fresh.creatorId,
+      creatorAvatar: fresh.creatorAvatar.isEmpty
+          ? creatorAvatar
+          : fresh.creatorAvatar,
     );
   }
 }
@@ -284,7 +350,6 @@ class PlaybackPlan {
     this.quality = 0,
     this.qualities = const [],
     this.session = '',
-    this.danmakuId = '',
     this.prefetchedBytes = 0,
     this.expiresAt = 0,
     this.routeIndex = 0,
@@ -297,7 +362,6 @@ class PlaybackPlan {
   final int quality;
   final List<int> qualities;
   final String session;
-  final String danmakuId;
   final int prefetchedBytes;
   final int expiresAt;
   final int routeIndex;
@@ -315,7 +379,6 @@ class PlaybackPlan {
     qualities: (json['qualities'] as List? ?? []).map(intValue).toSet().toList()
       ..sort((a, b) => b.compareTo(a)),
     session: json['session'] as String? ?? '',
-    danmakuId: json['danmakuId'] as String? ?? '',
     prefetchedBytes: intValue(json['prefetchedBytes']),
     expiresAt: intValue(json['expiresAt']),
     routeIndex: intValue(json['routeIndex']),

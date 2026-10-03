@@ -22,7 +22,7 @@ import (
 //         master 播放列表，含 #EXT-X-MOUFLON:PSCH:v2:<key> 密钥池
 //   GET {variant}?psch=v2&pkey={池内key}&preferredVideoCodec=H264   带鉴权的 variant
 //
-// 说明：本实现只做「分类 / 主播 / 房间 / 播放地址」，不含实时弹幕（guoapp 无直播弹幕通道）。
+// 说明：本实现只负责分类、主播、房间和播放地址。
 // variant 播放列表必须带 pkey 才能取到分片，故 playerContent 返回已拼好鉴权参数的 variant。
 
 const (

@@ -2,6 +2,31 @@ import 'dart:math' as math;
 
 import 'models.dart';
 
+class FeedCategoryFilter {
+  FeedCategoryFilter(Iterable<String> selected, Iterable<String> excluded)
+    : selected = selected.map(FeedRecommendations._normalize).toSet(),
+      excluded = excluded.map(FeedRecommendations._normalize).toSet() {
+    this.selected.remove('');
+    this.excluded.remove('');
+  }
+
+  final Set<String> selected, excluded;
+
+  bool allows(Drama drama, {bool selectedByRequest = false}) {
+    final labels = <String>{
+      drama.category,
+      ...drama.tags,
+      ...FeedRecommendations._features(drama),
+    }.map(FeedRecommendations._normalize).toSet();
+    final text = FeedRecommendations._normalize(
+      '${drama.title} ${drama.description}',
+    );
+    return !FeedRecommendations._matchesCategory(labels, text, excluded) &&
+        (selectedByRequest ||
+            FeedRecommendations._matchesCategory(labels, text, selected));
+  }
+}
+
 class FeedWatchSignal {
   const FeedWatchSignal({
     required this.drama,
@@ -609,7 +634,20 @@ class FeedRecommendations {
     return (topics: topics, groups: groups);
   }
 
+  static final _featureCache = Map<Drama, Set<String>>.identity();
+
   static Set<String> _features(Drama drama) {
+    final cached = _featureCache[drama];
+    if (cached != null) return cached;
+    final features = _uncachedFeatures(drama);
+    if (_featureCache.length >= 4096) {
+      _featureCache.remove(_featureCache.keys.first);
+    }
+    _featureCache[drama] = features;
+    return features;
+  }
+
+  static Set<String> _uncachedFeatures(Drama drama) {
     final values = <String>{
       if (drama.category.isNotEmpty) drama.category.trim(),
       ...drama.tags.map((tag) => tag.trim()),
@@ -675,6 +713,14 @@ class FeedRecommendations {
       ..._features(drama),
     }.map(_normalize).where((value) => value.isNotEmpty).toSet();
     final text = _normalize('${drama.title} ${drama.description}');
+    return _matchesCategory(labels, text, selected);
+  }
+
+  static bool _matchesCategory(
+    Set<String> labels,
+    String text,
+    Set<String> selected,
+  ) {
     for (final category in selected) {
       if (labels.contains(category) || text.contains(category)) return true;
       if (category == 'ai剧' &&

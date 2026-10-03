@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -10,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'core_bridge.dart';
+import 'source_subscriptions.dart';
 import 'app_layout.dart';
 import 'app_orientation.dart';
 import 'app_theme.dart';
@@ -21,11 +23,15 @@ import 'media_library.dart';
 import 'package_smoke.dart';
 import 'lan_controller.dart';
 import 'player_screen.dart';
-import 'video_enhancement_assets.dart';
 import 'widgets.dart';
 
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks([
+      'dart_simple_live / Douyin request signer',
+    ], await rootBundle.loadString('assets/licenses/douyin_LICENSE.txt'));
+  });
   if (Platform.isAndroid) {
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(AppTheme.systemBars(Brightness.dark));
@@ -34,7 +40,6 @@ Future<void> main(List<String> arguments) async {
     await windowManager.ensureInitialized();
   }
   if (!Platform.isAndroid) MediaKit.ensureInitialized();
-  VideoEnhancementAssets.registerLicenses();
   if (Platform.isWindows && arguments.firstOrNull == '--package-smoke') {
     await runPackageSmoke(arguments);
     return;
@@ -58,8 +63,11 @@ class _AppBootstrapState extends State<AppBootstrap>
   Object? error;
   late AppDevice device = widget.device;
 
+  void _sourcesChanged() { store?.refreshInstalledSources(); }
+
   @override
   void dispose() {
+    SourceSubscriptions.instance.removeListener(_sourcesChanged);
     WidgetsBinding.instance.removeObserver(this);
     LanController.current?.dispose();
     LanController.current = null;
@@ -114,6 +122,7 @@ class _AppBootstrapState extends State<AppBootstrap>
       error = null;
     });
     try {
+      await SourceSubscriptions.instance.open();
       final startup = await Future.wait<Object>([
         SharedPreferences.getInstance(),
         repository.initialize().then((_) => true),
@@ -123,6 +132,7 @@ class _AppBootstrapState extends State<AppBootstrap>
         setState(() {
           store = LocalStore(preferences);
           repository.access = store;
+          SourceSubscriptions.instance.addListener(_sourcesChanged);
           MediaLibrary.attach(repository, store!);
           LanController.current?.dispose();
           final link = LanController(
@@ -194,7 +204,7 @@ class _AppBootstrapState extends State<AppBootstrap>
   );
 }
 
-class DuanjuApp extends StatelessWidget {
+class DuanjuApp extends StatefulWidget {
   const DuanjuApp({
     super.key,
     required this.repository,
@@ -214,10 +224,60 @@ class DuanjuApp extends StatelessWidget {
   final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: Listenable.merge([store]),
-    builder: (_, _) => _application(),
+  State<DuanjuApp> createState() => _DuanjuAppState();
+}
+
+class _DuanjuAppState extends State<DuanjuApp> {
+  LocalStore? get store => widget.store;
+  AppRepository get repository => widget.repository;
+  bool get television => widget.television;
+  String get version => widget.version;
+  String? get bootstrapError => widget.bootstrapError;
+  VoidCallback? get onRetry => widget.onRetry;
+  GlobalKey<NavigatorState>? get navigatorKey => widget.navigatorKey;
+  Object? _appearance;
+
+  Object get _currentAppearance => (
+    store?.themeMode,
+    store?.themeSeed,
+    store?.dynamicColor,
+    store?.fontWeightAdjustment,
+    store?.hapticFeedback,
+    store?.locked,
+    store?.profileEpoch,
   );
+
+  @override
+  void initState() {
+    super.initState();
+    _appearance = _currentAppearance;
+    store?.addListener(_storeChanged);
+  }
+
+  @override
+  void didUpdateWidget(DuanjuApp oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.store != store) {
+      oldWidget.store?.removeListener(_storeChanged);
+      store?.addListener(_storeChanged);
+    }
+    _appearance = _currentAppearance;
+  }
+
+  void _storeChanged() {
+    final appearance = _currentAppearance;
+    if (appearance == _appearance) return;
+    setState(() => _appearance = appearance);
+  }
+
+  @override
+  void dispose() {
+    store?.removeListener(_storeChanged);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _application();
 
   Widget _application() {
     AppHaptics.enabled = store?.hapticFeedback ?? true;
@@ -285,6 +345,8 @@ class DuanjuApp extends StatelessWidget {
                       repository: repository,
                       store: store!,
                     )
+            : bootstrapError == null
+            ? const Scaffold()
             : Scaffold(
                 body: Center(
                   child: Padding(

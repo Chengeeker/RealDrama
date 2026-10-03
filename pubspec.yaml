@@ -1,7 +1,7 @@
 name: duanju_app
 description: 独立运行的多端短剧应用
 publish_to: none
-version: 0.7.0+115
+version: 0.9.1+139
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
@@ -18,6 +18,7 @@ dependencies:
   path: ^1.9.1
   path_provider: ^2.1.5
   shared_preferences: ^2.5.5
+  flutter_secure_storage: ^11.2.0
   dynamic_color: ^1.7.0
   flutter_foreground_task: 11.0.3
   ffmpeg_kit_flutter_new_min_gpl: 2.6.2
@@ -43,5 +44,5 @@ flutter:
     enable-swift-package-manager: false
   uses-material-design: true
   assets:
-    - assets/video_enhancement/
     - assets/icon12.png
+    - assets/licenses/douyin_LICENSE.txt

@@ -6,6 +6,7 @@ package main
 import "C"
 import (
 	"duanjuapp/native/core"
+ "duanjuapp/native/sourcevm"
 	"unsafe"
 )
 
@@ -19,5 +20,10 @@ func DuanjuRequest(input *C.char) *C.char {
 
 //export DuanjuFree
 func DuanjuFree(value *C.char) { C.free(unsafe.Pointer(value)) }
+
+//export RealDramaSourceRequest
+func RealDramaSourceRequest(input *C.char) *C.char {
+ if input == nil { return C.CString(`{"ok":false,"error":"请求为空"}`) }; return C.CString(sourcevm.Request(C.GoString(input)))
+}
 
 func main() {}

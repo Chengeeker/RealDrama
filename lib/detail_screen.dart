@@ -18,6 +18,8 @@ import 'sources_screen.dart';
 import 'episode_browser.dart';
 import 'follow_state.dart';
 import 'hongguo_series.dart';
+import 'playback_launch_screen.dart';
+import 'douyin_creator_screen.dart';
 
 class DetailScreen extends StatefulWidget {
   const DetailScreen({
@@ -62,7 +64,7 @@ class _DetailScreenState extends State<DetailScreen> {
     super.initState();
     _profileEpoch = widget.store.profileEpoch;
     widget.store.addListener(_onStoreChanged);
-    _load();
+    if (!{'douyin', 'douyin-live'}.contains(widget.drama.source)) _load();
   }
 
   @override
@@ -238,6 +240,16 @@ class _DetailScreenState extends State<DetailScreen> {
         !widget.store.allowsSource(detail.drama.source)) {
       return;
     }
+    if (detail.drama.source == 'douyin-live') {
+      await openPlaybackDirectly(
+        context,
+        drama: detail.drama,
+        repository: widget.repository,
+        store: widget.store,
+      );
+      if (mounted) setState(() {});
+      return;
+    }
     if (detail.episodes[index].vip &&
         detail.drama.source != SourceSite.dsd.id) {
       final accepted = await showDialog<bool>(
@@ -315,6 +327,13 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if ({'douyin', 'douyin-live'}.contains(widget.drama.source)) {
+      return DouyinCreatorScreen(
+        drama: widget.drama,
+        repository: widget.repository,
+        store: widget.store,
+      );
+    }
     final drama = _detail?.drama ?? widget.drama;
     final watched = widget.store.watched(drama.id);
     final episodes = _detail?.episodes ?? <Episode>[];
@@ -485,7 +504,8 @@ class _DetailScreenState extends State<DetailScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
                   child: Row(
                     children: [
-                      if (widget.repository.supportsDownloads &&
+                      if (SourceSite.byId(drama.source).supportsDownloads &&
+                          widget.repository.supportsDownloads &&
                           widget.store.canDownload) ...[
                         IconButton.filledTonal(
                           tooltip: '下载选集',

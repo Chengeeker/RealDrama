@@ -9,7 +9,8 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import 'models.dart';
-import 'danmaku_models.dart';
+import 'bilibili_source.dart';
+import 'douyin_source.dart';
 import 'background_downloads.dart';
 import 'local_store.dart';
 import 'app_build.dart';
@@ -67,6 +68,33 @@ class AppFailure implements Exception {
 }
 
 abstract class AppRepository {
+  void resetDouyin() {}
+  Future<Map<String, dynamic>> bilibiliAccount() async =>
+      throw AppFailure('当前环境不支持哔哩哔哩');
+  Future<int> checkDouyin() async => throw AppFailure('当前环境不支持抖音');
+  Future<int> checkDouyinLive() async => throw AppFailure('当前环境不支持抖音直播');
+  Future<DouyinCreatorPage> douyinCreatorVideos(
+    Drama drama, {
+    String cursor = '0',
+  }) async => throw AppFailure('当前环境不支持抖音主页');
+  Future<DouyinCreatorPage> creatorVideos(Drama drama, {String cursor = '0'}) =>
+      douyinCreatorVideos(drama, cursor: cursor);
+  Future<DouyinCommentPage> douyinComments(
+    Drama drama, {
+    required String requestScope,
+    String cursor = '0',
+  }) async => throw AppFailure('当前环境不支持抖音评论');
+  void cancelDouyinComments(String requestScope) {}
+  Future<DouyinCommentPage> videoComments(
+    Drama drama, {
+    required String requestScope,
+    String cursor = '0',
+  }) => douyinComments(drama, requestScope: requestScope, cursor: cursor);
+  void cancelVideoComments(String requestScope) =>
+      cancelDouyinComments(requestScope);
+
+  Future<DouyinLiveRoom> douyinLiveRoom(Drama drama) async =>
+      throw AppFailure('当前环境不支持抖音直播');
   Future<Map<String, dynamic>> lan(
     String command,
     Map<String, dynamic> payload,
@@ -90,12 +118,6 @@ abstract class AppRepository {
     bool online = false,
     String? requestKey,
   }) async => null;
-  Future<void> cancelDanmaku() async {}
-  Future<DanmakuPage> danmaku(
-    PlaybackPlan plan, {
-    required int startMs,
-    required int durationMs,
-  }) async => throw AppFailure('当前环境不支持弹幕');
   Future<void> cancelCatalog() async {}
   Future<void> cancelCategories() async {}
   Future<void> cancelSuggestions() async {}
@@ -193,6 +215,186 @@ class NativeRepository extends AppRepository {
   static final _coverDecoder = CoverDecoder();
   NativeRepository({this.background = false});
   final bool background;
+  String _douyinSourceFor(Drama drama) {
+    if (drama.source == 'douyin') {
+      if (drama.id.startsWith('douyin-series:')) return 'douyin-series';
+      if (drama.category.startsWith('放映厅')) return 'douyin-theater';
+    }
+    return drama.source;
+  }
+
+  final _douyin = DouyinSource();
+  late final _douyinVideos = <String, DouyinSource>{
+    'douyin': _douyin,
+    'douyin-series': DouyinSource(source: 'douyin-series'),
+    'douyin-theater': DouyinSource(source: 'douyin-theater'),
+  };
+  Future<T> _videoRead<T>(
+    String source,
+    Future<T> Function(DouyinSource, String) operation,
+  ) => _douyinRead(
+    (profile) => operation(_douyinVideos[source]!, profile),
+    source: source,
+  );
+  late final _douyinLive = DouyinLiveSource(_douyin);
+  @override
+  void resetDouyin() {
+    _douyinLive.reset();
+    for (final client in _douyinVideos.values) client.reset();
+  }
+
+  Future<T> _douyinRead<T>(
+    Future<T> Function(String) operation, {
+    bool configure = false,
+    String source = 'douyin',
+  }) async {
+    final store = access;
+    if (background || store == null || store.locked)
+      throw AppFailure('请在前台登录后使用抖音');
+    if (!configure) _authorize(source);
+    final epoch = store.profileEpoch;
+    final result = await operation(store.profile.id);
+    if (epoch != store.profileEpoch || store.locked)
+      throw AppFailure('用户已切换，请重新操作');
+    if (!configure) _authorize(source);
+    return result;
+  }
+
+  @override
+  Future<int> checkDouyin() => _douyinRead(
+    (profile) async =>
+        (await _douyin.catalog(profile, force: true)).items.length,
+    configure: true,
+  );
+
+  @override
+  Future<DouyinCreatorPage> creatorVideos(
+    Drama drama, {
+    String cursor = '0',
+  }) async {
+    if (drama.source != SourceSite.bilibili.id) {
+      return douyinCreatorVideos(drama, cursor: cursor);
+    }
+    final page = cursor == '0' ? 1 : int.tryParse(cursor);
+    if (page == null || page < 1 || page > 100000) {
+      throw AppFailure('作者作品分页无效');
+    }
+    final data = await _call({
+      'action': 'bilibiliCreator',
+      'source': drama.source,
+      'drama': drama.toJson(),
+      'page': page,
+    });
+    int? count(Object? value) =>
+        value is num ? value.toInt() : int.tryParse('$value');
+    return DouyinCreatorPage(
+      name: '${data['name'] ?? drama.creatorName}',
+      avatar: '${data['avatar'] ?? drama.creatorAvatar}',
+      userId: '${data['userId'] ?? drama.creatorId}',
+      bio: '${data['bio'] ?? ''}',
+      items: [
+        for (final item in data['items'] as List? ?? const [])
+          Drama.fromJson(item as Map<String, dynamic>),
+      ],
+      cursor: '${data['cursor'] ?? page + 1}',
+      hasMore: data['hasMore'] == true,
+      likes: count(data['likes']),
+      following: count(data['following']),
+      followers: count(data['followers']),
+    );
+  }
+
+  @override
+  Future<int> checkDouyinLive() => _douyinRead(
+    (profile) async =>
+        (await _douyinLive.catalog(profile, force: true)).items.length,
+    configure: true,
+    source: 'douyin-live',
+  );
+
+  @override
+  Future<DouyinCommentPage> videoComments(
+    Drama drama, {
+    required String requestScope,
+    String cursor = '0',
+  }) async {
+    if (drama.source != SourceSite.bilibili.id) {
+      return douyinComments(drama, requestScope: requestScope, cursor: cursor);
+    }
+    final page = cursor == '0' ? 1 : int.tryParse(cursor);
+    if (page == null || page < 1 || page > 10) throw AppFailure('评论分页无效');
+    final data = await _read('bilibili-comments-$requestScope', {
+      'action': 'bilibiliComments',
+      'source': drama.source,
+      'drama': drama.toJson(),
+      'page': page,
+    });
+    int count(Object? value) =>
+        value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+    return DouyinCommentPage(
+      items: [
+        for (final item in data['items'] as List? ?? const [])
+          DouyinComment(
+            id: '${item['id']}',
+            author: '${item['author'] ?? ''}',
+            avatar: '${item['avatar'] ?? ''}',
+            text: '${item['text'] ?? ''}',
+            likes: count(item['likes']),
+          ),
+      ],
+      cursor: '${data['cursor'] ?? page + 1}',
+      hasMore: data['hasMore'] == true,
+      total: count(data['total']),
+    );
+  }
+
+  @override
+  void cancelVideoComments(String requestScope) {
+    cancelDouyinComments(requestScope);
+    unawaited(_cancelReads('bilibili-comments-$requestScope'));
+  }
+
+  @override
+  Future<DouyinCreatorPage> douyinCreatorVideos(
+    Drama drama, {
+    String cursor = '0',
+  }) => _douyinRead(
+    (profile) async => _douyin.creatorVideos(
+      drama.source == 'douyin-live'
+          ? await _douyinLive.creator(profile, drama)
+          : drama,
+      profile,
+      cursor: cursor,
+    ),
+    source: drama.source == 'douyin-live' ? 'douyin-live' : 'douyin',
+  );
+
+  @override
+  Future<DouyinCommentPage> douyinComments(
+    Drama drama, {
+    required String requestScope,
+    String cursor = '0',
+  }) => _douyinRead(
+    (profile) => _douyin.comments(
+      drama,
+      profile,
+      cursor: cursor,
+      requestScope: requestScope,
+    ),
+  );
+
+  @override
+  void cancelDouyinComments(String requestScope) {
+    if (requestScope.startsWith('douyin-comments-')) {
+      _douyin.cancelComments(requestScope);
+    }
+  }
+
+  @override
+  Future<DouyinLiveRoom> douyinLiveRoom(Drama drama) => _douyinRead(
+    (profile) => _douyinLive.room(profile, drama),
+    source: 'douyin-live',
+  );
   LocalStore? access;
   final _readOwner = DateTime.now().microsecondsSinceEpoch.toString();
   int _readSequence = 0;
@@ -210,6 +412,9 @@ class NativeRepository extends AppRepository {
     Episode episode, {
     int quality = 0,
   }) async {
+    if (SourceSite.byId(drama.source).isDouyin) {
+      throw AppFailure('抖音站源不支持设备互联');
+    }
     final data = await _read('handoff', {
       'action': 'prepareHandoff',
       'drama': drama.toJson(),
@@ -286,9 +491,6 @@ class NativeRepository extends AppRepository {
   }
 
   @override
-  Future<void> cancelDanmaku() => _cancelReads('danmaku');
-
-  @override
   Future<void> cancelPreload({String? requestKey}) async {
     if (requestKey == null) {
       await _cancelReads('preload');
@@ -312,37 +514,18 @@ class NativeRepository extends AppRepository {
     int quality = 0,
     bool online = false,
     String? requestKey,
-  }) async => PlaybackPlan.fromJson(
-    await _read(requestKey ?? 'preload', {
-      'action': 'preload',
-      'drama': drama.toJson(),
-      'chapter': episode.raw,
-      'index': episode.number,
-      'quality': quality,
-      'force': online || access?.canDownload == false,
-    }),
-  );
-
-  @override
-  Future<DanmakuPage> danmaku(
-    PlaybackPlan plan, {
-    required int startMs,
-    required int durationMs,
   }) async {
-    _authorize('hongguo');
-    if (plan.local || plan.session.isEmpty || plan.danmakuId.isEmpty) {
-      throw AppFailure('本集暂不支持弹幕');
-    }
-    return DanmakuPage.fromJson(
-      await _read('danmaku', {
-        'action': 'danmaku',
-        'playbackSession': plan.session,
-        'startMs': startMs,
-        'durationMs': durationMs,
+    if (_douyinVideos.containsKey(_douyinSourceFor(drama)))
+      return resolve(drama, episode, quality: quality);
+    return PlaybackPlan.fromJson(
+      await _read(requestKey ?? 'preload', {
+        'action': 'preload',
+        'drama': drama.toJson(),
+        'chapter': episode.raw,
+        'index': episode.number,
+        'quality': quality,
+        'force': online || access?.canDownload == false,
       }),
-      episodeId: plan.danmakuId,
-      startMs: startMs,
-      durationMs: durationMs,
     );
   }
 
@@ -418,11 +601,41 @@ class NativeRepository extends AppRepository {
     }),
   );
 
+  final _sourceStatusReads = <String, Future<SourceStatus>>{};
+  final _sourceStatusCache = <String, (DateTime, int?, SourceStatus)>{};
+
+  Future<SourceStatus> _readSourceStatus(String source) async {
+    final epoch = access?.profileEpoch;
+    final response = await _call({'action': 'sourceStatus', 'source': source});
+    final status = SourceStatus.fromJson(response);
+    if (epoch == access?.profileEpoch) {
+      _sourceStatusCache[source] = (DateTime.now(), epoch, status);
+    }
+    return status;
+  }
+
   @override
-  Future<SourceStatus> sourceStatus(String source) async =>
-      SourceStatus.fromJson(
-        await _call({'action': 'sourceStatus', 'source': source}),
-      );
+  Future<SourceStatus> sourceStatus(String source) async {
+    _authorize(source);
+    if (_douyinVideos.containsKey(source))
+      return _douyinVideos[source]!.status(access?.profile.id ?? '');
+    if (source == 'douyin-live') return _douyinLive.status();
+    final cached = _sourceStatusCache[source];
+    if (cached != null &&
+        cached.$2 == access?.profileEpoch &&
+        DateTime.now().difference(cached.$1) < const Duration(seconds: 1))
+      return cached.$3;
+    final existing = _sourceStatusReads[source];
+    if (existing != null) return existing;
+    final pending = _readSourceStatus(source);
+    _sourceStatusReads[source] = pending;
+    try {
+      return await pending;
+    } finally {
+      if (identical(_sourceStatusReads[source], pending))
+        _sourceStatusReads.remove(source);
+    }
+  }
 
   @override
   Future<SourceStatus> startSourceJob(
@@ -431,6 +644,20 @@ class NativeRepository extends AppRepository {
     Drama? drama,
   }) async {
     _authorize(source);
+    if (_douyinVideos.containsKey(source)) {
+      if (!{'update', 'more', 'check', 'checkCatalog'}.contains(operation))
+        throw AppFailure('抖音站源不支持此操作');
+      return _videoRead(
+        source,
+        (client, profile) async => client.startJob(profile, operation),
+      );
+    }
+    if (source == 'douyin-live') {
+      return _douyinRead(
+        (profile) async => _douyinLive.startJob(profile, operation),
+        source: source,
+      );
+    }
     if (drama != null && drama.source != source) throw AppFailure('站源与剧集不匹配');
     final epoch = access?.profileEpoch;
     await BackgroundDownloads.ensureStarted();
@@ -446,10 +673,20 @@ class NativeRepository extends AppRepository {
   }
 
   @override
-  Future<SourceStatus> cancelSourceJob(String source) async =>
-      SourceStatus.fromJson(
-        await _call({'action': 'cancelSourceJob', 'source': source}),
-      );
+  Future<SourceStatus> cancelSourceJob(String source) async {
+    if (_douyinVideos.containsKey(source)) {
+      final client = _douyinVideos[source]!;
+      client.cancel();
+      return client.status(access?.profile.id ?? '');
+    }
+    if (source == 'douyin-live') {
+      _douyinLive.cancel();
+      return _douyinLive.status();
+    }
+    return SourceStatus.fromJson(
+      await _call({'action': 'cancelSourceJob', 'source': source}),
+    );
+  }
 
   void _authorize(String source, {bool download = false}) {
     if (!SourceSite.isAvailable(source)) {
@@ -521,6 +758,9 @@ class NativeRepository extends AppRepository {
   Future<Map<String, dynamic>> _call(Map<String, dynamic> input) async {
     try {
       final action = input['action'] as String;
+      if (action == 'sourceJob' || action == 'cancelSourceJob') {
+        _sourceStatusCache.remove(input['source']);
+      }
       final unrestricted =
           {
             'initialize',
@@ -544,8 +784,7 @@ class NativeRepository extends AppRepository {
       }
       if (action == 'recommendations' ||
           action == 'cachedRecommendations' ||
-          action == 'suggestions' ||
-          action == 'danmaku') {
+          action == 'suggestions') {
         _authorize('hongguo');
       }
       if ({
@@ -555,6 +794,7 @@ class NativeRepository extends AppRepository {
         'sourceStatus',
         'sourceJob',
         'cancelSourceJob',
+        'bilibiliAccount',
       }.contains(action)) {
         _authorize(input['source'] as String);
       }
@@ -568,6 +808,8 @@ class NativeRepository extends AppRepository {
         'prepareHandoff',
         'enqueueDownloads',
         'localPlayback',
+        'bilibiliCreator',
+        'bilibiliComments',
       }.contains(action)) {
         _authorize(
           (input['drama'] as Map)['source'] as String,
@@ -589,19 +831,41 @@ class NativeRepository extends AppRepository {
       if (action == 'resolve' && access != null && !access!.canDownload) {
         input['force'] = true;
       }
+      final source =
+          input['source'] as String? ??
+          ((input['drama'] as Map?)?['source'] as String? ?? '');
+      if (source == SourceSite.bilibili.id &&
+          {
+            'bilibiliAccount',
+            'bilibiliCreator',
+            'bilibiliComments',
+            'catalog',
+            'categories',
+            'sourceJob',
+            'detail',
+            'metadata',
+            'resolve',
+            'preload',
+            'prepareHandoff',
+          }.contains(action)) {
+        final profile = access?.profile.id;
+        input['cookie'] = profile == null
+            ? ''
+            : await BilibiliSource.readCookie(profile) ?? '';
+      }
       final body = jsonEncode(input);
-      final encoded = await Isolate.run(() => _nativeRequest(body)).timeout(
-        Duration(
-          seconds: action == 'moveDownloads'
-              ? 620
-              : action == 'danmaku'
-              ? 15
-              : action == 'preload'
-              ? 20
-              : 70,
-        ),
-      );
-      final response = jsonDecode(encoded) as Map<String, dynamic>;
+      final response =
+          await Isolate.run(
+            () => jsonDecode(_nativeRequest(body)) as Map<String, dynamic>,
+          ).timeout(
+            Duration(
+              seconds: action == 'moveDownloads'
+                  ? 620
+                  : action == 'preload'
+                  ? 20
+                  : 70,
+            ),
+          );
       if (response['ok'] != true) {
         throw AppFailure(
           response['error'] as String? ?? '读取失败，请重试',
@@ -630,9 +894,9 @@ class NativeRepository extends AppRepository {
             'suggestions',
             'recommendations',
             'metadata',
-            'danmaku',
             'preload',
             'prepareHandoff',
+            'bilibiliComments',
           }.contains(input['action'])) {
         unawaited(
           _call({
@@ -671,6 +935,16 @@ class NativeRepository extends AppRepository {
     String source, {
     bool force = false,
   }) async {
+    if (_douyinVideos.containsKey(source)) {
+      _authorize(source);
+      return DouyinSource.categoriesFor(source);
+    }
+    if (source == 'douyin-live') {
+      return _douyinRead(
+        (profile) => _douyinLive.categories(profile, force: force),
+        source: source,
+      );
+    }
     final result = await _read('categories-$source', {
       'action': 'categories',
       'source': source,
@@ -689,27 +963,68 @@ class NativeRepository extends AppRepository {
     String query = '',
     String category = '',
     bool force = false,
-  }) async => CatalogPage.fromJson(
-    await _read('catalog-$source', {
-      'action': 'catalog',
-      'source': source,
-      'page': page,
-      'query': query,
-      'category': category,
-      'force': force,
-    }),
-  );
-  @override
-  Future<CatalogPage> cached(String source, {String category = ''}) async =>
-      CatalogPage.fromJson(
-        await _call({
-          'action': 'cached',
-          'source': source,
-          'category': category,
-        }),
+  }) async {
+    if (_douyinVideos.containsKey(source)) {
+      if (query.isNotEmpty) throw AppFailure('抖音站源暂不支持搜索');
+      return _videoRead(
+        source,
+        (client, profile) => client.catalog(
+          profile,
+          page: page,
+          force: force,
+          category: category,
+        ),
       );
+    }
+    if (source == 'douyin-live') {
+      if (query.isNotEmpty) throw AppFailure('抖音直播暂不支持搜索');
+      return _douyinRead(
+        (profile) => _douyinLive.catalog(
+          profile,
+          page: page,
+          force: force,
+          category: category,
+        ),
+        source: source,
+      );
+    }
+    return CatalogPage.fromJson(
+      await _read('catalog-$source', {
+        'action': 'catalog',
+        'source': source,
+        'page': page,
+        'query': query,
+        'category': category,
+        'force': force,
+      }),
+    );
+  }
+
+  @override
+  Future<CatalogPage> cached(String source, {String category = ''}) async {
+    if (_douyinVideos.containsKey(source))
+      return _videoRead(
+        source,
+        (client, profile) async => client.cached(profile, category: category),
+      );
+    if (source == 'douyin-live') {
+      _authorize(source);
+      return _douyinLive.cached(category: category);
+    }
+    return CatalogPage.fromJson(
+      await _call({'action': 'cached', 'source': source, 'category': category}),
+    );
+  }
+
   @override
   Future<String> cover(Drama drama, {bool force = false}) async {
+    if (_douyinVideos.containsKey(_douyinSourceFor(drama)))
+      return _videoRead(
+        _douyinSourceFor(drama),
+        (client, _) => client.cover(drama),
+      );
+    if (drama.source == 'douyin-live')
+      return _douyinRead((_) => _douyin.cover(drama), source: drama.source);
     final epoch = access?.profileEpoch;
     final result = await _call({
       'action': 'cover',
@@ -730,29 +1045,67 @@ class NativeRepository extends AppRepository {
   }
 
   @override
-  Future<DramaDetail> detail(Drama drama) async => DramaDetail.fromJson(
-    await _call({'action': 'detail', 'drama': drama.toJson()}),
-  );
+  Future<DramaDetail> detail(Drama drama) async {
+    if (_douyinVideos.containsKey(_douyinSourceFor(drama)))
+      return _videoRead(
+        _douyinSourceFor(drama),
+        (client, profile) => client.detail(drama, profile),
+      );
+    if (drama.source == 'douyin-live') {
+      final room = await douyinLiveRoom(drama);
+      return DramaDetail(room.drama, [
+        Episode({
+          'id': room.drama.sourceId,
+          'title': '直播中',
+          'currentEpisode': 1,
+        }, 1),
+      ]);
+    }
+    return DramaDetail.fromJson(
+      await _call({'action': 'detail', 'drama': drama.toJson()}),
+    );
+  }
 
   @override
-  Future<DramaDetail> refreshDetail(Drama drama) async => DramaDetail.fromJson(
-    await _call({'action': 'detail', 'drama': drama.toJson(), 'force': true}),
-  );
+  Future<DramaDetail> refreshDetail(Drama drama) async {
+    if (_douyinVideos.containsKey(_douyinSourceFor(drama)))
+      return _videoRead(
+        _douyinSourceFor(drama),
+        (client, profile) => client.detail(drama, profile, force: true),
+      );
+    if (drama.source == 'douyin-live') return detail(drama);
+    return DramaDetail.fromJson(
+      await _call({'action': 'detail', 'drama': drama.toJson(), 'force': true}),
+    );
+  }
+
   @override
   Future<PlaybackPlan> resolve(
     Drama drama,
     Episode episode, {
     int quality = 0,
-  }) async => PlaybackPlan.fromJson(
-    await _call({
-      'action': 'resolve',
-      'drama': drama.toJson(),
-      'chapter': episode.raw,
-      'index': episode.number,
-      'quality': quality,
-      'sequence': ++_playbackSequence,
-    }),
-  );
+  }) async {
+    if (_douyinVideos.containsKey(_douyinSourceFor(drama)))
+      return _videoRead(
+        _douyinSourceFor(drama),
+        (client, profile) =>
+            client.resolve(drama, episode, profile, quality: quality),
+      );
+    if (drama.source == 'douyin-live') {
+      return (await douyinLiveRoom(drama)).plan;
+    }
+    return PlaybackPlan.fromJson(
+      await _call({
+        'action': 'resolve',
+        'drama': drama.toJson(),
+        'chapter': episode.raw,
+        'index': episode.number,
+        'quality': quality,
+        'sequence': ++_playbackSequence,
+      }),
+    );
+  }
+
   @override
   Future<PlaybackPlan> fallback(PlaybackPlan current) async =>
       PlaybackPlan.fromJson(
@@ -769,6 +1122,10 @@ class NativeRepository extends AppRepository {
 
   @override
   bool get supportsDownloads => access?.canDownload ?? true;
+
+  @override
+  Future<Map<String, dynamic>> bilibiliAccount() =>
+      _call({'action': 'bilibiliAccount', 'source': SourceSite.bilibili.id});
 
   @override
   Future<List<DownloadJob>> downloads() async {
@@ -790,6 +1147,12 @@ class NativeRepository extends AppRepository {
     List<Episode> episodes, {
     int quality = 0,
   }) async {
+    if (!SourceSite.byId(detail.drama.source).supportsDownloads) {
+      throw AppFailure('哔哩哔哩站源当前不支持下载');
+    }
+    if (SourceSite.byId(detail.drama.source).isDouyin) {
+      throw AppFailure('抖音站源当前不支持下载');
+    }
     _authorize(detail.drama.source, download: true);
     final epoch = access?.profileEpoch;
     await BackgroundDownloads.ensureStarted();
@@ -811,6 +1174,12 @@ class NativeRepository extends AppRepository {
     List<Episode> episodes, {
     int quality = 0,
   }) async {
+    if (!SourceSite.byId(detail.drama.source).supportsDownloads) {
+      throw AppFailure('哔哩哔哩站源当前不支持下载');
+    }
+    if (SourceSite.byId(detail.drama.source).isDouyin) {
+      throw AppFailure('抖音站源当前不支持下载');
+    }
     _authorize(detail.drama.source, download: true);
     final epoch = access?.profileEpoch;
     await BackgroundDownloads.ensureStarted();
@@ -885,6 +1254,7 @@ class NativeRepository extends AppRepository {
 
   @override
   Future<PlaybackPlan?> localPlayback(Drama drama, Episode episode) async {
+    if (SourceSite.byId(drama.source).isDouyin) return null;
     final result = await _call({
       'action': 'localPlayback',
       'drama': drama.toJson(),
@@ -899,17 +1269,28 @@ class NativeRepository extends AppRepository {
     Drama drama,
     Episode episode, {
     int quality = 0,
-  }) async => PlaybackPlan.fromJson(
-    await _call({
-      'action': 'resolve',
-      'drama': drama.toJson(),
-      'chapter': episode.raw,
-      'index': episode.number,
-      'quality': quality,
-      'force': true,
-      'sequence': ++_playbackSequence,
-    }),
-  );
+  }) async {
+    if (_douyinVideos.containsKey(_douyinSourceFor(drama)))
+      return _videoRead(
+        _douyinSourceFor(drama),
+        (client, profile) =>
+            client.resolve(drama, episode, profile, quality: quality),
+      );
+    if (drama.source == 'douyin-live') {
+      return (await douyinLiveRoom(drama)).plan;
+    }
+    return PlaybackPlan.fromJson(
+      await _call({
+        'action': 'resolve',
+        'drama': drama.toJson(),
+        'chapter': episode.raw,
+        'index': episode.number,
+        'quality': quality,
+        'force': true,
+        'sequence': ++_playbackSequence,
+      }),
+    );
+  }
 
   @override
   Future<void> release(String session) async {

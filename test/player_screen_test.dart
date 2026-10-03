@@ -1,7 +1,6 @@
 import 'package:duanju_app/local_store.dart';
 import 'package:duanju_app/models.dart';
 import 'package:duanju_app/player_screen.dart';
-import 'package:duanju_app/app_layout.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -149,47 +148,22 @@ void main() {
     },
   );
 
-  testWidgets('picture-in-picture hides app overlay controls', (tester) async {
+  testWidgets('fullscreen control replaces picture-in-picture', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    final messenger =
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(AppDevice.channel, (call) async {
-      switch (call.method) {
-        case 'pictureInPictureStatus':
-          return {'supported': true, 'active': false};
-        case 'enterPictureInPicture':
-          return {'supported': true, 'active': true, 'requested': true};
-      }
-      return null;
-    });
     try {
       final repository = RouteRepository();
       final player = ScriptedPlayer();
       await mount(tester, repository, player, size: const Size(390, 844));
-      expect(
-        find.byKey(const ValueKey('player-picture-in-picture')),
-        findsOneWidget,
-      );
-      expect(find.text('选集'), findsOneWidget);
-      expect(find.text('简介'), findsOneWidget);
-      expect(find.text('下载'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('player-picture-in-picture')));
-      await tester.pump();
-      await tester.pump();
-      await settleOperations(tester);
+      expect(find.byKey(const ValueKey('player-fullscreen')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('player-picture-in-picture')),
         findsNothing,
       );
-      expect(find.byKey(const ValueKey('player-speed')), findsNothing);
-      expect(find.byKey(const ValueKey('player-quality')), findsNothing);
-      expect(find.byKey(const ValueKey('player-progress')), findsNothing);
-      expect(find.text('选集'), findsNothing);
-      expect(find.text('简介'), findsNothing);
-      expect(find.text('下载'), findsNothing);
+      expect(find.text('选集'), findsOneWidget);
+      expect(find.text('简介'), findsOneWidget);
+      expect(find.text('下载'), findsOneWidget);
       await unmount(tester, player);
     } finally {
-      messenger.setMockMethodCallHandler(AppDevice.channel, null);
       debugDefaultTargetPlatformOverride = null;
     }
   });
@@ -223,14 +197,6 @@ void main() {
     tester,
   ) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
-    final messenger =
-        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
-    messenger.setMockMethodCallHandler(AppDevice.channel, (call) async {
-      if (call.method == 'pictureInPictureStatus') {
-        return {'supported': true, 'active': false};
-      }
-      return null;
-    });
     try {
       final repository = RouteRepository();
       final player = ScriptedPlayer();
@@ -239,15 +205,14 @@ void main() {
       final quality = tester.getRect(
         find.byKey(const ValueKey('player-quality')),
       );
-      final pip = tester.getRect(
-        find.byKey(const ValueKey('player-picture-in-picture')),
+      final fullscreen = tester.getRect(
+        find.byKey(const ValueKey('player-fullscreen')),
       );
       expect(quality.left - speed.right, lessThan(8));
-      expect(pip.left - quality.right, lessThan(8));
-      expect(pip.right, greaterThan(330));
+      expect(fullscreen.left - quality.right, lessThan(8));
+      expect(fullscreen.right, greaterThan(330));
       await unmount(tester, player);
     } finally {
-      messenger.setMockMethodCallHandler(AppDevice.channel, null);
       debugDefaultTargetPlatformOverride = null;
     }
   });

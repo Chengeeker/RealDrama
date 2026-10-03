@@ -30,6 +30,9 @@ func (d *Downloader) nativeCoverAddress(ctx context.Context, drama nativeDrama) 
 			return "", errors.New("红果详情与请求剧集不符")
 		}
 		return hongguoCoverAddress(mapString(row, "series_cover", "cover")), nil
+	case sourceBilibili:
+		fresh, _, err := d.fetchBilibiliDetail(ctx, id)
+		return nativeNormalize(fresh).Cover, err
 	case sourceHuangju:
 		fresh, _, err := d.fetchHuangjuDetail(ctx, id)
 		return nativeNormalize(fresh).Cover, err

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'core_bridge.dart';
@@ -92,9 +93,11 @@ class CatalogBrowser {
     ]);
   }
 
-  void _remember(String source, Iterable<Drama> items) {
+  Future<void> _remember(String source, Iterable<Drama> items) async {
+    var work = 0;
     final library = _library.putIfAbsent(source, () => {});
     for (final drama in items) {
+      if (++work % 128 == 0) await Future<void>.delayed(Duration.zero);
       if (drama.source == source) {
         final merged = library[drama.id]?.merge(drama) ?? drama;
         library[drama.id] = merged;
@@ -156,7 +159,7 @@ class CatalogBrowser {
     for (final drama in updates.values) {
       final library = _library[drama.source];
       if (library?.containsKey(drama.id) == true) {
-        _remember(drama.source, [library![drama.id]!.merge(drama)]);
+        unawaited(_remember(drama.source, [library![drama.id]!.merge(drama)]));
       }
     }
     for (final session in _sessions.values) {
@@ -193,7 +196,7 @@ class CatalogBrowser {
       try {
         final cached = await repository.cached(source.id);
         if (generation != _categoryGeneration) return;
-        _remember(source.id, cached.items);
+        await _remember(source.id, cached.items);
       } catch (_) {}
       if (cacheOnly || generation != _categoryGeneration) return;
       try {
@@ -211,6 +214,21 @@ class CatalogBrowser {
   }
 
   List<_CatalogChoice> _choices(SourceGroup group) {
+    if (group.sources.length == 1 &&
+        (group.sources.single.isDouyin ||
+            group.sources.single.id == 'bilibili')) {
+      final source = group.sources.single;
+      return [
+        for (final category in _menus[source.id] ?? const <CatalogCategory>[])
+          if (!{
+            'recommend',
+            'series:recommend',
+            'vs:variety',
+            'for-you',
+          }.contains(category.id))
+            _CatalogChoice(category)..requests[source.id] = category.id,
+      ];
+    }
     if (group.id == 'hongguo' && group.sources.length == 1) {
       final source = group.sources.single;
       final menu = _menus[source.id] ?? const <CatalogCategory>[];
@@ -312,7 +330,17 @@ class CatalogBrowser {
   }
 
   List<CatalogCategory> categories(SourceGroup group) => [
-    CatalogCategory.all,
+    group.id == 'bilibili'
+        ? const CatalogCategory('', '个性推荐')
+        : group.id == 'douyin'
+        ? const CatalogCategory('', '推荐')
+        : group.id == 'douyin-live'
+        ? const CatalogCategory('', '精选')
+        : group.id == 'douyin-series'
+        ? const CatalogCategory('', '推荐')
+        : group.id == 'douyin-theater'
+        ? const CatalogCategory('', '综艺')
+        : CatalogCategory.all,
     for (final choice in _choices(group)) choice.category,
   ];
 
@@ -461,7 +489,7 @@ class CatalogBrowser {
           entry.hasMore = cached.hasMore || cached.warning.isNotEmpty;
           entry.fresh = cached.fresh && cached.warning.isEmpty;
           if (cached.warning.isNotEmpty) failures[source] = cached.warning;
-          _remember(source, cached.items);
+          await _remember(source, cached.items);
         } catch (error) {
           if (cacheOnly) failures[source] = error.toString();
         }
@@ -500,7 +528,7 @@ class CatalogBrowser {
             (query.isEmpty || SourceSite.byId(source).pagedSearch) &&
             (result.hasMore || result.warning.isNotEmpty);
         entry.fresh = result.fresh && result.warning.isEmpty;
-        if (query.isEmpty) _remember(source, result.items);
+        if (query.isEmpty) await _remember(source, result.items);
         if (result.warning.isNotEmpty) {
           failures[source] = result.warning;
         } else {

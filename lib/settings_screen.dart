@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -8,8 +9,12 @@ import 'package:path_provider/path_provider.dart';
 import 'app_layout.dart';
 import 'core_bridge.dart';
 import 'local_store.dart';
+import 'models.dart';
 import 'personalization_screen.dart';
+import 'detail_screen.dart';
+import 'playback_launch_screen.dart';
 import 'resource_settings_screen.dart';
+import 'saved_library.dart';
 import 'settings_subpages.dart';
 
 String storageSize(int bytes) {
@@ -38,6 +43,31 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  void _openDrama(BuildContext context, Drama drama, {bool download = false}) {
+    if (download) {
+      Navigator.push<void>(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => DetailScreen(
+            drama: drama,
+            repository: widget.repository,
+            store: widget.store,
+            downloadOnOpen: true,
+          ),
+        ),
+      );
+    } else {
+      unawaited(
+        openPlaybackDirectly(
+          context,
+          drama: drama,
+          repository: widget.repository,
+          store: widget.store,
+        ),
+      );
+    }
+  }
+
   void _showAbout() {
     final version = AppLayout.versionOf(context);
     showDialog<void>(
@@ -127,13 +157,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: EdgeInsets.fromLTRB(16, 16, 16, widget.bottomNavPadding),
         children: [
           SettingsSection(
+            title: '最近观看',
+            children: [
+              ListTile(
+                key: const ValueKey('playback-recent-history'),
+                leading: const Icon(Icons.history_rounded),
+                title: const Text('最近观看'),
+                subtitle: Text('当前设备 · ${widget.store.history.length} 部'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => SavedLibrary(
+                      repository: widget.repository,
+                      store: widget.store,
+                      history: true,
+                      onOpen: (drama) => _openDrama(context, drama),
+                      onContinue: (drama) => _openDrama(context, drama),
+                      onDownload:
+                          widget.store.canDownload &&
+                              widget.repository.supportsDownloads
+                          ? (drama) =>
+                                _openDrama(context, drama, download: true)
+                          : null,
+                      bottomPadding: 24,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SettingsSection(
             title: '播放',
             children: [
               ListTile(
                 key: const ValueKey('playback-settings'),
                 leading: const Icon(Icons.play_circle_outline_rounded),
                 title: const Text('播放设置'),
-                subtitle: const Text('最近观看、站源管理与首页偏好'),
+                subtitle: const Text('站源管理、首页偏好与推荐设置'),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.push(
                   context,

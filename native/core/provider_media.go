@@ -14,6 +14,8 @@ type providerMedia struct {
 	Referer         string
 	Duration        time.Duration
 	Playlist        string
+	PlaylistType    string
+	ProbeURL        string
 	RewritePlaylist func(string) string
 	HLSKey          []byte
 	CENCKey         []byte
@@ -120,6 +122,9 @@ func (d *Downloader) resolveProviderMedia(ctx context.Context, task Task) (provi
 	}
 	if chapter.Source == sourceCloudFront {
 		return d.resolveLegacyMedia(ctx, task)
+	}
+	if chapter.Source == sourceBilibili {
+		return d.resolveBilibiliMedia(ctx, task)
 	}
 	if chapter.Source == sourceHuangju {
 		return d.resolveHuangjuMedia(ctx, task)

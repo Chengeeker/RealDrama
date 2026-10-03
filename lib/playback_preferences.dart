@@ -1,6 +1,17 @@
-import 'video_enhancement_preferences.dart';
-
 const playbackSpeeds = [.5, .75, 1.0, 1.25, 1.5, 2.0, 3.0];
+
+enum HardwareDecoder {
+  automatic('自动（安全）', 'auto-safe'),
+  copy('自动（复制）', 'auto-copy'),
+  mediaCodec('MediaCodec', 'mediacodec'),
+  mediaCodecCopy('MediaCodec（复制）', 'mediacodec-copy'),
+  d3d11('D3D11', 'd3d11va'),
+  d3d11Copy('D3D11（复制）', 'd3d11va-copy');
+
+  const HardwareDecoder(this.label, this.mpvValue);
+  final String label;
+  final String mpvValue;
+}
 
 class PlaybackPreferences {
   const PlaybackPreferences({
@@ -8,35 +19,40 @@ class PlaybackPreferences {
     this.quality = 0,
     this.homeQuality = 0,
     this.autoAdvance = true,
-    this.danmaku = true,
     this.preload = true,
-    this.enhancement = const VideoEnhancementPreferences(),
+    this.hardwareDecoding = true,
+    this.hardwareDecoder = HardwareDecoder.automatic,
+    this.lowMemory = false,
   });
 
   final double speed;
   final int quality;
   final int homeQuality;
   final bool autoAdvance;
-  final bool danmaku;
   final bool preload;
-  final VideoEnhancementPreferences enhancement;
+  final bool hardwareDecoding;
+  final HardwareDecoder hardwareDecoder;
+  final bool lowMemory;
+  int get bufferBytes => (lowMemory ? 2 : 32) * 1024 * 1024;
 
   PlaybackPreferences copyWith({
     double? speed,
     int? quality,
     int? homeQuality,
     bool? autoAdvance,
-    bool? danmaku,
     bool? preload,
-    VideoEnhancementPreferences? enhancement,
+    bool? hardwareDecoding,
+    HardwareDecoder? hardwareDecoder,
+    bool? lowMemory,
   }) => PlaybackPreferences(
     speed: speed ?? this.speed,
     quality: quality ?? this.quality,
     homeQuality: homeQuality ?? this.homeQuality,
     autoAdvance: autoAdvance ?? this.autoAdvance,
-    danmaku: danmaku ?? this.danmaku,
     preload: preload ?? this.preload,
-    enhancement: enhancement ?? this.enhancement,
+    hardwareDecoding: hardwareDecoding ?? this.hardwareDecoding,
+    hardwareDecoder: hardwareDecoder ?? this.hardwareDecoder,
+    lowMemory: lowMemory ?? this.lowMemory,
   );
 
   Map<String, dynamic> toJson() => {
@@ -44,9 +60,10 @@ class PlaybackPreferences {
     'quality': quality,
     'homeQuality': homeQuality,
     'autoAdvance': autoAdvance,
-    'danmaku': danmaku,
     'preload': preload,
-    'enhancement': enhancement.toJson(),
+    'hardwareDecoding': hardwareDecoding,
+    'hardwareDecoder': hardwareDecoder.name,
+    'lowMemory': lowMemory,
   };
 
   factory PlaybackPreferences.fromJson(Map<String, dynamic> value) {
@@ -54,7 +71,6 @@ class PlaybackPreferences {
     final quality = value['quality'] as int? ?? 0;
     final homeQuality = value['homeQuality'] as int? ?? 0;
     final autoAdvance = value['autoAdvance'] as bool? ?? true;
-    final danmaku = value['danmaku'] as bool? ?? true;
     final preload = value['preload'] as bool? ?? true;
     if (!playbackSpeeds.contains(speed) ||
         quality < 0 ||
@@ -68,9 +84,14 @@ class PlaybackPreferences {
       quality: quality,
       homeQuality: homeQuality,
       autoAdvance: autoAdvance,
-      danmaku: danmaku,
       preload: preload,
-      enhancement: VideoEnhancementPreferences.fromJson(value['enhancement']),
+      hardwareDecoding: value['hardwareDecoding'] != false,
+      hardwareDecoder:
+          HardwareDecoder.values
+              .where((item) => item.name == value['hardwareDecoder'])
+              .firstOrNull ??
+          HardwareDecoder.automatic,
+      lowMemory: value['lowMemory'] == true,
     );
   }
 }

@@ -5,8 +5,6 @@ import 'package:flutter/material.dart';
 import 'models.dart';
 import 'episode_browser.dart';
 import 'playback_preferences.dart';
-import 'video_enhancement.dart';
-import 'video_enhancement_settings.dart';
 
 enum PlayerMenuSection { episodes, speed, quality, settings }
 
@@ -25,12 +23,7 @@ class PlayerMenu extends StatefulWidget {
     required this.onEpisode,
     required this.onPreferences,
     required this.onFavorite,
-    this.showDanmaku = false,
-    this.danmakuStatus = '',
-    this.onRetryDanmaku,
     this.preloadStatus = '',
-    this.enhancement,
-    this.onCompareEnhancement,
   });
 
   final PlayerMenuSection section;
@@ -42,12 +35,7 @@ class PlayerMenu extends StatefulWidget {
   final bool local;
   final bool favorite;
   final bool mobile;
-  final bool showDanmaku;
-  final String danmakuStatus;
-  final VoidCallback? onRetryDanmaku;
   final String preloadStatus;
-  final VideoEnhancementController? enhancement;
-  final VoidCallback? onCompareEnhancement;
   final ValueChanged<int> onEpisode;
   final Future<void> Function(PlaybackPreferences) onPreferences;
   final Future<void> Function() onFavorite;
@@ -225,42 +213,6 @@ class _PlayerMenuState extends State<PlayerMenu> {
               ),
             ),
           const SizedBox(height: 20),
-        ],
-        if ((all || widget.section == PlayerMenuSection.quality) &&
-            widget.enhancement != null)
-          VideoEnhancementSettings(
-            controller: widget.enhancement!,
-            busy: _busy,
-            onChanged: (enhancement) => _run(
-              () => widget.onPreferences(
-                preferences.copyWith(enhancement: enhancement),
-              ),
-            ),
-            onCompare: widget.onCompareEnhancement ?? () {},
-          ),
-        if (all && widget.showDanmaku) ...[
-          SwitchListTile.adaptive(
-            key: const ValueKey('player-danmaku-enabled'),
-            contentPadding: EdgeInsets.zero,
-            title: const Text('弹幕'),
-            subtitle: Text(widget.danmakuStatus),
-            value: preferences.danmaku,
-            onChanged: _busy
-                ? null
-                : (value) => _run(
-                    () => widget.onPreferences(
-                      preferences.copyWith(danmaku: value),
-                    ),
-                  ),
-          ),
-          if (widget.onRetryDanmaku != null)
-            TextButton.icon(
-              key: const ValueKey('player-danmaku-retry'),
-              onPressed: _busy ? null : widget.onRetryDanmaku,
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('重试弹幕'),
-            ),
-          const SizedBox(height: 8),
         ],
         if (all) ...[
           SwitchListTile.adaptive(

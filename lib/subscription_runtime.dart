@@ -37,9 +37,11 @@ class SubscriptionRuntime {
   final _clients = <String, Set<HttpClient>>{};
   final _generation = <String,int>{};
   final _active = <String,String>{};
+  final _activeActions = <String,String>{};
   final _tails = <String,Future<void>>{};
   int _serial = 0;
   String _identity(String source) => '${store()?.profile.id}:$source';
+  String _cacheKey(String source,String category) => '${_identity(source)}:${SourceSubscriptions.instance.package(source)?.digest}:$category';
   void _authorize(String source, int? epoch, String digest) {
     final access = store();
     if (access == null || access.locked || access.profileEpoch != epoch || !access.allowsSource(source) || SourceSubscriptions.instance.package(source)?.digest != digest) throw const FormatException('站源已关闭、更新或用户已切换');
@@ -69,6 +71,7 @@ class SubscriptionRuntime {
     final generation = _generation[identity] ?? 0;
     final id = '${DateTime.now().microsecondsSinceEpoch}:${++_serial}';
     _active[id] = identity;
+    _activeActions[id] = action;
     final stateKey = '$identity:${package.digest}:$action:${payload['category'] ?? ''}';
     var request = <String,dynamic>{'command': 'start','id': id,'program': package.program, 'action':action, 'payload': {...payload,'source':source}, 'state':_states[stateKey] ?? <String,dynamic>{}};
     final deadline = DateTime.now().add(const Duration(seconds: 30));
@@ -104,6 +107,7 @@ class SubscriptionRuntime {
       throw const FormatException('站源单次请求次数过多');
     } finally {
       _active.remove(id);
+      _activeActions.remove(id);
       for (final client in _clients.remove(id) ?? <HttpClient>{}) { client.close(force:true); }
       final body = jsonEncode({'command':'cancel','id':id});
       try { await Isolate.run(() => _sourceStep(body)); } catch (_) {}
@@ -152,9 +156,9 @@ class SubscriptionRuntime {
       return {'status':response.statusCode,'text':text};
     } finally { client.close(force:true); _clients[id]?.remove(client); }
   }
-  CatalogPage cached(String source, String category) => _pages['${_identity(source)}:$category'] ?? CatalogPage([]);
+  CatalogPage cached(String source, String category) => _pages[_cacheKey(source,category)] ?? CatalogPage([]);
   Future<CatalogPage> catalog(String source, {int page=1,String category='',String query='',bool force=false}) async {
-    final key = '${_identity(source)}:$category';
+    final key = _cacheKey(source,category);
     final result = await execute(source,'catalog',{'page':page,'category':category,'query':query,'force':force});
     final parsed = CatalogPage.fromJson({...result,'page':page});
     if (query.isEmpty) {
@@ -193,12 +197,12 @@ class SubscriptionRuntime {
     }());
     return status(source);
   }
-  void cancel(String? source) {
+  void cancel(String? source,{Set<String>? actions}) {
     final identities = source == null ? {..._active.values,..._tails.keys,..._jobs.keys} : {_identity(source)};
     for (final identity in identities) {
-      _generation[identity]=(_generation[identity] ?? 0)+1;
-      final job=_jobs[identity]; if(job!=null){job['running']=false;job['stage']='已停止';}
-      for(final entry in _active.entries.where((row)=>row.value==identity).toList()) {
+      if(actions==null) _generation[identity]=(_generation[identity] ?? 0)+1;
+      final job=_jobs[identity]; if(job!=null && actions==null){job['running']=false;job['stage']='已停止';}
+      for(final entry in _active.entries.where((row)=>row.value==identity && (actions == null || actions.contains(_activeActions[row.key]))).toList()) {
         for(final client in _clients.remove(entry.key)??<HttpClient>{}){client.close(force:true);}
         final body=jsonEncode({'command':'cancel','id':entry.key});unawaited(Isolate.run(()=>_sourceStep(body)).catchError((Object _)=>''));
       }

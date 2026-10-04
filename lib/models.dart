@@ -3,31 +3,48 @@ import 'dart:convert';
 import 'app_build.dart';
 
 class SourceSite {
-  const SourceSite(this.id, this.name, this.description, {this.capabilities, this.family = "", this.kind = "drama"});
+  const SourceSite(
+    this.id,
+    this.name,
+    this.description, {
+    this.capabilities,
+    this.family = "",
+    this.kind = "drama",
+  });
   final Set<String>? capabilities;
   final String family, kind;
   final String id;
   final String name;
   final String description;
-  bool get onlineSearch => capabilities?.contains('search') ?? (id == 'hongguo' || pagedSearch);
-  bool get supportsDownloads => capabilities?.contains('download') ?? (id != 'bilibili');
-  bool get pagedSearch => capabilities?.contains('search') ?? (
-      id == 'huangju' ||
-      id == 'dsd' ||
-      id == 'sorani' ||
-      id == 'guipian' ||
-      id == 'hanxiaoquan' ||
-      id == 'crj91' ||
-      id == 'stripchat' ||
-      id == 'bilibili');
-  bool get searchSuggestions => capabilities?.contains('suggestions') ?? (id == 'hongguo');
-  bool get supportsCatalogTools => capabilities?.contains('catalogTools') ?? (id == 'hongguo');
+  bool get onlineSearch =>
+      capabilities?.contains('search') ?? (id == 'hongguo' || pagedSearch);
+  bool get supportsDownloads =>
+      capabilities?.contains('download') ?? (id != 'bilibili');
+  bool get pagedSearch =>
+      capabilities?.contains('search') ??
+      (id == 'huangju' ||
+          id == 'dsd' ||
+          id == 'sorani' ||
+          id == 'guipian' ||
+          id == 'hanxiaoquan' ||
+          id == 'crj91' ||
+          id == 'stripchat' ||
+          id == 'bilibili');
+  bool get searchSuggestions =>
+      capabilities?.contains('suggestions') ?? (id == 'hongguo');
+  bool get supportsCatalogTools =>
+      capabilities?.contains('catalogTools') ?? (id == 'hongguo');
   bool get supportsCreator =>
-      capabilities?.contains('creator') ?? {'douyin', 'douyin-live', 'bilibili'}.contains(id);
-  String get groupId => family.isNotEmpty && family != 'douyin' ? family : switch (id) {
-    'huangguo-video' || 'huangguoai' || 'cloudfront' => 'huangguo',
-    _ => id,
-  };
+      capabilities?.contains('creator') ??
+      {'douyin', 'douyin-live', 'bilibili'}.contains(id);
+  bool get supportsDanmaku =>
+      id == 'bilibili' && capabilities?.contains('danmaku') == true;
+  String get groupId => family.isNotEmpty && family != 'douyin'
+      ? family
+      : switch (id) {
+          'huangguo-video' || 'huangguoai' || 'cloudfront' => 'huangguo',
+          _ => id,
+        };
   String get groupName => groupId == 'huangguo' ? '黄果' : name;
   String get entryName => switch (id) {
     'huangguo-video' => '视频',
@@ -68,7 +85,11 @@ class SourceSite {
     '韩剧 · 韩国电影 · 综艺动漫',
   );
   static const crj91 = SourceSite('crj91', '91短剧', '成人短剧 · 漫剧 · 真人剧');
-  static const stripchat = SourceSite('stripchat', '直播', '成人直播 · 主播房间');
+  static const stripchat = SourceSite(
+    'stripchat',
+    'Stripchat 成人直播',
+    '成人直播 · 主播房间',
+  );
 
   static const featuredValues = [hongguo, hanxiaoquan, guipian, sorani];
 
@@ -96,11 +117,20 @@ class SourceSite {
   static const allValues = knownValues;
   static List<SourceSite> _installed = const [];
   static List<SourceSite> get values => _installed;
-  static void registerInstalled(List<SourceSite> sites) { _installed = List.unmodifiable(sites); }
+  static void registerInstalled(List<SourceSite> sites) {
+    _installed = List.unmodifiable(sites);
+  }
+
   static bool isAvailable(String id) => values.any((site) => site.id == id);
-  static bool isKnown(String id) => values.any((site) => site.id == id) || allValues.any((site) => site.id == id);
-  static SourceSite byId(String id) =>
-      values.firstWhere((site) => site.id == id, orElse: () => allValues.firstWhere((site) => site.id == id, orElse: () => SourceSite(id, id, '未安装站源')));
+  static bool isKnown(String id) =>
+      RegExp(r'^[a-z][a-z0-9-]{0,63}$').hasMatch(id);
+  static SourceSite byId(String id) => values.firstWhere(
+    (site) => site.id == id,
+    orElse: () => allValues.firstWhere(
+      (site) => site.id == id,
+      orElse: () => SourceSite(id, id, '未安装站源'),
+    ),
+  );
 }
 
 class SourceGroup {

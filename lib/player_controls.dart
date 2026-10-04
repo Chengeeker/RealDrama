@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'app_haptics.dart';
 import 'playback_engine.dart';
 import 'player_interactions.dart';
 import 'widgets.dart';
@@ -31,6 +32,8 @@ class PlayerControls extends StatefulWidget {
     this.immersiveFeed = false,
     this.hideFeedOverlays = false,
     this.live = false,
+    this.danmakuOn = false,
+    this.onDanmaku,
     this.onFeedDoubleTap,
     this.onSeek,
   });
@@ -57,6 +60,8 @@ class PlayerControls extends StatefulWidget {
   final bool immersiveFeed;
   final bool hideFeedOverlays;
   final bool live;
+  final bool danmakuOn;
+  final VoidCallback? onDanmaku;
   final VoidCallback? onFeedDoubleTap;
   final Future<void> Function(Duration)? onSeek;
 
@@ -198,6 +203,7 @@ class _PlayerControlsState extends State<PlayerControls> {
     widget.onFocusSurface();
     if (widget.immersiveFeed) {
       if (!widget.enabled) return;
+      AppHaptics.light();
       widget.onTogglePlayback();
       _showPlaybackFeedback();
       _show();
@@ -271,6 +277,7 @@ class _PlayerControlsState extends State<PlayerControls> {
                   event,
                   swipeEnabled: widget.swipeEnabled,
                   height: constraints.maxHeight,
+                  width: constraints.maxWidth,
                 );
               },
               onPointerMove: widget.interactions.pointerMove,
@@ -684,12 +691,12 @@ class _PlayerControlsState extends State<PlayerControls> {
     final targetWidth = visualWidth < 40 ? 48.0 : visualWidth + 8;
     return Tooltip(
       message: tooltip,
-      child: Semantics(
-        button: true,
-        enabled: enabled,
+      child: AppHaptics.tapTarget(
+        onTap: onPressed,
         label: tooltip,
         child: GestureDetector(
           key: key,
+          excludeFromSemantics: true,
           behavior: HitTestBehavior.opaque,
           onTap: onPressed,
           child: SizedBox(
@@ -755,6 +762,14 @@ class _PlayerControlsState extends State<PlayerControls> {
     required double volume,
   }) {
     final tools = [
+      if (widget.onDanmaku != null && !widget.immersiveFeed)
+        _toolText(
+          key: const ValueKey('player-danmaku'),
+          tooltip: widget.danmakuOn ? '关闭弹幕' : '开启弹幕',
+          label: widget.danmakuOn ? '弹' : '弹×',
+          onPressed: widget.onDanmaku,
+          width: 42,
+        ),
       if (showSpeedQuality) ...[
         _toolText(
           key: const ValueKey('player-speed'),
@@ -806,6 +821,14 @@ class _PlayerControlsState extends State<PlayerControls> {
 
   Widget _mobileControlRow({required bool fullscreen}) {
     final tools = [
+      if (widget.onDanmaku != null && !widget.immersiveFeed)
+        _toolText(
+          key: const ValueKey('player-danmaku'),
+          tooltip: widget.danmakuOn ? '关闭弹幕' : '开启弹幕',
+          label: widget.danmakuOn ? '弹' : '弹×',
+          onPressed: widget.onDanmaku,
+          width: 42,
+        ),
       _toolText(
         key: const ValueKey('player-speed'),
         tooltip: '倍速',

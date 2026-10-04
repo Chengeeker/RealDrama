@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.provider.Settings
 import android.net.ConnectivityManager
 import android.net.Uri
 import android.view.InputDevice
@@ -17,6 +18,7 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var deviceChannel: MethodChannel? = null
     private var televisionMode = false
+    private var originalScreenBrightness: Float? = null
 
     @Suppress("DEPRECATION")
     private fun isTelevisionDevice(): Boolean {
@@ -108,6 +110,40 @@ class MainActivity : FlutterActivity() {
                                 }
                                 result.success(null)
                             }
+                        }
+                        "adjustScreenBrightness" -> {
+                            val delta = call.argument<Double>("delta")?.toFloat()
+                            if (delta == null) {
+                                result.error("invalid_brightness", "缺少亮度变化值", null)
+                            } else {
+                                if (originalScreenBrightness == null) {
+                                    originalScreenBrightness = window.attributes.screenBrightness
+                                }
+                                val attributes = window.attributes
+                                val current = if (attributes.screenBrightness >= 0f) {
+                                    attributes.screenBrightness
+                                } else {
+                                    runCatching {
+                                        Settings.System.getInt(
+                                            contentResolver,
+                                            Settings.System.SCREEN_BRIGHTNESS
+                                        ) / 255f
+                                    }.getOrDefault(0.5f)
+                                }
+                                val next = (current + delta).coerceIn(0.02f, 1f)
+                                attributes.screenBrightness = next
+                                window.attributes = attributes
+                                result.success(next.toDouble())
+                            }
+                        }
+                        "restoreScreenBrightness" -> {
+                            originalScreenBrightness?.let { brightness ->
+                                val attributes = window.attributes
+                                attributes.screenBrightness = brightness
+                                window.attributes = attributes
+                            }
+                            originalScreenBrightness = null
+                            result.success(null)
                         }
                         "systemProxy" -> {
                             val connection = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager

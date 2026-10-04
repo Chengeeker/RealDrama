@@ -650,7 +650,7 @@ func isBilibiliMediaURL(raw string) bool {
 		return false
 	}
 	host := strings.ToLower(parsed.Hostname())
-	for _, suffix := range []string{".bilivideo.com", ".bilivideo.cn", ".biliapi.net", ".hdslb.com"} {
+	for _, suffix := range []string{".bilivideo.com", ".bilivideo.cn", ".biliapi.net", ".hdslb.com", ".edge.mountaintoys.cn"} {
 		if strings.HasSuffix(host, suffix) {
 			return true
 		}

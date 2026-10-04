@@ -12,9 +12,14 @@ import 'local_store.dart';
 import 'models.dart';
 import 'personalization_screen.dart';
 import 'detail_screen.dart';
+import 'feed_recommendation_settings_screen.dart';
+import 'home_feed_preferences_screen.dart';
 import 'playback_launch_screen.dart';
 import 'resource_settings_screen.dart';
 import 'saved_library.dart';
+import 'sources_screen.dart';
+import 'source_subscriptions_screen.dart';
+import 'widgets.dart';
 import 'settings_subpages.dart';
 
 String storageSize(int bytes) {
@@ -188,21 +193,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ],
           ),
           SettingsSection(
-            title: '播放',
+            title: '站源管理',
+            children: [
+              ListTile(
+                key: const ValueKey('source-management-settings'),
+                leading: const Icon(Icons.dns_outlined),
+                title: const Text('站源与首页信息流'),
+                subtitle: const Text('站源订阅、当前站源、首页偏好、画质与猜你喜欢'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => SourceManagementSettingsScreen(
+                      repository: widget.repository,
+                      store: widget.store,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SettingsSection(
+            title: '播放设置',
             children: [
               ListTile(
                 key: const ValueKey('playback-settings'),
                 leading: const Icon(Icons.play_circle_outline_rounded),
                 title: const Text('播放设置'),
-                subtitle: const Text('站源管理、首页偏好与推荐设置'),
+                subtitle: const Text('硬件解码方式与内存占用'),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute<void>(
-                    builder: (_) => PlaybackSettingsScreen(
-                      repository: widget.repository,
-                      store: widget.store,
-                    ),
+                    builder: (_) => PlaybackSettingsScreen(store: widget.store),
                   ),
                 ),
               ),
@@ -308,6 +331,151 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ],
       ),
     ),
+  );
+}
+
+class SourceManagementSettingsScreen extends StatelessWidget {
+  const SourceManagementSettingsScreen({
+    super.key,
+    required this.repository,
+    required this.store,
+  });
+
+  final AppRepository repository;
+  final LocalStore store;
+
+  void _open(BuildContext context, Widget page) {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => page),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('站源管理')),
+    body: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+          children: [
+            if (repository.supportsSourceManagement)
+              SettingsSection(
+                title: '站源',
+                children: [
+                  ListTile(
+                    key: const ValueKey('source-subscriptions-settings'),
+                    leading: const Icon(Icons.extension_outlined),
+                    title: const Text('站源订阅'),
+                    subtitle: const Text('导入站源程序，检测和更新订阅'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () =>
+                        _open(context, SourceSubscriptionsScreen(store: store)),
+                  ),
+                  ListTile(
+                    key: const ValueKey('current-sources-settings'),
+                    leading: const Icon(Icons.dns_outlined),
+                    title: const Text('当前站源'),
+                    subtitle: const Text('管理当前启用的站源、目录更新与连接检测'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => _open(
+                      context,
+                      SourcesScreen(repository: repository, store: store),
+                    ),
+                  ),
+                ],
+              ),
+            SettingsSection(
+              title: '首页信息流',
+              children: [
+                ListTile(
+                  key: const ValueKey('home-feed-preferences'),
+                  leading: const Icon(Icons.tune_rounded),
+                  title: const Text('首页偏好'),
+                  subtitle: const Text('选择首页推送的站源和分类'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _open(
+                    context,
+                    HomeFeedPreferencesScreen(
+                      repository: repository,
+                      store: store,
+                    ),
+                  ),
+                ),
+                _HomePlaybackQualityTile(store: store),
+                ListTile(
+                  key: const ValueKey('playback-feed-recommendations'),
+                  leading: const Icon(Icons.auto_awesome_rounded),
+                  title: const Text('猜你喜欢'),
+                  subtitle: const Text('查看兴趣标签，调整首页推荐权重'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _open(
+                    context,
+                    FeedRecommendationSettingsScreen(store: store),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _HomePlaybackQualityTile extends StatelessWidget {
+  const _HomePlaybackQualityTile({required this.store});
+
+  final LocalStore store;
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: store,
+    builder: (context, _) {
+      final preferences = store.playbackPreferences;
+      final qualities =
+          <int>{
+            0,
+            2160,
+            1440,
+            1080,
+            720,
+            480,
+            360,
+            preferences.homeQuality,
+          }.toList()..sort((a, b) {
+            if (a == 0) return -1;
+            if (b == 0) return 1;
+            return b.compareTo(a);
+          });
+      return PlaybackSelectorTile<int>(
+        key: const ValueKey('home-playback-quality'),
+        icon: Icons.high_quality_rounded,
+        title: '首页画质',
+        subtitle:
+            '当前：${preferences.homeQuality == 0 ? '自动（最高）' : '${preferences.homeQuality}P'} · 仅用于首页信息流；以源站实际提供的画质为准',
+        value: preferences.homeQuality,
+        items: [
+          for (final quality in qualities)
+            DropdownMenuItem<int>(
+              value: quality,
+              child: Text(quality == 0 ? '自动最高' : '${quality}P'),
+            ),
+        ],
+        onChanged: (quality) {
+          if (quality == null || quality == preferences.homeQuality) return;
+          unawaited(
+            saveUserChange(
+              context,
+              () => store.setPlaybackPreferences(
+                preferences.copyWith(homeQuality: quality),
+              ),
+            ),
+          );
+        },
+      );
+    },
   );
 }
 

@@ -19,6 +19,7 @@ class PlayerInteractions extends ChangeNotifier {
     this.holdSpeed = 2,
     this.onHoldStart,
     this.onSeek,
+    this.onBrightness,
   }) {
     player.addListener(_playerChanged);
   }
@@ -32,15 +33,16 @@ class PlayerInteractions extends ChangeNotifier {
   final double holdSpeed;
   final VoidCallback? onHoldStart;
   final Future<void> Function(Duration)? onSeek;
+  final Future<double> Function(double delta)? onBrightness;
   Timer? _holdTimer;
   Timer? _hintTimer;
   Future<void> _rates = Future<void>.value();
   final Set<int> _pointers = {};
   int? _pointer;
   Offset? _origin;
-  Offset? _lastPosition;
-  Duration _started = Duration.zero;
-  double _swipeThreshold = 70;
+  double? _swipeVolume;
+  double _swipeHeight = 1, _swipeWidth = 1;
+  bool? _brightnessGesture;
   bool _swipeEnabled = false;
   bool _moved = false;
   bool _held = false;
@@ -139,7 +141,8 @@ class PlayerInteractions extends ChangeNotifier {
     }
     _pointer = null;
     _origin = null;
-    _lastPosition = null;
+    _swipeVolume = null;
+    _brightnessGesture = null;
     _endHold(silent: true);
     hint('');
   }
@@ -148,6 +151,7 @@ class PlayerInteractions extends ChangeNotifier {
     PointerDownEvent event, {
     required bool swipeEnabled,
     required double height,
+    required double width,
   }) {
     _pointers.add(event.pointer);
     if (_pointers.length != 1 || _cancelUntilRelease) {
@@ -156,20 +160,33 @@ class PlayerInteractions extends ChangeNotifier {
     }
     if (!available() || event.buttons != kPrimaryButton) return;
     _pointer = event.pointer;
-    _origin = _lastPosition = event.localPosition;
-    _started = event.timeStamp;
+    _origin = event.localPosition;
+    _swipeVolume = null;
     _swipeEnabled = swipeEnabled && event.kind == PointerDeviceKind.touch;
-    _swipeThreshold = math.max(56, math.min(100, height * .1));
+    _swipeHeight = math.max(1, height);
+    _swipeWidth = math.max(1, width);
+    _brightnessGesture = null;
     _moved = _held = false;
     _beginHold();
   }
 
   void pointerMove(PointerMoveEvent event) {
     if (_pointer != event.pointer || _origin == null) return;
-    _lastPosition = event.localPosition;
-    if ((event.localPosition - _origin!).distance > 12) {
+    final delta = event.localPosition - _origin!;
+    if (delta.distance > 12) {
       _moved = true;
       _endHold();
+      if (_swipeEnabled &&
+          delta.dy.abs() > delta.dx.abs() * 1.2 &&
+          delta.dy.abs() >= 12) {
+        _brightnessGesture ??= _origin!.dx < _swipeWidth / 2;
+        if (_brightnessGesture!) {
+          unawaited(_adjustBrightness(-event.delta.dy / _swipeHeight * 1.2));
+        } else {
+          _swipeVolume ??= player.state.volume;
+          changeVolume(-event.delta.dy / _swipeHeight * 100);
+        }
+      }
     }
   }
 
@@ -181,21 +198,12 @@ class PlayerInteractions extends ChangeNotifier {
       return;
     }
     if (_pointer != event.pointer || _origin == null) return;
-    final delta = (_lastPosition ?? event.localPosition) - _origin!;
-    final swipe =
-        _swipeEnabled &&
-        !_held &&
-        _moved &&
-        delta.dy.abs() >= _swipeThreshold &&
-        delta.dy.abs() > delta.dx.abs() * 1.5 &&
-        event.timeStamp - _started < const Duration(milliseconds: 1500);
     if (_moved || _held) {
       _ignoreTapUntil = DateTime.now().add(const Duration(milliseconds: 600));
     }
     _pointer = null;
     _origin = null;
     _endHold();
-    if (swipe && available()) hint(onEpisode(delta.dy < 0 ? 1 : -1));
   }
 
   void pointerCancel(PointerCancelEvent event) {
@@ -214,9 +222,24 @@ class PlayerInteractions extends ChangeNotifier {
     hint('${seconds > 0 ? '快进至' : '后退至'} ${formatPosition(target / 1000)}');
   }
 
+  Future<void> _adjustBrightness(double delta) async {
+    final adjust = onBrightness;
+    if (!available() || adjust == null) return;
+    try {
+      final brightness = await adjust(delta);
+      hint('亮度 ${(brightness * 100).round()}%');
+    } catch (_) {
+      hint('当前设备不支持手势调节亮度');
+    }
+  }
+
   void changeVolume(double delta) {
     if (!available()) return;
-    final volume = (player.state.volume + delta).clamp(0.0, 100.0);
+    final current = _brightnessGesture == false
+        ? _swipeVolume ?? player.state.volume
+        : player.state.volume;
+    final volume = (current + delta).clamp(0.0, 100.0);
+    if (_brightnessGesture == false) _swipeVolume = volume;
     unawaited(player.setVolume(volume));
     if (volume > 0) _unmutedVolume = volume;
     hint(volume == 0 ? '已静音' : '音量 ${volume.round()}%');

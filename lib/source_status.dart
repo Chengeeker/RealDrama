@@ -36,6 +36,7 @@ class SourceHealth {
   final List<SourceHealthStep> steps;
   String get label => switch (state) {
     'ok' => '连接检测通过',
+    'resolved' => '目录与解析正常 · 实播未检测',
     'catalogOnly' => '目录正常 · 播放未检测',
     'checking' => '检测中',
     'failed' => '检测未通过',

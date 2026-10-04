@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net/http"
@@ -43,10 +44,21 @@ func newHuangguoBrowserTransport(base http.RoundTripper, downloader *Downloader)
 	return transport
 }
 
+type subscriptionBrowserKey struct{}
+
+func newSubscriptionBrowserTransport(base http.RoundTripper, downloader *Downloader) *huangguoBrowserTransport {
+	transport := &huangguoBrowserTransport{base: base, router: downloader.proxyRouter, insecure: downloader.cfg.InsecureTLS, record: downloader.recordDiagnostic, clients: make(map[string]browserHTTPClient)}
+	transport.newClient = transport.createClient
+	return transport
+}
+func subscriptionBrowserContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, subscriptionBrowserKey{}, true)
+}
+
 func (transport *huangguoBrowserTransport) matches(request *http.Request) bool {
 	return (request.Method == http.MethodGet || request.Method == http.MethodHead) &&
 		(request.URL.Scheme == "http" || request.URL.Scheme == "https") &&
-		(strings.EqualFold(request.URL.Host, transport.host) || strings.EqualFold(request.URL.Hostname(), "huangguo.video"))
+		(request.Context().Value(subscriptionBrowserKey{}) == true || transport.host != "" && (strings.EqualFold(request.URL.Host, transport.host) || strings.EqualFold(request.URL.Hostname(), "huangguo.video")))
 }
 
 func (transport *huangguoBrowserTransport) createClient(proxy string) (browserHTTPClient, error) {

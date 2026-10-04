@@ -240,6 +240,17 @@ func (stream *nativeStreamServer) nativeRewriteDASH(token string, session *nativ
 			return "", errors.New("DASH 清单格式无效")
 		}
 		start, isStart := tokenValue.(xml.StartElement)
+		if isStart {
+			attributes := start.Attr[:0]
+			for _, attribute := range start.Attr {
+				if attribute.Name.Space == "" && attribute.Name.Local == "xmlns" && attribute.Value == start.Name.Space {
+					continue
+				}
+				attributes = append(attributes, attribute)
+			}
+			start.Attr = attributes
+			tokenValue = start
+		}
 		if !isStart || start.Name.Local != "BaseURL" {
 			if err := encoder.EncodeToken(tokenValue); err != nil {
 				return "", errors.New("DASH 清单处理失败")

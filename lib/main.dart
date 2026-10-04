@@ -32,6 +32,13 @@ Future<void> main(List<String> arguments) async {
       'dart_simple_live / Douyin request signer',
     ], await rootBundle.loadString('assets/licenses/douyin_LICENSE.txt'));
   });
+  LicenseRegistry.addLicense(() async* {
+    for (final name in ['goja', 'cascadia']) {
+      yield LicenseEntryWithLineBreaks([
+        name,
+      ], await rootBundle.loadString('assets/licenses/${name}_LICENSE.txt'));
+    }
+  });
   if (Platform.isAndroid) {
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(AppTheme.systemBars(Brightness.dark));
@@ -63,7 +70,13 @@ class _AppBootstrapState extends State<AppBootstrap>
   Object? error;
   late AppDevice device = widget.device;
 
-  void _sourcesChanged() { store?.refreshInstalledSources(); }
+  int _sourceRevision = -1;
+  void _sourcesChanged() {
+    final subscriptions = SourceSubscriptions.instance;
+    if (_sourceRevision == subscriptions.revision) return;
+    _sourceRevision = subscriptions.revision;
+    store?.refreshInstalledSources();
+  }
 
   @override
   void dispose() {

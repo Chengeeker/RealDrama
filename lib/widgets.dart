@@ -4,7 +4,6 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'app_haptics.dart';
 import 'app_layout.dart';
 import 'core_bridge.dart';
 import 'models.dart';
@@ -193,10 +192,12 @@ class DramaCover extends StatelessWidget {
     required this.drama,
     required this.repository,
     this.radius = 14,
+    this.allowRetry = true,
   });
   final Drama drama;
   final AppRepository repository;
   final double radius;
+  final bool allowRetry;
   static const imagesDisabled = bool.fromEnvironment('DISABLE_REMOTE_IMAGES');
 
   @override
@@ -230,6 +231,7 @@ class DramaCover extends StatelessWidget {
               drama: drama,
               repository: repository,
               placeholder: placeholder,
+              allowRetry: allowRetry,
             ),
           Positioned.fill(
             child: IgnorePointer(
@@ -292,10 +294,12 @@ class CachedCoverImage extends StatefulWidget {
     required this.drama,
     required this.repository,
     required this.placeholder,
+    this.allowRetry = true,
   });
   final Drama drama;
   final AppRepository repository;
   final Widget placeholder;
+  final bool allowRetry;
   @override
   State<CachedCoverImage> createState() => _CachedCoverImageState();
 }
@@ -307,6 +311,10 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   bool _retryOnFailure = false;
   bool _retryQueued = false;
   String? _failedPath;
+
+  Map<String, String>? get _imageHeaders => widget.drama.source == 'bilibili'
+      ? const {'Referer': 'https://www.bilibili.com/'}
+      : null;
 
   @override
   void initState() {
@@ -371,7 +379,9 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       await ResizeImage.resizeIfNeeded(
         440,
         null,
-        FileImage(File(path)),
+        Uri.tryParse(path)?.scheme == 'https'
+            ? NetworkImage(path, headers: _imageHeaders)
+            : FileImage(File(path)),
       ).evict();
     }
     if (mounted) {
@@ -390,6 +400,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
     _coverFailed = true;
     _failedPath = path;
     if (_retryOnFailure) _queueRetry();
+    if (!widget.allowRetry) return widget.placeholder;
     return Center(
       child: IconButton(
         tooltip: '重试海报',
@@ -411,6 +422,16 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
       }
       if (snapshot.hasError || !snapshot.hasData) {
         return _failed(null);
+      }
+      if (Uri.tryParse(snapshot.data!)?.scheme == 'https') {
+        return Image.network(
+          snapshot.data!,
+          headers: _imageHeaders,
+          fit: BoxFit.cover,
+          cacheWidth: 440,
+          excludeFromSemantics: true,
+          errorBuilder: (_, error, stack) => _failed(snapshot.data),
+        );
       }
       return Image.file(
         File(snapshot.data!),
@@ -471,7 +492,6 @@ class DramaTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final television = AppLayout.isTelevision(context);
-    var tapHapticPlayed = false;
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -480,7 +500,11 @@ class DramaTile extends StatelessWidget {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              DramaCover(drama: drama, repository: repository),
+              DramaCover(
+                drama: drama,
+                repository: repository,
+                allowRetry: false,
+              ),
               if (badge != null && badge!.isNotEmpty)
                 Positioned(
                   left: 6,
@@ -595,19 +619,7 @@ class DramaTile extends StatelessWidget {
       label: '${drama.title}，${drama.episodes}集',
       child: InkWell(
         enableFeedback: !hapticOnTap,
-        splashFactory: hapticOnTap ? InkRipple.splashFactory : null,
-        onTapDown: hapticOnTap
-            ? (_) {
-                AppHaptics.light(force: true);
-                tapHapticPlayed = true;
-              }
-            : null,
-        onTap: () {
-          if (hapticOnTap && !tapHapticPlayed) {
-            AppHaptics.light(force: true);
-          }
-          onTap();
-        },
+        onTap: onTap,
         onLongPress: onLongPress ?? onMore,
         onSecondaryTap: onMore,
         borderRadius: BorderRadius.circular(14),

@@ -1,11 +1,9 @@
 package core
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -136,41 +134,15 @@ func (d *Downloader) doMediaRequestWithClient(request *http.Request, client *htt
 		}
 		client = credentials.client(client)
 	}
-	keyRequest := d.isHuangguoVideoURL(request.URL) && strings.HasPrefix(request.URL.Path, "/api/hls_key/")
-	origin := request.URL.Scheme + "://" + request.URL.Host
-	for attempt := 0; attempt < 2; attempt++ {
-		if keyRequest {
-			token, err := d.huangguoPreviewToken(request.Context(), origin, request.Header.Get("Referer"))
-			if err != nil {
-				return nil, fmt.Errorf("获取播放凭证失败: %w", err)
-			}
-			request.Header.Set("X-Preview-Token", token)
-		}
-		response, err := client.Do(request)
-		if err != nil {
-			return nil, err
-		}
-		if keyRequest && attempt == 0 && (response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden) {
-			body, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
-			response.Body.Close()
-			if readErr == nil && catalogResponseBlockReason(response, body) == "" {
-				session := d.previewSession(origin)
-				session.mu.Lock()
-				if session.token == request.Header.Get("X-Preview-Token") {
-					session.token = ""
-				}
-				session.mu.Unlock()
-				continue
-			}
-			response.Body = io.NopCloser(bytes.NewReader(body))
-		}
-		if d.limiter != nil {
-			d.limiter.observe(request, response)
-		}
-		observeSourceResponse(request.Context(), response)
-		return response, nil
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
 	}
-	return nil, errors.New("播放凭证刷新失败")
+	if d.limiter != nil {
+		d.limiter.observe(request, response)
+	}
+	observeSourceResponse(request.Context(), response)
+	return response, nil
 }
 
 func (d *Downloader) fetchMediaPlaylist(ctx context.Context, address, referer string) (string, string, error) {

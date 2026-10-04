@@ -5,13 +5,37 @@ abstract final class AppHaptics {
   static bool enabled = true;
   static int _lastAt = 0;
 
-  static void light({bool force = false}) {
+  static void light() {
     if (!enabled) return;
     final now = DateTime.now().millisecondsSinceEpoch;
-    if (!force && now - _lastAt < 40) return;
+    if (now - _lastAt < 40) return;
     _lastAt = now;
     HapticFeedback.lightImpact();
   }
+
+  static Widget tapTarget({
+    required Widget child,
+    required VoidCallback? onTap,
+    String? label,
+    bool button = true,
+    bool focused = false,
+  }) => Semantics(
+    button: button,
+    enabled: onTap != null,
+    focused: focused,
+    label: label,
+    onTap: onTap == null
+        ? null
+        : () {
+            light();
+            onTap();
+          },
+    child: Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: onTap == null ? null : (_) => light(),
+      child: child,
+    ),
+  );
 }
 
 class AppHapticSplashFactory extends InteractiveInkFeatureFactory {

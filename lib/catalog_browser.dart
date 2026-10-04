@@ -205,12 +205,14 @@ class CatalogBrowser {
           _menus[source.id] = categories;
           _taxonomyGroupCache.remove(group.id);
         }
-      } catch (_) {
-        if (generation == _categoryGeneration) failures.add(source.groupName);
+      } catch (error) {
+        if (generation == _categoryGeneration) {
+          failures.add('${source.groupName}：$error');
+        }
       }
     });
     if (generation != _categoryGeneration) return null;
-    return failures.isEmpty ? null : '部分分类暂未加载，点击重试';
+    return failures.isEmpty ? null : '部分分类暂未加载，点击重试：${failures.join('；')}';
   }
 
   List<_CatalogChoice> _choices(SourceGroup group) {

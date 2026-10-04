@@ -106,13 +106,7 @@ func (limiter *requestLimiter) notifyLocked() {
 func (limiter *requestLimiter) acquire(ctx context.Context, request *http.Request) (func(), error) {
 	background, _ := ctx.Value(backgroundCatalogKey{}).(bool)
 	host := strings.ToLower(request.URL.Hostname())
-	source := providerSourceForURL(request.URL.String())
-	if source == "" {
-		source = host
-		if strings.HasSuffix(host, ".cloudfront.net") {
-			source = "cloudfront"
-		}
-	}
+	source := host
 	limiter.mu.Lock()
 	if !background {
 		limiter.foregroundWaiting++

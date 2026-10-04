@@ -18,7 +18,6 @@ class DouyinAuthorPanel extends StatelessWidget {
   final VoidCallback onFollow;
 
   void _more(BuildContext context) {
-    AppHaptics.light();
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -42,14 +41,17 @@ class DouyinAuthorPanel extends StatelessWidget {
     );
   }
 
-  Widget _authorLink(Widget child) => Listener(
-    onPointerDown: (_) => AppHaptics.light(),
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onOpen,
-      child: child,
-    ),
-  );
+  Widget _authorLink(Widget child, {required String label}) =>
+      AppHaptics.tapTarget(
+        onTap: onOpen,
+        label: label,
+        child: GestureDetector(
+          excludeFromSemantics: true,
+          behavior: HitTestBehavior.opaque,
+          onTap: onOpen,
+          child: child,
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
@@ -88,6 +90,7 @@ class DouyinAuthorPanel extends StatelessWidget {
                         ),
                 ),
               ),
+              label: '查看$name的个人主页',
             ),
             const SizedBox(width: 10),
             Flexible(
@@ -119,14 +122,12 @@ class DouyinAuthorPanel extends StatelessWidget {
                       ),
                   ],
                 ),
+                label: '查看$name的个人主页',
               ),
             ),
             const SizedBox(width: 8),
             FilledButton.tonal(
-              onPressed: () {
-                AppHaptics.light();
-                onFollow();
-              },
+              onPressed: onFollow,
               style: FilledButton.styleFrom(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 minimumSize: const Size(0, 34),
@@ -151,28 +152,35 @@ class DouyinAuthorPanel extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {
-                    AppHaptics.light();
-                    onOpen();
-                  },
-                  child: Text(
-                    drama.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: descriptionStyle,
+                AppHaptics.tapTarget(
+                  onTap: onOpen,
+                  label: '进入短视频详情',
+                  child: GestureDetector(
+                    excludeFromSemantics: true,
+                    behavior: HitTestBehavior.opaque,
+                    onTap: onOpen,
+                    child: Text(
+                      drama.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: descriptionStyle,
+                    ),
                   ),
                 ),
                 if (truncated)
-                  GestureDetector(
-                    behavior: HitTestBehavior.opaque,
+                  AppHaptics.tapTarget(
                     onTap: () => _more(context),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text(
-                        '更多',
-                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                    label: '显示完整文字内容',
+                    child: GestureDetector(
+                      excludeFromSemantics: true,
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => _more(context),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 6),
+                        child: Text(
+                          '更多',
+                          style: TextStyle(color: Colors.white70, fontSize: 13),
+                        ),
                       ),
                     ),
                   ),

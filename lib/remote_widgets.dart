@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
-
-import 'search_input.dart';
 import 'package:flutter/services.dart';
+
+import 'app_haptics.dart';
+import 'search_input.dart';
 
 class RemoteTarget extends StatefulWidget {
   const RemoteTarget({
@@ -37,6 +38,13 @@ class RemoteTarget extends StatefulWidget {
 class _RemoteTargetState extends State<RemoteTarget> {
   bool _focused = false;
 
+  void _activate() {
+    final callback = widget.onPressed;
+    if (callback == null) return;
+    AppHaptics.light();
+    callback();
+  }
+
   @override
   Widget build(BuildContext context) => FocusableActionDetector(
     focusNode: widget.focusNode,
@@ -45,7 +53,7 @@ class _RemoteTargetState extends State<RemoteTarget> {
     actions: {
       ActivateIntent: CallbackAction<ActivateIntent>(
         onInvoke: (_) {
-          widget.onPressed?.call();
+          _activate();
           return null;
         },
       ),
@@ -77,7 +85,7 @@ class _RemoteTargetState extends State<RemoteTarget> {
             : SystemMouseCursors.click,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: widget.onPressed,
+          onTap: _activate,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 120),
             padding: widget.padding,

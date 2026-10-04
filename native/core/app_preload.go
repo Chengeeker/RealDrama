@@ -3,6 +3,7 @@ package core
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,27 @@ import (
 type nativePreloadKey struct{}
 
 const nativePreloadLimit = 4 << 20
+
+func (engine *nativeEngine) subscriptionPrefetch(ctx context.Context, input nativeInput) (nativePlan, error) {
+	var plan nativePlan
+	if err := json.Unmarshal(input.Subscription, &plan); err != nil {
+		return plan, err
+	}
+	engine.mu.Lock()
+	choice, exists := engine.playbacks[plan.Session]
+	stream := engine.stream
+	engine.mu.Unlock()
+	if exists && stream != nil && choice.streamSession != "" {
+		warming, cancel := context.WithTimeout(context.WithValue(ctx, backgroundCatalogKey{}, true), 6*time.Second)
+		plan.PrefetchedBytes = stream.nativePrefetch(warming, choice.streamSession, plan.URL, input.Quality)
+		cancel()
+	}
+	if err := ctx.Err(); err != nil {
+		engine.nativeReleasePlayback(plan.Session)
+		return nativePlan{}, err
+	}
+	return plan, nil
+}
 
 func (engine *nativeEngine) nativePreload(ctx context.Context, input nativeInput) (nativePlan, error) {
 	ctx = context.WithValue(ctx, backgroundCatalogKey{}, true)

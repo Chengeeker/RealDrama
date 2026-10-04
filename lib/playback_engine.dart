@@ -40,8 +40,21 @@ abstract class PlaybackEngine extends ChangeNotifier {
   PlaybackSnapshot _snapshot = const PlaybackSnapshot();
   final StreamController<String> _errors = StreamController<String>.broadcast();
   bool _closed = false;
+  int _timelineRevision = 0;
+  Duration _timelinePosition = Duration.zero;
 
   PlaybackSnapshot get state => _snapshot;
+  int get timelineRevision => _timelineRevision;
+  Duration get timelinePosition => _timelinePosition;
+
+  @protected
+  void resetTimeline(Duration position) {
+    if (_closed) return;
+    _timelinePosition = position;
+    _timelineRevision++;
+    notifyListeners();
+  }
+
   Stream<String> get errors => _errors.stream;
   Player? get mediaKitPlayer => null;
   VideoController? get mediaKitVideo => null;
@@ -238,6 +251,7 @@ class MediaKitPlaybackEngine extends PlaybackEngine {
       ),
       play: play,
     );
+    resetTimeline(position);
   }
 
   @override
@@ -250,7 +264,10 @@ class MediaKitPlaybackEngine extends PlaybackEngine {
   Future<void> pause() => player.pause();
 
   @override
-  Future<void> seek(Duration position) => player.seek(position);
+  Future<void> seek(Duration position) async {
+    await player.seek(position);
+    resetTimeline(position);
+  }
 
   @override
   Future<void> setRate(double rate) => player.setRate(rate);

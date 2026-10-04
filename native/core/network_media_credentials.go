@@ -15,11 +15,16 @@ type providerMediaCredentials struct {
 	referer   string
 	userAgent string
 	expires   time.Time
+	headers   map[string]string
+	browser   bool
 }
 
 type providerMediaCredentialsKey struct{}
 
 func providerMediaContext(ctx context.Context, credentials *providerMediaCredentials) context.Context {
+	if credentials != nil && credentials.browser {
+		ctx = subscriptionBrowserContext(ctx)
+	}
 	return context.WithValue(ctx, providerMediaCredentialsKey{}, credentials)
 }
 
@@ -37,6 +42,9 @@ func providerMediaOrigin(address *url.URL) string {
 
 func (credentials *providerMediaCredentials) apply(request *http.Request) error {
 	request.Header.Del("Cookie")
+	for key := range credentials.headers {
+		request.Header.Del(key)
+	}
 	if credentials.userAgent != "" {
 		request.Header.Set("User-Agent", credentials.userAgent)
 	}
@@ -51,6 +59,9 @@ func (credentials *providerMediaCredentials) apply(request *http.Request) error 
 			return errors.New("播放凭证已过期，请重新解析播放")
 		}
 		request.Header.Set("Cookie", credentials.cookie)
+		for key, value := range credentials.headers {
+			request.Header.Set(key, value)
+		}
 	}
 	return nil
 }

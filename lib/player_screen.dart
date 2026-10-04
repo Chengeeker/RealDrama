@@ -1,3 +1,4 @@
+import 'video_danmaku.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -166,12 +167,30 @@ class _PlayerScreenState extends State<PlayerScreen>
       _openedIndex == _index && _playback.state.position.inMilliseconds > 0
       ? _playback.state.position.inMilliseconds / 1000
       : _resumePosition;
+  bool get _feedPageIsActive =>
+      (widget.feedActive?.value ?? true) &&
+      (widget.feedPageActive?.value ?? true);
+  bool? _lastFeedCanPop;
+  static const _deviceChannel = MethodChannel('duanju/device');
+
+  void _syncFeedBackScope() {
+    if (!widget.immersiveFeed) return;
+    final canPop = !_feedPageIsActive;
+    if (_lastFeedCanPop == canPop) return;
+    _lastFeedCanPop = canPop;
+    if (mounted) setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    VideoDanmaku.enabled.addListener(_danmakuChanged);
     _index = widget.initialIndex;
+    if (widget.detail.drama.source == 'bilibili') {
+      _aspectRatio = 16 / 9;
+    }
+    if (widget.immersiveFeed) _lastFeedCanPop = !_feedPageIsActive;
     _profileEpoch = widget.handoff?.profileEpoch ?? widget.store.profileEpoch;
     final preferences = widget.store.playbackPreferences;
     _speed = preferences.speed;
@@ -255,6 +274,11 @@ class _PlayerScreenState extends State<PlayerScreen>
       baseSpeed: () => _speed,
       onTogglePlayback: _togglePlayback,
       onSeek: _seekTo,
+      onBrightness: (delta) async =>
+          await _deviceChannel.invokeMethod<double>('adjustScreenBrightness', {
+            'delta': delta,
+          }) ??
+          .5,
       onFullscreen: _toggleFullscreen,
       onEpisode: (direction) {
         final next = _index + direction;
@@ -395,6 +419,7 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _feedVisibilityChanged() {
     if (!widget.immersiveFeed) return;
+    _syncFeedBackScope();
     final feedVisible =
         (widget.feedActive?.value ?? true) &&
         (widget.feedPageActive?.value ?? true) &&
@@ -600,6 +625,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       widget.feedPageActive?.addListener(_feedVisibilityChanged);
       _applyLifecycleVisibility();
     }
+    _lastFeedCanPop = widget.immersiveFeed ? !_feedPageIsActive : null;
     if (oldWidget.immersiveFeed != widget.immersiveFeed ||
         oldWidget.hideFeedOverlays != widget.hideFeedOverlays) {
       _scheduleSystemUi();
@@ -730,7 +756,6 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _togglePlayback() {
     if (_closed || _loading || _error != null) return;
-    if (widget.immersiveFeed) AppHaptics.light();
     _handoffOwned = false;
     widget.handoff?.fail('接收端已操作播放');
     _interactions.cancel();
@@ -1263,9 +1288,17 @@ class _PlayerScreenState extends State<PlayerScreen>
     }
   }
 
+  void _danmakuChanged() {
+    if (mounted && !_closed) setState(() {});
+  }
+
   @override
   void dispose() {
     _closed = true;
+    VideoDanmaku.enabled.removeListener(_danmakuChanged);
+    if (Platform.isAndroid) {
+      unawaited(_deviceChannel.invokeMethod<void>('restoreScreenBrightness'));
+    }
     LanController.current?.detachPlayback(_lanIdentity);
     widget.handoff?.fail('接收端已退出播放');
     widget.store.removeListener(_accessChanged);
@@ -1341,9 +1374,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     final title = widget.detail.drama.title;
     final fullscreen = _showFullscreen;
     return PopScope(
-      canPop: !widget.immersiveFeed && (_television || !fullscreen),
+      canPop: widget.immersiveFeed
+          ? !_feedPageIsActive
+          : _television || !fullscreen,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && widget.immersiveFeed) {
+        if (!didPop && widget.immersiveFeed && _feedPageIsActive) {
           widget.onFeedBack?.call();
         } else if (!didPop && fullscreen && !_television) {
           _toggleFullscreen();
@@ -1423,7 +1458,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                           );
                         }
                         if (_mobile) {
-                          final height = (constraints.maxWidth / _aspectRatio)
+                          final height = (constraints.maxWidth / (16 / 9))
                               .clamp(0.0, constraints.maxHeight * .56);
                           return Column(
                             children: [
@@ -1436,8 +1471,10 @@ class _PlayerScreenState extends State<PlayerScreen>
                             ],
                           );
                         }
-                        final height = (constraints.maxWidth / _aspectRatio)
-                            .clamp(0.0, constraints.maxHeight * .64);
+                        final height = (constraints.maxWidth / (16 / 9)).clamp(
+                          0.0,
+                          constraints.maxHeight * .64,
+                        );
                         return Column(
                           children: [
                             SizedBox(
@@ -1499,6 +1536,13 @@ class _PlayerScreenState extends State<PlayerScreen>
             onSeek: _seekTo,
             speed: _speed,
             qualityLabel: _qualityLabel,
+            danmakuOn: VideoDanmaku.enabled.value,
+            onDanmaku:
+                !widget.localOnly &&
+                    _plan?.local != true &&
+                    SourceSite.byId(widget.detail.drama.source).supportsDanmaku
+                ? () => VideoDanmaku.enabled.value = !VideoDanmaku.enabled.value
+                : null,
             onEpisodes: () => _openPanel(PlayerMenuSection.episodes),
             onSpeed: () => _openPanel(PlayerMenuSection.speed),
             onQuality: () => _openPanel(PlayerMenuSection.quality),
@@ -1507,7 +1551,31 @@ class _PlayerScreenState extends State<PlayerScreen>
                 ? () => _play(_index + 1)
                 : null,
           );
-    final layeredControls = Stack(fit: StackFit.expand, children: [controls]);
+    final layeredControls = Stack(
+      fit: StackFit.expand,
+      children: [
+        if (!_loading &&
+            _error == null &&
+            !widget.localOnly &&
+            _plan?.local != true &&
+            !widget.hideFeedOverlays &&
+            VideoDanmaku.enabled.value &&
+            SourceSite.byId(widget.detail.drama.source).supportsDanmaku)
+          VideoDanmaku(
+            key: ValueKey(
+              'danmaku:${widget.detail.drama.id}:${widget.detail.episodes[_index].id}',
+            ),
+            player: _playback,
+            repository: widget.repository,
+            drama: widget.detail.drama,
+            episode: widget.detail.episodes[_index],
+            active: widget.feedActive,
+            pageActive: widget.feedPageActive,
+            lowMemory: widget.store.playbackPreferences.lowMemory,
+          ),
+        controls,
+      ],
+    );
     return Theme(
       data: videoTheme,
       child: LayoutBuilder(
@@ -1689,10 +1757,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     final colors = Theme.of(context).colorScheme;
     return Expanded(
       child: InkWell(
-        onTap: () {
-          AppHaptics.light();
-          setState(() => _mobileTab = value);
-        },
+        onTap: () => setState(() => _mobileTab = value),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
           alignment: Alignment.center,

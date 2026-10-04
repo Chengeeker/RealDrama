@@ -96,6 +96,8 @@ type nativeDrama struct {
 }
 
 type nativeInput struct {
+	Subscription     json.RawMessage         `json:"subscription"`
+	SubscriptionHTTP json.RawMessage         `json:"subscriptionHttp"`
 	LAN              json.RawMessage         `json:"lan"`
 	ExpectedVersions map[string]string       `json:"expectedVersions"`
 	SystemProxy      nativeSystemProxy       `json:"systemProxy"`
@@ -269,7 +271,7 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 	transport.ResponseHeaderTimeout = 20 * time.Second
 	transport.Proxy = router.proxy
 	cdn := newCDNTransport(transport, newDNSResolver(transport))
-	d.client = &http.Client{Transport: newHuangguoBrowserTransport(cdn, d), Timeout: 45 * time.Second,
+	d.client = &http.Client{Transport: newSubscriptionBrowserTransport(cdn, d), Timeout: 45 * time.Second,
 		CheckRedirect: func(request *http.Request, via []*http.Request) error {
 			if len(via) >= 10 {
 				return errors.New("站源重定向次数过多")
@@ -284,10 +286,6 @@ func newNativeEngine(directory string) (*nativeEngine, error) {
 		}}
 	engine := &nativeEngine{downloader: d, directory: directory, catalogs: map[string][]nativeDrama{}, catalogStates: map[string]nativeCatalogState{}}
 	engine.loadResourceSettings()
-	d.loadRankingCache()
-	engine.loadCatalogCache()
-	engine.loadSourceRecords()
-	engine.covers = newNativeCoverCache(directory, d)
 	engine.downloads = newNativeDownloads(engine)
 	return engine, nil
 }
@@ -359,7 +357,7 @@ func nativeDispatch(input nativeInput) (any, error) {
 			nativeState.engine = engine
 		}
 		nativeState.Unlock()
-		return map[string]any{"version": "0.2.17", "standalone": true, "allSources": buildAllSources == "true"}, nil
+		return map[string]any{"version": "0.3.0", "standalone": true, "sourceRuntime": 1}, nil
 	}
 	engine := nativeState.engine
 	nativeState.Unlock()
@@ -374,17 +372,7 @@ func nativeDispatch(input nativeInput) (any, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), duration)
 	defer cancel()
-	requestSource := canonicalProviderSource(input.Source)
-	if requestSource == "" {
-		requestSource = sourceFromDramaID(input.Drama.ID)
-	}
-	if requestSource == sourceBilibili {
-		ctx = context.WithValue(ctx, bilibiliCookieContextKey{}, input.Cookie)
-		if input.Action == "resolve" || input.Action == "preload" || input.Action == "prepareHandoff" {
-			ctx = context.WithValue(ctx, bilibiliQualityContextKey{}, input.Quality)
-		}
-	}
-	if input.Action == "preload" || input.Action == "prepareHandoff" || input.Session != "" && (input.Action == "catalog" || input.Action == "categories" || input.Action == "suggestions" || input.Action == "recommendations" || input.Action == "metadata" || input.Action == "bilibiliComments") {
+	if input.Action == "subscriptionHttp" || input.Action == "subscriptionPrefetch" || input.Action == "preload" || input.Action == "prepareHandoff" || input.Session != "" && (input.Action == "catalog" || input.Action == "categories" || input.Action == "suggestions" || input.Action == "recommendations" || input.Action == "metadata" || input.Action == "bilibiliComments") {
 		work, finish, err := engine.beginRead(ctx, input)
 		if err != nil {
 			return nil, err
@@ -393,6 +381,12 @@ func nativeDispatch(input nativeInput) (any, error) {
 		ctx = work
 	}
 	switch input.Action {
+	case "subscriptionPlan":
+		return engine.subscriptionPlan(ctx, input.Subscription)
+	case "subscriptionPrefetch":
+		return engine.subscriptionPrefetch(ctx, input)
+	case "subscriptionHttp":
+		return engine.subscriptionHTTP(ctx, input.SubscriptionHTTP)
 	case "lan":
 		return engine.nativeLAN(ctx, input.Command, input.LAN)
 	case "updateSystemProxy":
@@ -403,30 +397,9 @@ func nativeDispatch(input nativeInput) (any, error) {
 		return engine.saveResourceSettings(input.Settings)
 	case "controlDownloadBatch":
 		return engine.downloads.controlBatchExpected(ctx, input.JobIDs, input.Command, input.ExpectedVersions)
-	case "preload":
-		return engine.nativePreload(ctx, input)
-	case "prepareHandoff":
-		return engine.nativeResolve(ctx, input)
 	case "cancelRead":
 		engine.cancelRead(input)
 		return true, nil
-	case "recommendations":
-		return engine.nativeRecommendations(ctx, input)
-	case "cachedRecommendations":
-		return engine.cachedRecommendations(input.Category)
-	case "rankingBoards":
-		boards := []rankingBoard{}
-		for _, board := range rankingBoards {
-			if nativeSourceAvailable(board.Source) {
-				boards = append(boards, board)
-			}
-		}
-		return map[string]any{"items": boards}, nil
-	case "rankings":
-		return engine.nativeRanking(ctx, input)
-	case "suggestions":
-		items, err := engine.suggestions(ctx, input.Query)
-		return map[string]any{"items": items}, err
 	case "downloadDirectory":
 		engine.downloads.mu.Lock()
 		root := engine.downloads.root
@@ -450,49 +423,13 @@ func nativeDispatch(input nativeInput) (any, error) {
 	case "localPlayback":
 		plan, _, err := engine.downloads.localPlan(input.Drama.ID, input.Index)
 		return plan, err
-	case "catalog":
-		return engine.nativeCatalog(ctx, input)
-	case "bilibiliAccount":
-		return engine.downloader.bilibiliAccount(ctx)
-	case "bilibiliCreator":
-		return engine.downloader.bilibiliCreator(ctx, input.Drama, max(1, input.Page))
-	case "bilibiliComments":
-		return engine.downloader.bilibiliComments(ctx, input.Drama, max(1, input.Page))
-	case "cached":
-		if !validNativeCategory(canonicalProviderSource(input.Source), input.Category) {
-			return nil, errors.New("内容分类无效")
-		}
-		if canonicalProviderSource(input.Source) == sourceBilibili {
-			return nativeCatalogResult{Items: []nativeDrama{}, Page: 1, HasMore: true}, nil
-		}
-		return engine.nativeCached(nativeCatalogKey(input.Source, input.Category)), nil
-	case "categories":
-		items, err := engine.nativeCategories(ctx, input.Source, input.Force)
-		return map[string]any{"items": items}, err
-	case "sourceStatus":
-		return engine.sourceStatus(input.Source), nil
-	case "sourceJob":
-		return engine.startSourceTask(input.Source, input.Command, input.Drama, input.Cookie)
-	case "cancelSourceJob":
-		return engine.cancelSourceTask(input.Source), nil
-	case "cover":
-		return engine.loadCover(ctx, input.Drama, input.Force)
-	case "prepareCover":
-		return engine.prepareCover(ctx, input.Drama)
-	case "detail":
-		return engine.nativeDetail(ctx, input.Drama, input.Force)
-	case "metadata":
-		return engine.nativeMetadata(ctx, input.Drama)
-	case "resolve", "fallback":
+	case "fallback":
 		playback, finish, err := engine.nativeBeginPlayback(ctx, input.Sequence)
 		if err != nil {
 			return nil, err
 		}
 		defer finish()
-		if input.Action == "fallback" {
-			return engine.nativeNextPlayback(playback, input.Session)
-		}
-		return engine.nativeResolve(playback, input)
+		return engine.nativeNextPlayback(playback, input.Session)
 	case "cancelPlayback":
 		engine.nativeCancelPlayback(input.Sequence)
 		return true, nil

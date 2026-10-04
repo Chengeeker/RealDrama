@@ -11,14 +11,12 @@ import 'package:path_provider/path_provider.dart';
 import 'models.dart';
 import 'subscription_runtime.dart';
 import 'source_subscriptions.dart';
-import 'bilibili_source.dart';
 import 'douyin_source.dart';
+import 'bilibili_source.dart';
 import 'background_downloads.dart';
 import 'local_store.dart';
-import 'app_build.dart';
 import 'source_status.dart';
 import 'ranking_models.dart';
-import 'cover_decoder.dart';
 import 'catalog_updates.dart';
 import 'download_collections.dart';
 import 'resource_settings.dart';
@@ -207,6 +205,12 @@ abstract class AppRepository {
   Future<String> cover(Drama drama, {bool force = false});
   Future<DramaDetail> detail(Drama drama);
   Future<DramaDetail> refreshDetail(Drama drama) => detail(drama);
+  Future<Map<String, dynamic>> danmaku(
+    Drama drama,
+    Episode episode,
+    int positionMs,
+  ) async => throw AppFailure('此来源暂不支持弹幕');
+  void cancelDanmaku(String source) {}
   Future<PlaybackPlan> resolve(Drama drama, Episode episode, {int quality = 0});
   Future<PlaybackPlan> fallback(PlaybackPlan current);
   Future<void> cancelPlayback();
@@ -214,30 +218,138 @@ abstract class AppRepository {
 }
 
 class NativeRepository extends AppRepository {
-  static final _coverDecoder = CoverDecoder();
   NativeRepository({this.background = false});
   final bool background;
   late final _subscriptions = SubscriptionRuntime(() => access);
-  @override void resetDouyin() => _subscriptions.cancel(null);
-  @override Future<int> checkDouyin() async => intValue((await _subscriptions.execute('douyin','check',{},configure:true))['count']);
-  @override Future<int> checkDouyinLive() async => intValue((await _subscriptions.execute('douyin-live','check',{},configure:true))['count']);
-  @override Future<Map<String,dynamic>> bilibiliAccount() => _subscriptions.execute('bilibili','account',{},configure:true);
-  @override Future<DouyinCreatorPage> creatorVideos(Drama drama,{String cursor='0'}) async {
-    final data = await _subscriptions.execute(drama.source,'creator',{'drama':drama.toJson(),'cursor':cursor});
-    return DouyinCreatorPage(name:data['name'] as String? ?? drama.creatorName,avatar:data['avatar'] as String? ?? drama.creatorAvatar,items:CatalogPage.fromJson(data).items,cursor:'${data['cursor'] ?? '0'}',hasMore:data['hasMore']==true,userId:'${data['userId'] ?? drama.creatorId}',bio:data['bio'] as String? ?? '',likes:data['likes'] is num?intValue(data['likes']):null,following:data['following'] is num?intValue(data['following']):null,followers:data['followers'] is num?intValue(data['followers']):null);
+  @override
+  void resetDouyin() => _subscriptions.cancel(null);
+  @override
+  Future<int> checkDouyin() async => intValue(
+    (await _subscriptions.execute(
+      'douyin',
+      'check',
+      {},
+      configure: true,
+    ))['count'],
+  );
+  @override
+  Future<int> checkDouyinLive() async => intValue(
+    (await _subscriptions.execute(
+      'douyin-live',
+      'check',
+      {},
+      configure: true,
+    ))['count'],
+  );
+  @override
+  Future<DouyinCreatorPage> creatorVideos(
+    Drama drama, {
+    String cursor = '0',
+  }) async {
+    final data = await _subscriptions.execute(drama.source, 'creator', {
+      'drama': drama.toJson(),
+      'cursor': cursor,
+    });
+    return DouyinCreatorPage(
+      name: data['name'] as String? ?? drama.creatorName,
+      avatar: data['avatar'] as String? ?? drama.creatorAvatar,
+      items: CatalogPage.fromJson(data).items,
+      cursor: '${data['cursor'] ?? '0'}',
+      hasMore: data['hasMore'] == true,
+      userId: '${data['userId'] ?? drama.creatorId}',
+      bio: data['bio'] as String? ?? '',
+      likes: data['likes'] is num ? intValue(data['likes']) : null,
+      following: data['following'] is num ? intValue(data['following']) : null,
+      followers: data['followers'] is num ? intValue(data['followers']) : null,
+    );
   }
-  @override Future<DouyinCreatorPage> douyinCreatorVideos(Drama drama,{String cursor='0'}) => creatorVideos(drama,cursor:cursor);
-  @override Future<DouyinCommentPage> videoComments(Drama drama,{required String requestScope,String cursor='0'}) async {
-    final data=await _subscriptions.execute(drama.source,'comments',{'drama':drama.toJson(),'cursor':cursor});
-    return DouyinCommentPage(items:[for(final row in data['items'] as List? ?? const []) DouyinComment(id:'${row['id']}',author:'${row['author'] ?? ''}',avatar:'${row['avatar'] ?? ''}',text:'${row['text'] ?? ''}',likes:intValue(row['likes']))],cursor:'${data['cursor'] ?? '0'}',hasMore:data['hasMore']==true,total:intValue(data['total']));
+
+  @override
+  Future<DouyinCreatorPage> douyinCreatorVideos(
+    Drama drama, {
+    String cursor = '0',
+  }) => creatorVideos(drama, cursor: cursor);
+  @override
+  Future<Map<String, dynamic>> danmaku(
+    Drama drama,
+    Episode episode,
+    int positionMs,
+  ) {
+    if (SourceSubscriptions.instance
+            .package(drama.source)
+            ?.capabilities
+            .contains('danmaku') !=
+        true)
+      return Future.error(AppFailure('此来源暂不支持弹幕'));
+    return _subscriptions.execute(drama.source, 'danmaku', {
+      'drama': drama.toJson(),
+      'chapter': episode.raw,
+      'positionMs': positionMs,
+    });
   }
-  @override Future<DouyinCommentPage> douyinComments(Drama drama,{required String requestScope,String cursor='0'}) => videoComments(drama,requestScope:requestScope,cursor:cursor);
-  @override void cancelVideoComments(String requestScope) => _subscriptions.cancel(null,actions:{'comments'});
-  @override void cancelDouyinComments(String requestScope) => cancelVideoComments(requestScope);
-  @override Future<DouyinLiveRoom> douyinLiveRoom(Drama drama) async {
-    final data=await _subscriptions.execute(drama.source,'live',{'drama':drama.toJson()});
-    return DouyinLiveRoom(drama:data['drama'] is Map?Drama.fromJson(Map<String,dynamic>.from(data['drama'] as Map)):drama,plan:PlaybackPlan.fromJson(Map<String,dynamic>.from(data['plan'] as Map)));
+
+  @override
+  void cancelDanmaku(String source) =>
+      _subscriptions.cancel(source, actions: {'danmaku'});
+
+  @override
+  Future<DouyinCommentPage> videoComments(
+    Drama drama, {
+    required String requestScope,
+    String cursor = '0',
+  }) async {
+    final data = await _subscriptions.execute(drama.source, 'comments', {
+      'drama': drama.toJson(),
+      'cursor': cursor,
+    });
+    return DouyinCommentPage(
+      items: [
+        for (final row in data['items'] as List? ?? const [])
+          DouyinComment(
+            id: '${row['id']}',
+            author: '${row['author'] ?? ''}',
+            avatar: '${row['avatar'] ?? ''}',
+            text: '${row['text'] ?? ''}',
+            likes: intValue(row['likes']),
+          ),
+      ],
+      cursor: '${data['cursor'] ?? '0'}',
+      hasMore: data['hasMore'] == true,
+      total: intValue(data['total']),
+    );
   }
+
+  @override
+  Future<DouyinCommentPage> douyinComments(
+    Drama drama, {
+    required String requestScope,
+    String cursor = '0',
+  }) => videoComments(drama, requestScope: requestScope, cursor: cursor);
+  @override
+  void cancelVideoComments(String requestScope) =>
+      _subscriptions.cancel(null, actions: {'comments'});
+  @override
+  void cancelDouyinComments(String requestScope) =>
+      cancelVideoComments(requestScope);
+  @override
+  Future<DouyinLiveRoom> douyinLiveRoom(Drama drama) async {
+    final epoch = _playbackEpoch;
+    final data = await _subscriptions.execute(drama.source, 'live', {
+      'drama': drama.toJson(),
+    });
+    final plan = await _openSubscriptionPlan(
+      drama.source,
+      Map<String, dynamic>.from(data['plan'] as Map),
+      epoch,
+    );
+    return DouyinLiveRoom(
+      drama: data['drama'] is Map
+          ? Drama.fromJson(Map<String, dynamic>.from(data['drama'] as Map))
+          : drama,
+      plan: plan,
+    );
+  }
+
   LocalStore? access;
   final _readOwner = DateTime.now().microsecondsSinceEpoch.toString();
   int _readSequence = 0;
@@ -336,27 +448,88 @@ class NativeRepository extends AppRepository {
   @override
   Future<void> cancelPreload({String? requestKey}) async {
     if (requestKey == null) {
+      _preloadEpochs.clear();
       await _cancelReads('preload');
       return;
     }
-    final sequence = _activeReads[requestKey];
+    _preloadEpochs.remove(requestKey);
+    final scope = 'preload:$requestKey';
+    final sequence = _activeReads[scope];
     if (sequence == null) return;
     try {
       await _call({
         'action': 'cancelRead',
-        'session': '$_readOwner:$requestKey',
+        'session': '$_readOwner:$scope',
         'sequence': sequence,
       });
     } catch (_) {}
   }
 
-  @override Future<PlaybackPlan?> preload(Drama drama,Episode episode,{int quality=0,bool online=false,String? requestKey}) => resolve(drama,episode,quality:quality);
-  @override Future<void> cancelCatalog() async => _subscriptions.cancel(null,actions:{'catalog'});
-  @override Future<void> cancelCategories() async => _subscriptions.cancel(null,actions:{'categories'});
-  @override Future<void> cancelSuggestions() async => _subscriptions.cancel(null,actions:{'suggestions'});
-  @override Future<void> cancelRecommendations() async => _subscriptions.cancel(null,actions:{'recommendations'});
+  @override
+  Future<PlaybackPlan?> preload(
+    Drama drama,
+    Episode episode, {
+    int quality = 0,
+    bool online = false,
+    String? requestKey,
+  }) async {
+    final key = requestKey ?? '${drama.source}:${drama.id}:${episode.id}';
+    final epoch = ++_preloadSequence;
+    _preloadEpochs[key] = epoch;
+    PlaybackPlan? plan;
+    try {
+      plan = await resolve(drama, episode, quality: quality);
+      if (_preloadEpochs[key] != epoch) throw AppFailure('预加载已取消');
+      if (plan.local) return plan;
+      final data = await _read('preload:$key', {
+        'action': 'subscriptionPrefetch',
+        'quality': quality,
+        'subscription': {
+          'url': plan.url,
+          'headers': plan.headers,
+          'session': plan.session,
+          'quality': plan.quality,
+          'qualities': plan.qualities,
+          'decryptionKey': plan.decryptionKey,
+          'expiresAt': plan.expiresAt,
+          'routeIndex': plan.routeIndex,
+          'routeCount': plan.routeCount,
+        },
+      });
+      if (_preloadEpochs[key] != epoch) throw AppFailure('预加载已取消');
+      return PlaybackPlan.fromJson(data);
+    } catch (_) {
+      if (plan != null) await release(plan.session);
+      rethrow;
+    } finally {
+      if (_preloadEpochs[key] == epoch) _preloadEpochs.remove(key);
+    }
+  }
 
-  @override Future<CatalogPage> recommendations(String genre,{bool more=false,bool force=false}) => _subscriptions.catalog('hongguo',category:genre,page:more?_subscriptions.cached('hongguo',genre).page+1:1,force:force);
+  @override
+  Future<void> cancelCatalog() async =>
+      _subscriptions.cancel(null, actions: {'catalog'});
+  @override
+  Future<void> cancelCategories() async =>
+      _subscriptions.cancel(null, actions: {'categories'});
+  @override
+  Future<void> cancelSuggestions() async =>
+      _subscriptions.cancel(null, actions: {'suggestions'});
+  @override
+  Future<void> cancelRecommendations() async =>
+      _subscriptions.cancel(null, actions: {'recommendations'});
+
+  @override
+  Future<CatalogPage> recommendations(
+    String genre, {
+    bool more = false,
+    bool force = false,
+  }) => _subscriptions.catalog(
+    'hongguo',
+    category: genre,
+    page: more ? _subscriptions.cached('hongguo', genre).page + 1 : 1,
+    force: force,
+  );
 
   @override
   Future<Drama?> supplementMetadata(Drama drama) async {
@@ -417,13 +590,32 @@ class NativeRepository extends AppRepository {
     return status;
   }
 
-  @override Future<SourceStatus> sourceStatus(String source) async { _authorize(source); return _subscriptions.status(source); }
-  @override Future<SourceStatus> startSourceJob(String source,String operation,{Drama? drama}) async { _authorize(source);return _subscriptions.startJob(source,operation); }
-  @override Future<SourceStatus> cancelSourceJob(String source) async { _subscriptions.cancel(source); return _subscriptions.status(source); }
+  @override
+  Future<SourceStatus> sourceStatus(String source) async {
+    _authorize(source);
+    await _subscriptions.loadCached(source, '');
+    return _subscriptions.status(source);
+  }
+
+  @override
+  Future<SourceStatus> startSourceJob(
+    String source,
+    String operation, {
+    Drama? drama,
+  }) async {
+    _authorize(source);
+    return _subscriptions.startJob(source, operation);
+  }
+
+  @override
+  Future<SourceStatus> cancelSourceJob(String source) async {
+    _subscriptions.cancel(source);
+    return _subscriptions.status(source);
+  }
 
   void _authorize(String source, {bool download = false}) {
     if (!SourceSite.isAvailable(source)) {
-      throw AppFailure('当前版本不包含此站源');
+      throw AppFailure('请先导入此站源的订阅包');
     }
     if (access == null) return;
     if (access!.locked ||
@@ -487,18 +679,68 @@ class NativeRepository extends AppRepository {
     }))['count'],
   );
   int _playbackSequence = DateTime.now().microsecondsSinceEpoch;
+  int _playbackEpoch = 0;
+  int _preloadSequence = 0;
+  final _preloadEpochs = <String, int>{};
+  final _rankingSources = <String, String>{};
 
   Future<Map<String, dynamic>> _call(Map<String, dynamic> input) async {
-    final sourceAction=input['action'];
-    if({'rankingBoards'}.contains(sourceAction)) {
-      final packages=SourceSubscriptions.instance.installed.where((item)=>item.capabilities.contains('rankings'));
-      final rows=<dynamic>[];
-      for(final item in packages){if(access?.allowsSource(item.id)==true){rows.addAll((await _subscriptions.execute(item.id,'rankingBoards',{}))['items'] as List? ?? []);}}
-      return {'items':rows};
+    final sourceAction = input['action'];
+    if ({'rankingBoards'}.contains(sourceAction)) {
+      final packages = SourceSubscriptions.instance.sourcePackages.where(
+        (item) => item.capabilities.contains('rankings'),
+      );
+      final rows = <dynamic>[];
+      for (final item in packages) {
+        if (access?.allowsSource(item.id) == true) {
+          rows.addAll(
+            (await _subscriptions.execute(
+                      item.id,
+                      'rankingBoards',
+                      {},
+                    ))['items']
+                    as List? ??
+                [],
+          );
+        }
+      }
+      _rankingSources.clear();
+      for (final row in rows.whereType<Map>()) {
+        if (row['id'] is String && row['source'] is String)
+          _rankingSources[row['id'] as String] = row['source'] as String;
+      }
+      return {'items': rows};
     }
-    if({'metadata','rankings','recommendations','cachedRecommendations','suggestions','bilibiliAccount','bilibiliCreator','bilibiliComments'}.contains(sourceAction)) {
-      final source=input['source'] as String? ?? (input['drama'] as Map?)?['source'] as String? ?? 'hongguo';
-      return _subscriptions.execute(source,sourceAction as String,input);
+    if ({
+      'metadata',
+      'rankings',
+      'recommendations',
+      'cachedRecommendations',
+      'suggestions',
+      'bilibiliAccount',
+      'bilibiliCreator',
+      'bilibiliComments',
+    }.contains(sourceAction)) {
+      final source =
+          input['source'] as String? ??
+          (input['drama'] as Map?)?['source'] as String? ??
+          (sourceAction == 'rankings'
+              ? _rankingSources[input['board']] ??
+                    RankingBoard.sourceForID(input['board'] as String)
+              : 'hongguo');
+      final action =
+          const {
+            'bilibiliAccount': 'account',
+            'bilibiliCreator': 'creator',
+            'bilibiliComments': 'comments',
+          }[sourceAction] ??
+          sourceAction as String;
+      return _subscriptions.execute(
+        source,
+        action,
+        input,
+        configure: action == 'account',
+      );
     }
 
     try {
@@ -552,7 +794,6 @@ class NativeRepository extends AppRepository {
         'preload',
         'prepareHandoff',
         'enqueueDownloads',
-        'localPlayback',
         'bilibiliCreator',
         'bilibiliComments',
       }.contains(action)) {
@@ -564,6 +805,7 @@ class NativeRepository extends AppRepository {
       if (!unrestricted &&
           {
             'downloads',
+            'localPlayback',
             'controlDownloads',
             'controlDownloadBatch',
             'storage',
@@ -576,28 +818,12 @@ class NativeRepository extends AppRepository {
       if (action == 'resolve' && access != null && !access!.canDownload) {
         input['force'] = true;
       }
-      final source =
-          input['source'] as String? ??
-          ((input['drama'] as Map?)?['source'] as String? ?? '');
-      if (source == SourceSite.bilibili.id &&
-          {
-            'bilibiliAccount',
-            'bilibiliCreator',
-            'bilibiliComments',
-            'catalog',
-            'categories',
-            'sourceJob',
-            'detail',
-            'metadata',
-            'resolve',
-            'preload',
-            'prepareHandoff',
-          }.contains(action)) {
-        final profile = access?.profile.id;
-        input['cookie'] = profile == null
-            ? ''
-            : await BilibiliSource.readCookie(profile) ?? '';
-      }
+      if (action == 'localPlayback' &&
+          access != null &&
+          !access!.allowsStoredSource(
+            (input['drama'] as Map)['source'] as String,
+          ))
+        throw AppFailure('当前用户没有此操作权限');
       final body = jsonEncode(input);
       final response =
           await Isolate.run(
@@ -606,7 +832,7 @@ class NativeRepository extends AppRepository {
             Duration(
               seconds: action == 'moveDownloads'
                   ? 620
-                  : action == 'preload'
+                  : action == 'preload' || action == 'subscriptionPrefetch'
                   ? 20
                   : 70,
             ),
@@ -640,6 +866,7 @@ class NativeRepository extends AppRepository {
             'recommendations',
             'metadata',
             'preload',
+            'subscriptionPrefetch',
             'prepareHandoff',
             'bilibiliComments',
           }.contains(input['action'])) {
@@ -659,12 +886,13 @@ class NativeRepository extends AppRepository {
 
   @override
   Future<void> initialize() async {
+    await SourceSubscriptions.instance.open();
     final directory = await getApplicationSupportDirectory();
     final build = await _call({
       'action': 'initialize',
       'directory': directory.path,
     });
-    if (build['allSources'] != allSourcesEnabled) {
+    if (build['sourceRuntime'] != 1) {
       throw AppFailure('应用与原生核心的站源版本不一致，请使用完整安装包重新安装');
     }
     if (!background) await BackgroundDownloads.prepare();
@@ -675,14 +903,91 @@ class NativeRepository extends AppRepository {
     }
   }
 
-  @override Future<List<CatalogCategory>> categories(String source,{bool force=false}) => _subscriptions.categories(source);
-  @override Future<CatalogPage> catalog(String source,{int page=1,String query='',String category='',bool force=false}) => _subscriptions.catalog(source,page:page,query:query,category:category,force:force);
-  @override Future<CatalogPage> cached(String source,{String category=''}) async => _subscriptions.cached(source,category);
+  @override
+  Future<List<CatalogCategory>> categories(
+    String source, {
+    bool force = false,
+  }) => _subscriptions.categories(source, force: force);
+  @override
+  Future<CatalogPage> catalog(
+    String source, {
+    int page = 1,
+    String query = '',
+    String category = '',
+    bool force = false,
+  }) => _subscriptions.catalog(
+    source,
+    page: page,
+    query: query,
+    category: category,
+    force: force,
+  );
+  @override
+  Future<CatalogPage> cached(String source, {String category = ''}) =>
+      _subscriptions.loadCached(source, category);
 
-  @override Future<String> cover(Drama drama,{bool force=false}) async { _authorize(drama.source);if(drama.cover.isEmpty)throw AppFailure('海报暂不可用');return drama.cover; }
-  @override Future<DramaDetail> detail(Drama drama) async => DramaDetail.fromJson(await _subscriptions.execute(drama.source,'detail',{'drama':drama.toJson()}));
-  @override Future<DramaDetail> refreshDetail(Drama drama) async => DramaDetail.fromJson(await _subscriptions.execute(drama.source,'detail',{'drama':drama.toJson(),'force':true}));
-  @override Future<PlaybackPlan> resolve(Drama drama,Episode episode,{int quality=0}) async => PlaybackPlan.fromJson(await _subscriptions.execute(drama.source,'resolve',{'drama':drama.toJson(),'chapter':episode.raw,'index':episode.number,'quality':quality}));
+  @override
+  Future<String> cover(Drama drama, {bool force = false}) async {
+    _authorize(drama.source);
+    if (drama.cover.isEmpty) throw AppFailure('海报暂不可用');
+    return drama.source == 'bilibili'
+        ? BilibiliSource.imageURL(drama.cover)
+        : drama.cover;
+  }
+
+  @override
+  Future<DramaDetail> detail(Drama drama) async => DramaDetail.fromJson(
+    await _subscriptions.execute(drama.source, 'detail', {
+      'drama': drama.toJson(),
+    }),
+  );
+  @override
+  Future<DramaDetail> refreshDetail(Drama drama) async => DramaDetail.fromJson(
+    await _subscriptions.execute(drama.source, 'detail', {
+      'drama': drama.toJson(),
+      'force': true,
+    }),
+  );
+  @override
+  Future<PlaybackPlan> resolve(
+    Drama drama,
+    Episode episode, {
+    int quality = 0,
+  }) async {
+    final epoch = _playbackEpoch;
+    final data = await _subscriptions.execute(drama.source, 'resolve', {
+      'drama': drama.toJson(),
+      'chapter': episode.raw,
+      'index': episode.number,
+      'quality': quality,
+    });
+    return _openSubscriptionPlan(drama.source, data, epoch);
+  }
+
+  Future<PlaybackPlan> _openSubscriptionPlan(
+    String source,
+    Map<String, dynamic> data,
+    int epoch,
+  ) async {
+    _authorize(source);
+    if (epoch != _playbackEpoch) throw AppFailure('播放请求已取消');
+    final result = await _call({
+      'action': 'subscriptionPlan',
+      'subscription': {...data, 'source': source},
+    });
+    final plan = PlaybackPlan.fromJson(result);
+    if (epoch != _playbackEpoch) {
+      await release(plan.session);
+      throw AppFailure('播放请求已取消');
+    }
+    try {
+      _authorize(source);
+    } catch (_) {
+      await release(plan.session);
+      rethrow;
+    }
+    return plan;
+  }
 
   @override
   Future<PlaybackPlan> fallback(PlaybackPlan current) async =>
@@ -695,6 +1000,8 @@ class NativeRepository extends AppRepository {
       );
   @override
   Future<void> cancelPlayback() async {
+    _playbackEpoch++;
+    _subscriptions.cancel(null, actions: {'resolve', 'live'});
     await _call({'action': 'cancelPlayback', 'sequence': ++_playbackSequence});
   }
 
@@ -713,8 +1020,7 @@ class NativeRepository extends AppRepository {
         .map((value) => DownloadJob.fromJson(Map<String, dynamic>.from(value)))
         .where(
           (job) =>
-              SourceSite.isAvailable(job.drama.source) &&
-              (access == null || access!.allowsSource(job.drama.source)),
+              access == null || access!.allowsStoredSource(job.drama.source),
         )
         .toList();
   }
@@ -726,7 +1032,7 @@ class NativeRepository extends AppRepository {
     int quality = 0,
   }) async {
     if (!SourceSite.byId(detail.drama.source).supportsDownloads) {
-      throw AppFailure('哔哩哔哩站源当前不支持下载');
+      throw AppFailure('此订阅站源不支持下载');
     }
     if (SourceSite.byId(detail.drama.source).isDouyin) {
       throw AppFailure('抖音站源当前不支持下载');
@@ -740,7 +1046,19 @@ class NativeRepository extends AppRepository {
       'drama': detail.drama.toJson(),
       'quality': quality,
       'entries': episodes
-          .map((episode) => {'chapter': episode.raw, 'index': episode.number})
+          .map(
+            (episode) => {
+              'chapter': {
+                'id': episode.id,
+                'title': episode.title,
+                'currentEpisode': episode.number,
+                'vip': episode.vip,
+                'source': detail.drama.source,
+                'subscriptionInput': episode.raw,
+              },
+              'index': episode.number,
+            },
+          )
           .toList(),
     });
     return intValue(result['added']);
@@ -753,7 +1071,7 @@ class NativeRepository extends AppRepository {
     int quality = 0,
   }) async {
     if (!SourceSite.byId(detail.drama.source).supportsDownloads) {
-      throw AppFailure('哔哩哔哩站源当前不支持下载');
+      throw AppFailure('此订阅站源不支持下载');
     }
     if (SourceSite.byId(detail.drama.source).isDouyin) {
       throw AppFailure('抖音站源当前不支持下载');
@@ -768,7 +1086,19 @@ class NativeRepository extends AppRepository {
       'drama': detail.drama.toJson(),
       'quality': quality,
       'entries': episodes
-          .map((episode) => {'chapter': episode.raw, 'index': episode.number})
+          .map(
+            (episode) => {
+              'chapter': {
+                'id': episode.id,
+                'title': episode.title,
+                'currentEpisode': episode.number,
+                'vip': episode.vip,
+                'source': detail.drama.source,
+                'subscriptionInput': episode.raw,
+              },
+              'index': episode.number,
+            },
+          )
           .toList(),
     });
     return intValue(result['added']);
@@ -783,11 +1113,19 @@ class NativeRepository extends AppRepository {
     _downloadPermission();
     final epoch = access?.profileEpoch;
     if (ids.isEmpty || ids.length > 500) throw AppFailure('每批请选择 1 至 500 个任务');
-    final visible = (await downloads()).map((job) => job.id).toSet();
+    final jobs = await downloads();
+    final visible = jobs.map((job) => job.id).toSet();
     if (ids.any((id) => !visible.contains(id))) {
       throw AppFailure('部分任务已删除或当前用户无权操作，请刷新');
     }
-    if (command == 'resume') await BackgroundDownloads.ensureStarted();
+    if (command == 'resume') {
+      for (final job in jobs.where((job) => ids.contains(job.id))) {
+        _authorize(job.drama.source, download: true);
+        if (!SourceSite.byId(job.drama.source).supportsDownloads)
+          throw AppFailure('此订阅站源不支持下载');
+      }
+      await BackgroundDownloads.ensureStarted();
+    }
     if (epoch != access?.profileEpoch) throw AppFailure('用户已切换，请重新操作');
     return DownloadBatchResult.fromJson(
       await _call({
@@ -802,27 +1140,42 @@ class NativeRepository extends AppRepository {
   @override
   Future<void> controlDownloads(String command, {String id = ''}) async {
     _downloadPermission();
-    if (command == 'resume' || command == 'resumeAll') {
+    final epoch = access?.profileEpoch;
+    final visible = await downloads();
+    if (command == 'resumeAll' || command == 'pauseAll') {
+      final selected = visible
+          .where(
+            (job) => command == 'pauseAll'
+                ? job.active
+                : job.resumable &&
+                      SourceSite.isAvailable(job.drama.source) &&
+                      SourceSite.byId(job.drama.source).supportsDownloads &&
+                      (access?.allowsSource(job.drama.source) ?? true),
+          )
+          .toList();
+      if (command == 'resumeAll' && selected.isNotEmpty)
+        await BackgroundDownloads.ensureStarted();
+      for (final job in selected) {
+        if (epoch != access?.profileEpoch) throw AppFailure('用户已切换，请重新操作');
+        if (command == 'resumeAll')
+          _authorize(job.drama.source, download: true);
+        await _call({
+          'action': 'controlDownloads',
+          'command': command == 'pauseAll' ? 'pause' : 'resume',
+          'jobId': job.id,
+        });
+      }
+      return;
+    }
+    if (!visible.any((job) => job.id == id)) throw AppFailure('当前用户没有此下载任务权限');
+    if (command == 'resume') {
+      final job = visible.firstWhere((job) => job.id == id);
+      _authorize(job.drama.source, download: true);
+      if (!SourceSite.byId(job.drama.source).supportsDownloads)
+        throw AppFailure('此订阅站源不支持下载');
       await BackgroundDownloads.ensureStarted();
     }
-    if (access != null && !access!.profile.admin) {
-      final visible = await downloads();
-      if (command == 'pauseAll' || command == 'resumeAll') {
-        for (final job in visible.where(
-          (job) => command == 'pauseAll' ? job.active : job.resumable,
-        )) {
-          await _call({
-            'action': 'controlDownloads',
-            'command': command == 'pauseAll' ? 'pause' : 'resume',
-            'jobId': job.id,
-          });
-        }
-        return;
-      }
-      if (!visible.any((job) => job.id == id)) {
-        throw AppFailure('当前用户没有此下载任务权限');
-      }
-    }
+    if (epoch != access?.profileEpoch) throw AppFailure('用户已切换，请重新操作');
     await _call({
       'action': 'controlDownloads',
       'command': command,
@@ -832,7 +1185,8 @@ class NativeRepository extends AppRepository {
 
   @override
   Future<PlaybackPlan?> localPlayback(Drama drama, Episode episode) async {
-    if (SourceSite.byId(drama.source).isDouyin) return null;
+    if (access != null && !access!.allowsStoredSource(drama.source))
+      throw AppFailure('当前用户没有此操作权限');
     final result = await _call({
       'action': 'localPlayback',
       'drama': drama.toJson(),
@@ -842,7 +1196,12 @@ class NativeRepository extends AppRepository {
     return PlaybackPlan.fromJson(result);
   }
 
-  @override Future<PlaybackPlan> resolveOnline(Drama drama,Episode episode,{int quality=0}) => resolve(drama,episode,quality:quality);
+  @override
+  Future<PlaybackPlan> resolveOnline(
+    Drama drama,
+    Episode episode, {
+    int quality = 0,
+  }) => resolve(drama, episode, quality: quality);
 
   @override
   Future<void> release(String session) async {

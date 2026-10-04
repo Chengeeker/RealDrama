@@ -1,3 +1,4 @@
+import 'video_danmaku.dart';
 import 'dart:math' as math;
 import 'dart:async';
 import 'dart:convert';
@@ -492,7 +493,7 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
         _items = [];
         _hasMore = false;
         _error =
-            '请在“设置 → 播放设置 → 首页偏好”开启站源并选择可请求的短剧分类。红果细分类只在已开启的真人剧、漫剧或AI剧中生效。';
+            '请先在“设置 → 播放与信息流 → 站源管理”导入并开启订阅，再在“首页偏好”选择来源和分类。红果细分类只在已开启的真人剧、漫剧或AI剧中生效。';
       });
       return;
     }
@@ -1075,6 +1076,25 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
                               onPressed: null,
                               icon: const Icon(Icons.grid_view_rounded),
                             ),
+                          if (_items.isNotEmpty &&
+                              SourceSite.byId(
+                                _items[_index].source,
+                              ).supportsDanmaku)
+                            ValueListenableBuilder<bool>(
+                              valueListenable: VideoDanmaku.enabled,
+                              builder: (context, enabled, _) => IconButton(
+                                tooltip: enabled ? '关闭弹幕' : '开启弹幕',
+                                onPressed: () =>
+                                    VideoDanmaku.enabled.value = !enabled,
+                                icon: Text(
+                                  enabled ? '弹' : '弹×',
+                                  style: TextStyle(
+                                    color: colors.onSurface,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                              ),
+                            ),
                           IconButton(
                             tooltip: '刷新推荐',
                             onPressed: _refresh,
@@ -1589,9 +1609,14 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
           ),
         if (widget.cleanScreen)
           Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
+            child: AppHaptics.tapTarget(
               onTap: widget.onRestoreCleanScreen,
+              label: '退出清屏模式',
+              child: GestureDetector(
+                excludeFromSemantics: true,
+                behavior: HitTestBehavior.opaque,
+                onTap: widget.onRestoreCleanScreen,
+              ),
             ),
           ),
       ],
@@ -1694,7 +1719,6 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
   Future<void> _openComments(Drama drama) async {
     if (_commentsOpen) return;
     _commentsOpen = true;
-    AppHaptics.light();
     try {
       await showDouyinComments(context, widget.repository, drama);
     } finally {
@@ -1718,64 +1742,58 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
                   onFollow: () => widget.onFollow(widget.drama),
                 ),
               )
-            : Semantics(
-                button: true,
+            : AppHaptics.tapTarget(
+                onTap: () => widget.onOpenDetail(widget.drama),
                 label: '查看${widget.drama.title}详情',
-                child: Listener(
+                child: GestureDetector(
+                  excludeFromSemantics: true,
                   behavior: HitTestBehavior.opaque,
-                  onPointerDown: (_) => AppHaptics.light(),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => widget.onOpenDetail(widget.drama),
-                    onDoubleTap: _doubleTapLike,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 6,
-                        horizontal: 4,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  widget.drama.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 17,
-                                    fontWeight: FontWeight.w800,
-                                    shadows: [
-                                      Shadow(
-                                        color: Colors.black,
-                                        blurRadius: 8,
-                                      ),
-                                    ],
-                                  ),
+                  onTap: () => widget.onOpenDetail(widget.drama),
+                  onDoubleTap: _doubleTapLike,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 6,
+                      horizontal: 4,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.drama.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w800,
+                                  shadows: [
+                                    Shadow(color: Colors.black, blurRadius: 8),
+                                  ],
                                 ),
                               ),
-                            ],
-                          ),
-                          ValueListenableBuilder<int>(
-                            valueListenable: _episode,
-                            builder: (_, index, _) => Text(
-                              '${widget.drama.category.isEmpty ? '短剧' : widget.drama.category} · 第 ${detail.episodes[index.clamp(0, detail.episodes.length - 1)].number} 集',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                shadows: [
-                                  Shadow(color: Colors.black, blurRadius: 8),
-                                ],
-                              ),
+                            ),
+                          ],
+                        ),
+                        ValueListenableBuilder<int>(
+                          valueListenable: _episode,
+                          builder: (_, index, _) => Text(
+                            '${widget.drama.category.isEmpty ? '短剧' : widget.drama.category} · 第 ${detail.episodes[index.clamp(0, detail.episodes.length - 1)].number} 集',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              shadows: [
+                                Shadow(color: Colors.black, blurRadius: 8),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),

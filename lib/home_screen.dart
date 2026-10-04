@@ -29,6 +29,27 @@ import 'drama_actions.dart';
 import 'library_updater.dart';
 import 'saved_library.dart';
 import 'short_drama_feed.dart';
+import 'sources_screen.dart';
+import 'source_subscriptions.dart';
+
+class _DiscoveryView {
+  const _DiscoveryView({
+    required this.items,
+    required this.hasMore,
+    required this.query,
+    required this.displayOffset,
+    required this.scrollOffset,
+    required this.recommendations,
+    this.error,
+  });
+  final List<Drama> items;
+  final bool hasMore;
+  final String query;
+  final int displayOffset;
+  final double scrollOffset;
+  final bool recommendations;
+  final String? error;
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.repository, required this.store});
@@ -46,6 +67,28 @@ class _HomeScreenState extends State<HomeScreen> {
   Timer? _debounce;
   late SourceSite _source;
   List<Drama> _items = [];
+  final _discoveryViews = <String, _DiscoveryView>{};
+  late int _viewProfileEpoch;
+  String get _viewKey =>
+      '${_group.id}:${_group.sources.map((source) => source.id).join(',')}';
+
+  void _rememberDiscoveryView() {
+    if (_items.isEmpty && !_showRecommendations) return;
+    _discoveryViews.remove(_viewKey);
+    _discoveryViews[_viewKey] = _DiscoveryView(
+      items: List.unmodifiable(_items),
+      hasMore: _hasMore,
+      query: _search.text.trim(),
+      displayOffset: _catalogDisplayOffset,
+      scrollOffset: _scroll.hasClients ? _scroll.offset : 0,
+      recommendations: _showRecommendations,
+      error: _error,
+    );
+    while (_discoveryViews.length > 16) {
+      _discoveryViews.remove(_discoveryViews.keys.first);
+    }
+  }
+
   bool _loading = true;
   bool _loadingMore = false;
   bool _hasMore = true;
@@ -248,6 +291,10 @@ class _HomeScreenState extends State<HomeScreen> {
   /// 站源显示设置变化后，把当前站源归一化到仍然可见的站源。
   void _sourcesChanged() {
     if (!mounted) return;
+    if (_viewProfileEpoch != widget.store.profileEpoch) {
+      _viewProfileEpoch = widget.store.profileEpoch;
+      _discoveryViews.clear();
+    }
     final visible = widget.store.sources;
     final signature = visible.map((site) => site.id).join(',');
     if (signature == _sourceSignature) return;
@@ -261,6 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
         .union(current)
         .difference(previous.intersection(current));
     _sourceSignature = signature;
+    _discoveryViews.clear();
     if (visible.isEmpty) {
       if (_tab != 1) {
         _catalogSourcesDirty = true;
@@ -568,6 +616,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _feedMounted = _tab == 0;
     _scroll.addListener(_onCatalogScroll);
     _source = SourceSite.byId(widget.store.source);
+    _viewProfileEpoch = widget.store.profileEpoch;
     _sourceSignature = widget.store.sources.map((site) => site.id).join(',');
     _browser = CatalogBrowser(widget.repository);
     _updater = LibraryUpdater(
@@ -712,19 +761,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _changeSource(SourceSite source, {bool persist = true}) {
     if (_source.id == source.id) return;
+    if (persist) _rememberDiscoveryView();
+    _generation++;
+    _categoryGeneration++;
+    unawaited(_browser.cancel());
     _debounce?.cancel();
-    _search.clear();
+    _source = source;
+    final view = _discoveryViews[_viewKey];
+    _search.text = view?.query ?? '';
     setState(() {
-      _showRecommendations = false;
+      _showRecommendations = view?.recommendations ?? false;
       _selectionMode = false;
       _selectedDramas.clear();
-      _source = source;
-      _searchVisible = false;
-      _items = [];
-      _catalogDisplayOffset = 0;
-      _hasMore = true;
-      _submittedQuery = '';
-      _error = null;
+      _searchVisible = view?.query.isNotEmpty ?? false;
+      _items = view?.items ?? [];
+      _catalogDisplayOffset = view?.displayOffset ?? 0;
+      _hasMore = view?.hasMore ?? true;
+      _submittedQuery = view?.query ?? '';
+      _error = view?.error;
+      _loading = false;
+      _loadingMore = false;
+      _categoriesLoading = false;
+      _categoriesError = null;
     });
     if (persist) {
       unawaited(
@@ -734,11 +792,20 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
-    if (_scroll.hasClients) {
-      _scroll.jumpTo(0);
+    final generation = _generation;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _generation || !_scroll.hasClients) return;
+      _scroll.jumpTo(
+        (view?.scrollOffset ?? 0).clamp(0.0, _scroll.position.maxScrollExtent),
+      );
+    });
+    if (view == null) {
+      if (_scroll.hasClients) _scroll.jumpTo(0);
+      unawaited(_loadInitialDiscovery());
+      unawaited(_loadCategories());
+    } else if (_categories.length <= 1) {
+      unawaited(_loadCategories());
     }
-    _load(useCache: true);
-    _loadCategories();
   }
 
   void _searchChanged(String query) {
@@ -855,13 +922,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadInitialDiscovery() async {
-    final sourceId = _group.sources.length == 1 ? _group.sources.single.id : '';
+    final key = _viewKey;
+    final epoch = widget.store.profileEpoch;
+    final generation = _generation + 1;
     await _load(cacheOnly: true);
     if (!mounted ||
-        sourceId != SourceSite.douyin.id ||
-        _group.sources.length != 1 ||
-        _group.sources.single.id != sourceId ||
-        _items.isNotEmpty) {
+        generation != _generation ||
+        key != _viewKey ||
+        epoch != widget.store.profileEpoch ||
+        _items.isNotEmpty ||
+        _showRecommendations) {
       return;
     }
     await _load();
@@ -1267,9 +1337,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (_tab != 0)
                         if (_tab == 1)
                           widget.store.sources.isEmpty
-                              ? const StatusPanel(
-                                  title: '暂无可用站源',
-                                  message: '请联系管理员为当前用户开放站源。',
+                              ? StatusPanel(
+                                  title:
+                                      SourceSubscriptions
+                                          .instance
+                                          .installed
+                                          .isEmpty
+                                      ? '尚未导入站源'
+                                      : '暂无已开启的站源',
+                                  message: '在站源管理中导入订阅并开启需要使用的来源。',
+                                  action: '站源管理',
+                                  onRetry: () => Navigator.push<void>(
+                                    context,
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => SourcesScreen(
+                                        repository: widget.repository,
+                                        store: widget.store,
+                                      ),
+                                    ),
+                                  ),
                                 )
                               : _catalog(
                                   selectionInBody: desktop || television,

@@ -84,7 +84,7 @@ func providerChapterID(source, sourceID, chapterKey string) string {
 func splitProviderDramaID(id string) (source, sourceID string, ok bool) {
 	source, sourceID, ok = strings.Cut(strings.TrimSpace(id), ":")
 	source = canonicalProviderSource(source)
-	if !ok || strings.TrimSpace(sourceID) == "" || !isHuangguoProviderSource(source) {
+	if !ok || strings.TrimSpace(sourceID) == "" || !subscriptionID.MatchString(source) {
 		return "", "", false
 	}
 	return source, strings.TrimSpace(sourceID), true

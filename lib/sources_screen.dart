@@ -1,4 +1,3 @@
-import 'source_subscriptions_screen.dart';
 import 'douyin_settings_screen.dart';
 import 'douyin_source.dart';
 import 'bilibili_settings_screen.dart';
@@ -196,7 +195,11 @@ class _SourcesScreenState extends State<SourcesScreen> {
   Future<void> _setVisible(SourceSite source, bool visible) =>
       _setVisibility([source], visible);
 
-  Future<void> _setVisibility(List<SourceSite> sources, bool visible) async {
+  Future<void> _setVisibility(
+    List<SourceSite> sources,
+    bool visible, {
+    String? family,
+  }) async {
     if (sources.any((source) => _visibilityPending.contains(source.id))) return;
     final epoch = widget.store.profileEpoch;
     final ids = sources.map((source) => source.id).toSet();
@@ -224,12 +227,16 @@ class _SourcesScreenState extends State<SourcesScreen> {
       }
       if (!mounted || epoch != widget.store.profileEpoch || widget.store.locked)
         return;
-      await widget.store.setSourcesVisible({
-        for (final source in sources) source.id: visible,
-      });
+      if (family != null) {
+        await widget.store.setSourceFamilyVisible(family, sources, visible);
+      } else {
+        await widget.store.setSourcesVisible({
+          for (final source in sources) source.id: visible,
+        });
+      }
       if (!mounted || epoch != widget.store.profileEpoch) return;
       for (final source in sources) {
-        if (visible) {
+        if (widget.store.allowsSource(source.id)) {
           unawaited(_refreshSource(source));
         } else {
           _revisions[source.id] = (_revisions[source.id] ?? 0) + 1;
@@ -247,8 +254,8 @@ class _SourcesScreenState extends State<SourcesScreen> {
     }
   }
 
-  Widget _douyinVisibility() {
-    final sources = _douyinSources;
+  Widget _familyVisibility(SourceGroup group) {
+    final sources = group.sources;
     final enabled = sources
         .where((source) => widget.store.allowsSource(source.id))
         .length;
@@ -256,22 +263,24 @@ class _SourcesScreenState extends State<SourcesScreen> {
       (source) => _visibilityPending.contains(source.id),
     );
     return ListTile(
-      key: const ValueKey('visible-douyin-family'),
-      title: const Text('抖音'),
+      key: ValueKey('visible-${group.id}'),
+      title: Text(group.name),
       subtitle: Text('已开启 $enabled/${sources.length} · 子项在下方管理'),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            tooltip: '统一配置抖音 Cookie',
-            icon: const Icon(Icons.manage_accounts_outlined),
-            onPressed: busy ? null : _configureDouyin,
-          ),
+          if (sources.any((source) => source.isDouyin))
+            IconButton(
+              tooltip: '统一配置抖音 Cookie',
+              icon: const Icon(Icons.manage_accounts_outlined),
+              onPressed: busy ? null : _configureDouyin,
+            ),
           Switch(
             value: enabled > 0,
             onChanged: busy
                 ? null
-                : (visible) => _setVisibility(sources, visible),
+                : (visible) =>
+                      _setVisibility(sources, visible, family: group.id),
           ),
         ],
       ),
@@ -325,14 +334,48 @@ class _SourcesScreenState extends State<SourcesScreen> {
     if (_bulkOperation != null || !widget.repository.supportsSourceManagement) {
       return;
     }
+    final epoch = widget.store.profileEpoch;
+    final sources = List<SourceSite>.of(widget.store.sources);
+    if (sources.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('没有已启用的站源')));
+      return;
+    }
     setState(() => _bulkOperation = operation);
     try {
-      for (final source in widget.store.sources) {
+      for (final source in sources) {
         if (!mounted) return;
+        if (epoch != widget.store.profileEpoch) return;
+        if (!widget.store.allowsSource(source.id)) continue;
+        for (final active in sources) {
+          if (!mounted || epoch != widget.store.profileEpoch) return;
+          if (active.id == source.id || _statuses[active.id]?.running != true) {
+            continue;
+          }
+          await _waitForSourceJob(active, epoch);
+        }
         await _run(source, operation);
+        await _waitForSourceJob(source, epoch);
+      }
+      if (mounted && epoch == widget.store.profileEpoch) {
+        final label = operation == 'update' ? '更新' : '检测';
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('已完成所有已开启站源的$label')));
       }
     } finally {
       if (mounted) setState(() => _bulkOperation = null);
+    }
+  }
+
+  Future<void> _waitForSourceJob(SourceSite source, int epoch) async {
+    while (mounted &&
+        epoch == widget.store.profileEpoch &&
+        _statuses[source.id]?.running == true) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (!mounted || epoch != widget.store.profileEpoch) return;
+      await _refreshSource(source);
     }
   }
 
@@ -421,7 +464,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
           SourceSite.values
               .where(
                 (source) =>
-                    source.isDouyin || widget.store.allowsSource(source.id),
+                    source.isDouyin ||
+                    source.groupId == 'huangguo' ||
+                    widget.store.allowsSource(source.id),
               )
               .toList()
             ..sort((a, b) {
@@ -436,11 +481,11 @@ class _SourcesScreenState extends State<SourcesScreen> {
             });
       final visibleGroups = SourceSite.values
           .where((source) => widget.store.allowsSource(source.id))
-          .map((source) => source.isDouyin ? 'douyin-family' : source.id)
+          .map((source) => source.isDouyin ? 'douyin-family' : source.groupId)
           .toSet()
           .length;
       final totalGroups = SourceSite.values
-          .map((source) => source.isDouyin ? 'douyin-family' : source.id)
+          .map((source) => source.isDouyin ? 'douyin-family' : source.groupId)
           .toSet()
           .length;
       final viewPaddingBottom = MediaQuery.viewPaddingOf(context).bottom;
@@ -450,11 +495,10 @@ class _SourcesScreenState extends State<SourcesScreen> {
           : paddingBottom;
       return Scaffold(
         appBar: AppBar(
-          title: const Text('站源管理'),
+          title: const Text('当前站源'),
           actions: [
-            IconButton(tooltip: '站源订阅与更新', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SourceSubscriptionsScreen(store: widget.store))), icon: const Icon(Icons.extension_outlined)),
             IconButton(
-              tooltip: '同步全部内容',
+              tooltip: '一键更新',
               onPressed:
                   _bulkOperation == null &&
                       widget.repository.supportsSourceManagement
@@ -481,12 +525,10 @@ class _SourcesScreenState extends State<SourcesScreen> {
               child: ListView(
                 padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
                 children: [
-                  Card.outlined(child: ListTile(leading: const Icon(Icons.extension_outlined), title: const Text('站源订阅'), subtitle: const Text('从 GitHub 或独立链接导入，检查和更新站源程序'), trailing: const Icon(Icons.chevron_right), onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SourceSubscriptionsScreen(store: widget.store))))),
-                  const SizedBox(height: 12),
                   const Padding(
                     padding: EdgeInsets.only(bottom: 16),
                     child: Text(
-                      '各站源可分别更新和检测。更新会查找新剧、继续加载一页历史内容，并分批补齐资料；“加载后续所有页”会逐页低频请求，同一时间只运行一个站源，最多连续加载 1000 页或 30 分钟。遇到限流、超时或错误会停止并保留已加载内容，也可随时手动停止。',
+                      '顶栏可依次更新或检测所有已开启站源，卡片也可单独操作。更新会查找新剧、继续加载一页历史内容，并分批补齐资料；“加载后续所有页”会逐页低频请求，同一时间只运行一个站源，最多连续加载 1000 页或 30 分钟。遇到限流、超时或错误会停止并保留已加载内容，也可随时手动停止。',
                     ),
                   ),
                   _expandableSection(
@@ -495,22 +537,20 @@ class _SourcesScreenState extends State<SourcesScreen> {
                     title: '显示的站源',
                     subtitle: '已显示 $visibleGroups/$totalGroups · 点击选择隐藏',
                     children: [
-                      for (final source in SourceSite.values)
-                        if (source.id == SourceSite.douyin.id)
-                          _douyinVisibility()
-                        else if (!source.isDouyin)
+                      for (final group in _managementGroups(SourceSite.values))
+                        if (group.id == 'douyin-family' ||
+                            group.id == 'huangguo')
+                          _familyVisibility(group)
+                        else
                           ListTile(
-                            key: ValueKey('visible-${source.id}'),
-                            title: Text(source.name),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Switch(
-                                  value: widget.store.allowsSource(source.id),
-                                  onChanged: (visible) =>
-                                      _setVisible(source, visible),
-                                ),
-                              ],
+                            key: ValueKey('visible-${group.sources.first.id}'),
+                            title: Text(group.name),
+                            trailing: Switch(
+                              value: widget.store.allowsSource(
+                                group.sources.first.id,
+                              ),
+                              onChanged: (visible) =>
+                                  _setVisible(group.sources.first, visible),
                             ),
                           ),
                     ],
@@ -562,7 +602,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
 
   Widget _sourceCard(SourceSite source) {
     final visible = widget.store.allowsSource(source.id);
-    if (source.isDouyin && !visible) {
+    if ((source.isDouyin || source.groupId == 'huangguo') && !visible) {
       return Card(
         elevation: 0,
         child: ListTile(
@@ -623,7 +663,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
                     onPressed: _configureBilibili,
                     icon: const Icon(Icons.key_outlined),
                   ),
-                if (source.isDouyin)
+                if (source.isDouyin || source.groupId == 'huangguo')
                   Switch(
                     value: visible,
                     onChanged: _visibilityPending.contains(source.id)

@@ -247,7 +247,7 @@ class _RecommendationsScreenState extends State<RecommendationsScreen> {
           child: !widget.store.allowsSource('hongguo')
               ? const StatusPanel(
                   title: '红果站源当前不可用',
-                  message: '可在“设置 → 播放设置 → 站源管理”中恢复显示。',
+                  message: '可在“设置 → 播放与信息流 → 站源管理”中恢复显示。',
                 )
               : _loading && _items.isEmpty
               ? const Center(child: AppLoadingIndicator())

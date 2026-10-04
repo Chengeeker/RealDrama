@@ -68,6 +68,7 @@ class LibraryUpdater extends ChangeNotifier {
         {
           'update',
           'more',
+          'allPages',
           'metadata',
           'vipMetadata',
           'retrySave',

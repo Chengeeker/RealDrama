@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'app_haptics.dart';
 import 'core_bridge.dart';
 import 'douyin_source.dart';
 import 'local_store.dart';
@@ -60,7 +59,6 @@ class _DouyinSettingsScreenState extends State<DouyinSettingsScreen> {
 
   Future<void> _run(String action) async {
     if (!_valid || _busy) return;
-    AppHaptics.light();
     setState(() {
       _busy = true;
       _message = '';

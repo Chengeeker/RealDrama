@@ -68,15 +68,16 @@ func (d Drama) DisplayTitle() string {
 }
 
 type Chapter struct {
-	VIP            bool            `json:"vip,omitempty"`
-	ID             string          `json:"id"`
-	Source         string          `json:"source,omitempty"`
-	Title          string          `json:"title"`
-	VideoURL       string          `json:"videoUrl"`
-	CurrentEpisode json.RawMessage `json:"currentEpisode"`
-	MediaSize      int64           `json:"mediaSize"`
-	PageURL        string          `json:"pageUrl,omitempty"`
-	Referer        string          `json:"referer,omitempty"`
+	SubscriptionInput json.RawMessage `json:"subscriptionInput,omitempty"`
+	VIP               bool            `json:"vip,omitempty"`
+	ID                string          `json:"id"`
+	Source            string          `json:"source,omitempty"`
+	Title             string          `json:"title"`
+	VideoURL          string          `json:"videoUrl"`
+	CurrentEpisode    json.RawMessage `json:"currentEpisode"`
+	MediaSize         int64           `json:"mediaSize"`
+	PageURL           string          `json:"pageUrl,omitempty"`
+	Referer           string          `json:"referer,omitempty"`
 }
 
 func (c Chapter) EpisodeString(fallback int) string {

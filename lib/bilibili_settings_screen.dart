@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'app_haptics.dart';
 import 'bilibili_source.dart';
 import 'core_bridge.dart';
 import 'local_store.dart';
@@ -61,7 +60,6 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
 
   Future<void> _run(String action) async {
     if (!_valid || _busy) return;
-    AppHaptics.light();
     setState(() {
       _busy = true;
       _message = '';

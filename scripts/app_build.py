@@ -40,4 +40,4 @@ class BuildVariant:
 
 def add_variant_argument(parser):
     parser.add_argument('--all-sources', action='store_true',
-                        help='构建包含全部站源的真果鉴；默认构建仅红果的红果鉴')
+                        help='保留旧构建变体兼容；站源改由订阅导入，不会预装来源')

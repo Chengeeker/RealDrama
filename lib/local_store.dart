@@ -176,9 +176,6 @@ class LocalStore extends ChangeNotifier {
       try {
         final values = jsonDecode(encoded) as List;
         hidden = values.whereType<String>().where(SourceSite.isKnown).toSet();
-        if (SourceSite.values.isNotEmpty && SourceSite.values.every((site) => hidden.contains(site.id))) {
-          hidden.remove(SourceSite.values.first.id);
-        }
       } catch (_) {
         hidden = _defaultHiddenSources(selectedSource);
       }
@@ -210,21 +207,49 @@ class LocalStore extends ChangeNotifier {
     return hidden;
   }
 
+  List<String> _rememberedSources(String id) {
+    final sources = SourceSite.values.map((site) => site.id).toSet();
+    try {
+      final previous = jsonDecode(_string(_key('knownSources', id)) ?? '[]');
+      if (previous is List) {
+        sources.addAll(previous.whereType<String>().where(SourceSite.isKnown));
+      }
+    } catch (_) {}
+    return sources.toList()..sort();
+  }
+
   Set<String> get hiddenSources => Set.of(_hiddenSourcesFor(_current));
   bool allowsSource(String source) =>
       !locked &&
       SourceSite.isAvailable(source) &&
       !_hiddenSourcesFor(_current).contains(source);
+  bool allowsStoredSource(String source) =>
+      !locked &&
+      SourceSite.isKnown(source) &&
+      !_hiddenSourcesFor(_current).contains(source);
   List<SourceSite> get sources =>
       SourceSite.values.where((site) => allowsSource(site.id)).toList();
 
-  bool visibleRequested(Map<String,bool> changes) => changes.values.any((visible) => visible);
-  void refreshInstalledSources() { _hiddenSourceCache.clear(); _sourceVisibilityRevision++; _notify(); }
+  bool visibleRequested(Map<String, bool> changes) =>
+      changes.values.any((visible) => visible);
+  void refreshInstalledSources() {
+    _hiddenSourceCache.clear();
+    _sourceVisibilityRevision++;
+    _notify();
+  }
 
   Future<void> setSourceVisible(String source, bool visible) =>
       setSourcesVisible({source: visible});
 
-  Future<void> setSourcesVisible(Map<String, bool> changes) {
+  Future<void> setSourceFamilyVisible(
+    String family,
+    List<SourceSite> sources,
+    bool visible,
+  ) => setSourcesVisible({
+    for (final source in sources) source.id: visible,
+  }, family: family);
+
+  Future<void> setSourcesVisible(Map<String, bool> changes, {String? family}) {
     final requested = Map<String, bool>.of(changes);
     if (requested.keys.any((source) => !SourceSite.isAvailable(source))) {
       return Future.error(StateError('站源不在当前版本中'));
@@ -233,6 +258,30 @@ class LocalStore extends ChangeNotifier {
     return _queue(() async {
       if (locked || epoch != _epoch) throw StateError('当前用户已变更，请重试');
       final hidden = hiddenSources;
+      final selections = <String, dynamic>{};
+      if (family != null) {
+        try {
+          selections.addAll(
+            jsonDecode(_string(_key('sourceFamilySelections')) ?? '{}')
+                as Map<String, dynamic>,
+          );
+        } catch (_) {}
+        if (visibleRequested(requested)) {
+          final saved = (selections[family] as List? ?? const [])
+              .whereType<String>()
+              .toSet();
+          final available = saved.intersection(requested.keys.toSet());
+          if (available.isNotEmpty) {
+            for (final id in requested.keys.toList())
+              requested[id] = available.contains(id);
+          }
+        } else {
+          final enabled = requested.keys
+              .where((id) => !hidden.contains(id))
+              .toList();
+          if (enabled.isNotEmpty) selections[family] = enabled;
+        }
+      }
       var changed = false;
       for (final entry in requested.entries) {
         if (entry.value) {
@@ -245,16 +294,17 @@ class LocalStore extends ChangeNotifier {
       final remaining = SourceSite.values
           .where((site) => !hidden.contains(site.id))
           .toList();
-      if (remaining.isEmpty && visibleRequested(requested)) throw StateError('站源不可用');
+      if (remaining.isEmpty && visibleRequested(requested))
+        throw StateError('站源不可用');
       final selected = _string(_key('source')) ?? '';
       final fallback = remaining.firstOrNull?.id ?? '';
       final sourceSelectionChanged =
           selected.isNotEmpty && hidden.contains(selected);
       await _commit({
         _key('hiddenSources'): jsonEncode(hidden.toList()..sort()),
-        _key('knownSources'): jsonEncode(
-          SourceSite.values.map((s) => s.id).toList(),
-        ),
+        if (family != null)
+          _key('sourceFamilySelections'): jsonEncode(selections),
+        _key('knownSources'): jsonEncode(_rememberedSources(_current)),
         if (sourceSelectionChanged) _key('source'): fallback,
         if (sourceSelectionChanged && catalogView.allSources)
           _key('catalogView'): jsonEncode(
@@ -1538,9 +1588,7 @@ class LocalStore extends ChangeNotifier {
             ),
             'source': _string(_key('source', profile.id)) ?? '',
             'hiddenSources': _hiddenSourcesFor(profile.id).toList()..sort(),
-            'knownSources': SourceSite.values
-                .map((source) => source.id)
-                .toList(),
+            'knownSources': _rememberedSources(profile.id),
             'hideVip': _bool(_key('hideVip', profile.id)) ?? true,
             'playback': jsonDecode(
               _string(_key('playback', profile.id)) ?? '{}',
@@ -1754,7 +1802,12 @@ class LocalStore extends ChangeNotifier {
         _key('source', profile.id): library['source'] as String,
         _key('hiddenSources', profile.id): jsonEncode(hiddenSources),
         _key('knownSources', profile.id): jsonEncode(
-          SourceSite.values.map((s) => s.id).toList(),
+          {
+            ..._rememberedSources(profile.id),
+            ...((library['knownSources'] as List?) ?? [])
+                .whereType<String>()
+                .where(SourceSite.isKnown),
+          }.toList()..sort(),
         ),
         _key('hideVip', profile.id): library['hideVip'] as bool,
         _key('playback', profile.id): jsonEncode(library['playback'] ?? {}),

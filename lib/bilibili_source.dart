@@ -3,6 +3,18 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class BilibiliSource {
   static const storage = FlutterSecureStorage();
 
+  static String imageURL(String value) {
+    final uri = Uri.tryParse(value.startsWith('//') ? 'https:$value' : value);
+    if (uri != null &&
+        uri.scheme == 'http' &&
+        uri.userInfo.isEmpty &&
+        (!uri.hasPort || uri.port == 80) &&
+        uri.host.toLowerCase().endsWith('.hdslb.com')) {
+      return uri.replace(scheme: 'https', port: 443).toString();
+    }
+    return uri?.toString() ?? value;
+  }
+
   static String cookieKey(String profile) => 'bilibili.cookie.$profile';
 
   static Future<String?> readCookie(String profile) =>

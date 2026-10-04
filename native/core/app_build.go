@@ -7,8 +7,7 @@ var buildAllSources = "false"
 var errNativeBuildSource = errors.New("当前版本不包含此站源")
 
 func nativeSourceAvailable(source string) bool {
-	source = canonicalProviderSource(source)
-	return source == sourceHongguo || buildAllSources == "true" && isHuangguoProviderSource(source)
+	return subscriptionID.MatchString(canonicalProviderSource(source))
 }
 
 func nativeDramaAvailable(drama nativeDrama) bool {
@@ -36,45 +35,16 @@ func nativeDownloadAvailable(job nativeDownloadJob) bool {
 	if source == "" {
 		source = sourceFromDramaID(job.Drama.ID)
 	}
-	return source != sourceBilibili && nativeChapterAvailable(job.Drama, job.Chapter)
+	return nativeSourceAvailable(source) && nativeChapterAvailable(job.Drama, job.Chapter)
 }
 
 func nativeAuthorizeInput(input nativeInput) error {
 	switch input.Action {
-	case "recommendations", "cachedRecommendations", "suggestions":
-		if !nativeSourceAvailable(sourceHongguo) {
-			return errNativeBuildSource
-		}
-	case "rankings":
-		board, found := findRankingBoard(input.Board)
-		if !found || !nativeSourceAvailable(board.Source) {
-			return errNativeBuildSource
-		}
-	case "catalog", "cached", "categories", "sourceStatus", "sourceJob", "cancelSourceJob":
-		if !nativeSourceAvailable(input.Source) {
-			return errNativeBuildSource
-		}
-		if input.Action == "sourceJob" && input.Drama.ID != "" &&
-			(!nativeDramaAvailable(input.Drama) || sourceFromDramaID(input.Drama.ID) != canonicalProviderSource(input.Source)) {
-			return errNativeBuildSource
-		}
-	case "cover", "prepareCover", "detail", "metadata", "resolve", "preload", "prepareHandoff", "enqueueDownloads", "localPlayback":
+	case "recommendations", "cachedRecommendations", "rankingBoards", "rankings", "suggestions", "catalog", "cached", "categories", "sourceStatus", "sourceJob", "cancelSourceJob", "cover", "prepareCover", "detail", "metadata", "resolve", "preload", "prepareHandoff", "bilibiliAccount", "bilibiliCreator", "bilibiliComments":
+		return errors.New("此操作已经迁移至站源订阅，请导入兼容站源")
+	case "enqueueDownloads", "localPlayback":
 		if !nativeDramaAvailable(input.Drama) {
-			return errNativeBuildSource
-		}
-		if (input.Action == "resolve" || input.Action == "preload" || input.Action == "prepareHandoff") && !nativeChapterAvailable(input.Drama, input.Chapter) {
-			return errNativeBuildSource
-		}
-		if input.Action == "enqueueDownloads" && sourceFromDramaID(input.Drama.ID) == sourceBilibili {
-			return errors.New("哔哩哔哩站源当前不支持下载")
-		}
-	case "bilibiliAccount":
-		if canonicalProviderSource(input.Source) != sourceBilibili || !nativeSourceAvailable(sourceBilibili) {
-			return errNativeBuildSource
-		}
-	case "bilibiliCreator", "bilibiliComments":
-		if !nativeDramaAvailable(input.Drama) || sourceFromDramaID(input.Drama.ID) != sourceBilibili {
-			return errNativeBuildSource
+			return errors.New("条目标识无效")
 		}
 	}
 	return nil

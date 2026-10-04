@@ -9,6 +9,7 @@ import 'feed_recommendations.dart';
 import 'local_store.dart';
 import 'models.dart';
 import 'widgets.dart';
+import 'sources_screen.dart';
 
 class _PreferenceTopicGroup {
   const _PreferenceTopicGroup(this.group, this.categoriesByTopic);
@@ -899,6 +900,21 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
                   ),
                 ),
               ),
+              if (SourceSite.values.isEmpty)
+                ListTile(
+                  leading: const Icon(Icons.add_link),
+                  title: const Text('先导入站源订阅'),
+                  subtitle: const Text('导入后可设置首页来源和分类'),
+                  onTap: () => Navigator.push<void>(
+                    context,
+                    MaterialPageRoute<void>(
+                      builder: (_) => SourcesScreen(
+                        repository: widget.repository,
+                        store: widget.store,
+                      ),
+                    ),
+                  ),
+                ),
               for (final source in SourceSite.values) _sourceCard(source),
             ],
           ),

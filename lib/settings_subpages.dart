@@ -10,14 +10,11 @@ import 'app_layout.dart';
 import 'background_downloads.dart';
 import 'core_bridge.dart';
 import 'downloads_screen.dart';
-import 'home_feed_preferences_screen.dart';
-import 'feed_recommendation_settings_screen.dart';
 import 'local_store.dart';
 import 'playback_preferences.dart';
 import 'resource_settings.dart';
 import 'resource_settings_screen.dart';
 import 'settings_screen.dart';
-import 'sources_screen.dart';
 import 'widgets.dart';
 import 'webdav_backup.dart';
 
@@ -73,13 +70,8 @@ class SettingsSection extends StatelessWidget {
 }
 
 class PlaybackSettingsScreen extends StatelessWidget {
-  const PlaybackSettingsScreen({
-    super.key,
-    required this.repository,
-    required this.store,
-  });
+  const PlaybackSettingsScreen({super.key, required this.store});
 
-  final AppRepository repository;
   final LocalStore store;
 
   @override
@@ -90,109 +82,7 @@ class PlaybackSettingsScreen extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 720),
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          children: [
-            SettingsSection(
-              title: '播放与信息流',
-              children: [
-                if (repository.supportsSourceManagement)
-                  ListTile(
-                    key: const ValueKey('playback-source-management'),
-                    leading: const Icon(Icons.dns_outlined),
-                    title: const Text('站源管理'),
-                    subtitle: const Text('管理站源显示、更新与连接检测'),
-                    trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.push<void>(
-                      context,
-                      MaterialPageRoute<void>(
-                        builder: (_) =>
-                            SourcesScreen(repository: repository, store: store),
-                      ),
-                    ),
-                  ),
-                ListTile(
-                  key: const ValueKey('home-feed-preferences'),
-                  leading: const Icon(Icons.tune_rounded),
-                  title: const Text('首页偏好'),
-                  subtitle: const Text('只推送已启用站源和所选分类'),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.push<void>(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => HomeFeedPreferencesScreen(
-                        repository: repository,
-                        store: store,
-                      ),
-                    ),
-                  ),
-                ),
-                AnimatedBuilder(
-                  animation: store,
-                  builder: (context, _) {
-                    final preferences = store.playbackPreferences;
-                    final qualities =
-                        <int>{
-                          0,
-                          2160,
-                          1440,
-                          1080,
-                          720,
-                          480,
-                          360,
-                          preferences.homeQuality,
-                        }.toList()..sort((a, b) {
-                          if (a == 0) return -1;
-                          if (b == 0) return 1;
-                          return b.compareTo(a);
-                        });
-                    return _PlaybackSelectorTile<int>(
-                      key: const ValueKey('home-playback-quality'),
-                      icon: Icons.high_quality_rounded,
-                      title: '首页画质',
-                      subtitle:
-                          '当前：${preferences.homeQuality == 0 ? '自动（最高）' : '${preferences.homeQuality}P'} · 仅用于首页信息流；以源站实际提供的画质为准',
-                      value: preferences.homeQuality,
-                      items: [
-                        for (final quality in qualities)
-                          DropdownMenuItem<int>(
-                            value: quality,
-                            child: Text(quality == 0 ? '自动最高' : '${quality}P'),
-                          ),
-                      ],
-                      onChanged: (quality) {
-                        if (quality == null ||
-                            quality == preferences.homeQuality) {
-                          return;
-                        }
-                        unawaited(
-                          saveUserChange(
-                            context,
-                            () => store.setPlaybackPreferences(
-                              preferences.copyWith(homeQuality: quality),
-                            ),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-                ListTile(
-                  key: const ValueKey('playback-feed-recommendations'),
-                  leading: const Icon(Icons.auto_awesome_rounded),
-                  title: const Text('猜你喜欢'),
-                  subtitle: const Text('查看兴趣标签，调整首页推荐权重'),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.push<void>(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          FeedRecommendationSettingsScreen(store: store),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            _PlaybackPerformanceSettings(store: store),
-          ],
+          children: [_PlaybackPerformanceSettings(store: store)],
         ),
       ),
     ),
@@ -261,7 +151,7 @@ class _PlaybackPerformanceSettingsState
                     (current) => current.copyWith(hardwareDecoding: value),
                   ),
           ),
-          _PlaybackSelectorTile<HardwareDecoder>(
+          PlaybackSelectorTile<HardwareDecoder>(
             icon: Icons.developer_board_outlined,
             title: '硬件解码器',
             subtitle: '通常保留自动（安全）；复制模式可改善部分设备的硬件解码兼容性',
@@ -302,8 +192,8 @@ class _PlaybackPerformanceSettingsState
   );
 }
 
-class _PlaybackSelectorTile<T> extends StatelessWidget {
-  const _PlaybackSelectorTile({
+class PlaybackSelectorTile<T> extends StatelessWidget {
+  const PlaybackSelectorTile({
     super.key,
     required this.icon,
     required this.title,

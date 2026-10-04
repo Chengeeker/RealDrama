@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'core_bridge.dart';
-import 'app_haptics.dart';
 import 'douyin_source.dart';
 import 'local_store.dart';
 import 'models.dart';
@@ -223,12 +222,9 @@ class _DouyinCreatorScreenState extends State<DouyinCreatorScreen> {
                       builder: (context, _) => SizedBox(
                         width: double.infinity,
                         child: FilledButton.tonal(
-                          onPressed: () {
-                            AppHaptics.light();
-                            unawaited(
-                              widget.store.toggleFavorite(widget.drama),
-                            );
-                          },
+                          onPressed: () => unawaited(
+                            widget.store.toggleFavorite(widget.drama),
+                          ),
                           child: Text(
                             widget.store.isFavorite(widget.drama.id)
                                 ? '已关注 · 本地收藏'
@@ -300,7 +296,6 @@ class _DouyinCreatorScreenState extends State<DouyinCreatorScreen> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
                     onTap: () {
-                      AppHaptics.light();
                       if (widget.onPlay case final play?) {
                         unawaited(play(item));
                         return;

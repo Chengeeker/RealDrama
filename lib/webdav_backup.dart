@@ -150,7 +150,7 @@ class _WebDavBackupScreenState extends State<WebDavBackupScreen> {
         builder: (context) => AlertDialog(
           title: const Text('从 WebDAV 恢复？'),
           content: Text(
-            '备份包含 ${(data['profiles'] as List).length} 个用户。恢复会替换本机用户、追剧、观看记录和偏好设置；已下载视频保留。',
+            '备份包含 ${(data['profiles'] as List).length} 个用户。恢复会替换本机用户、收藏、观看记录和偏好设置；已下载视频保留。',
           ),
           actions: [
             TextButton(

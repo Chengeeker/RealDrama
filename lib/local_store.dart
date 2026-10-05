@@ -38,6 +38,7 @@ class LocalStore extends ChangeNotifier {
   final Map<String, WatchEntry> _history = {};
   final Map<String, Drama> _favorites = {};
   final Map<String, FollowState> _followStates = {};
+  final Map<String, FollowedCreator> _followedCreators = {};
   final Map<String, Drama> _seriesCandidates = {};
   final Map<String, Drama> _sessionSeriesCandidates = {};
   final Map<
@@ -118,6 +119,7 @@ class LocalStore extends ChangeNotifier {
     _history.clear();
     _favorites.clear();
     _followStates.clear();
+    _followedCreators.clear();
     _seriesCandidates.clear();
     _feedSessionSignals.clear();
     _epoch++;
@@ -164,10 +166,11 @@ class LocalStore extends ChangeNotifier {
     final selectedSource = _string(_key('source', id));
     final known = _string(_key('knownSources', id));
     final cached = _hiddenSourceCache[id];
-    if (cached?.encoded == encoded &&
-        cached?.selectedSource == selectedSource &&
-        cached?.known == known) {
-      return cached!.sources;
+    if (cached != null &&
+        cached.encoded == encoded &&
+        cached.selectedSource == selectedSource &&
+        cached.known == known) {
+      return cached.sources;
     }
     late final Set<String> hidden;
     if (encoded == null) {
@@ -197,6 +200,20 @@ class LocalStore extends ChangeNotifier {
     if (!sourceWasKnown(SourceSite.bilibili.id) &&
         (known != null || hidden.isNotEmpty)) {
       hidden.add(SourceSite.bilibili.id);
+    }
+    if (!sourceWasKnown(SourceSite.bilibiliLive.id) &&
+        (known != null || hidden.isNotEmpty) &&
+        (!sourceWasKnown(SourceSite.bilibili.id) ||
+            hidden.contains(SourceSite.bilibili.id))) {
+      hidden.add(SourceSite.bilibiliLive.id);
+    }
+    if (!sourceWasKnown(SourceSite.tiktok.id) &&
+        (known != null || hidden.isNotEmpty)) {
+      hidden.add(SourceSite.tiktok.id);
+    }
+    if (!sourceWasKnown(SourceSite.youtube.id) &&
+        (known != null || hidden.isNotEmpty)) {
+      hidden.add(SourceSite.youtube.id);
     }
     _hiddenSourceCache[id] = (
       encoded: encoded,
@@ -321,6 +338,7 @@ class LocalStore extends ChangeNotifier {
     _history.clear();
     _favorites.clear();
     _followStates.clear();
+    _followedCreators.clear();
     _seriesCandidates.clear();
     if (_configurationError != null) return;
     for (final row in readJsonList(_string(_key('history')))) {
@@ -333,6 +351,14 @@ class LocalStore extends ChangeNotifier {
       try {
         final drama = Drama.fromJson(row);
         _favorites[drama.id] = drama;
+      } catch (_) {}
+    }
+    for (final row in readJsonList(
+      _string(_key('followedCreators')),
+    ).take(5000)) {
+      try {
+        final creator = FollowedCreator.fromJson(row);
+        _followedCreators[creator.id] = creator;
       } catch (_) {}
     }
     Map<String, dynamic> states = {};
@@ -373,6 +399,11 @@ class LocalStore extends ChangeNotifier {
       .toList()
       .reversed
       .toList();
+  List<FollowedCreator> get followedCreators =>
+      _followedCreators.values
+          .where((creator) => allowsSource(creator.source))
+          .toList()
+        ..sort((a, b) => b.followedAt.compareTo(a.followedAt));
   List<FeedWatchSignal> get feedSessionSignals => locked
       ? const []
       : List.unmodifiable(
@@ -790,6 +821,40 @@ class LocalStore extends ChangeNotifier {
 
   bool isFavorite(String id) =>
       _favorites[id] != null && allowsSource(_favorites[id]!.source);
+  bool isCreatorFollowed(Drama drama) {
+    final id = FollowedCreator.keyFor(drama);
+    return id != null &&
+        _followedCreators.containsKey(id) &&
+        allowsSource(drama.source);
+  }
+
+  Future<void> toggleCreatorFollow(Drama drama) {
+    final epoch = _epoch;
+    final creatorId = FollowedCreator.keyFor(drama);
+    if (!SourceSite.byId(drama.source).supportsCreator || creatorId == null) {
+      return Future.error(StateError('该内容源没有提供可识别的作者编号'));
+    }
+    return _queue(() async {
+      if (!allowsSource(drama.source) || epoch != _epoch) return;
+      final creators = Map.of(_followedCreators);
+      if (creators.containsKey(creatorId)) {
+        creators.remove(creatorId);
+      } else {
+        if (creators.length >= 5000) {
+          throw StateError('本地关注作者数量已达上限，请先整理收藏');
+        }
+        creators[creatorId] = FollowedCreator.fromDrama(drama);
+      }
+      await _commit({
+        _key('followedCreators'): jsonEncode(
+          creators.values.map((creator) => creator.toJson()).toList(),
+        ),
+      }, trackSync: false);
+      _loadLibrary();
+      _notify();
+    });
+  }
+
   FollowState? following(String id) =>
       isFavorite(id) ? _followStates[id] : null;
   List<Drama> seriesDramasFor(Drama anchor) {
@@ -1108,7 +1173,7 @@ class LocalStore extends ChangeNotifier {
         entries.remove(drama.id);
         states.remove(drama.id);
       } else {
-        if (entries.length >= 20000) throw StateError('追剧数量已达上限，请先整理追剧');
+        if (entries.length >= 20000) throw StateError('收藏数量已达上限，请先整理收藏');
         entries[drama.id] = drama;
         states[drama.id] = FollowState.initial(drama, _history[drama.id]);
       }
@@ -1132,7 +1197,7 @@ class LocalStore extends ChangeNotifier {
     return _queue(() async {
       if (!allowsSource(drama.source) || epoch != _epoch) return;
       if (!_favorites.containsKey(drama.id) && _favorites.length >= 20000) {
-        throw StateError('追剧数量已达上限，请先整理追剧');
+        throw StateError('收藏数量已达上限，请先整理收藏');
       }
       final current = _favorites[drama.id]?.merge(drama) ?? drama;
       final entries = Map.of(_favorites)..[drama.id] = current;
@@ -1577,6 +1642,9 @@ class LocalStore extends ChangeNotifier {
             ..._backupFollowSync(profile.id),
             'history': readJsonList(_string(_key('history', profile.id))),
             'favorites': readJsonList(_string(_key('favorites', profile.id))),
+            'followedCreators': readJsonList(
+              _string(_key('followedCreators', profile.id)),
+            ),
             'followStates': jsonDecode(
               _string(_key('followStates', profile.id)) ?? '{}',
             ),
@@ -1665,10 +1733,12 @@ class LocalStore extends ChangeNotifier {
       final library = libraries[profile.id] as Map;
       final history = library['history'] as List,
           favorites = library['favorites'] as List;
+      final followedCreators = library['followedCreators'] as List? ?? [];
       final media = library['mediaHistory'] as Map? ?? {};
       if (media.length > 300 ||
           history.length > 300 ||
-          favorites.length > 20000) {
+          favorites.length > 20000 ||
+          followedCreators.length > 5000) {
         throw const FormatException('备份记录过多');
       }
       for (final row in [...history, ...media.values]) {
@@ -1677,13 +1747,22 @@ class LocalStore extends ChangeNotifier {
       for (final row in favorites) {
         Drama.fromJson(Map<String, dynamic>.from(row as Map));
       }
+      final creatorIds = <String>{};
+      for (final row in followedCreators) {
+        final creator = FollowedCreator.fromJson(
+          Map<String, dynamic>.from(row as Map),
+        );
+        if (!creatorIds.add(creator.id)) {
+          throw const FormatException('备份作者收藏存在重复记录');
+        }
+      }
       final states = library['followStates'] as Map? ?? {};
       final seriesCandidates = library['seriesCandidates'] as List? ?? [];
       final favoriteIds = favorites.map((row) => (row as Map)['id']).toSet();
       _readBackupFollowSync(library);
       if (states.length > 20000 ||
           states.keys.any((id) => id is! String || !favoriteIds.contains(id))) {
-        throw const FormatException('备份追剧状态无效');
+        throw const FormatException('备份收藏状态无效');
       }
       for (final row in states.values) {
         FollowState.fromJson(Map<String, dynamic>.from(row as Map));
@@ -1783,6 +1862,25 @@ class LocalStore extends ChangeNotifier {
           (library['knownSources'] as List).contains(SourceSite.bilibili.id))) {
         hiddenSources.add(SourceSite.bilibili.id);
       }
+      if (!(library['knownSources'] is List &&
+              (library['knownSources'] as List).contains(
+                SourceSite.bilibiliLive.id,
+              )) &&
+          (!(library['knownSources'] is List &&
+                  (library['knownSources'] as List).contains(
+                    SourceSite.bilibili.id,
+                  )) ||
+              hiddenSources.contains(SourceSite.bilibili.id))) {
+        hiddenSources.add(SourceSite.bilibiliLive.id);
+      }
+      if (!(library['knownSources'] is List &&
+          (library['knownSources'] as List).contains(SourceSite.tiktok.id))) {
+        hiddenSources.add(SourceSite.tiktok.id);
+      }
+      if (!(library['knownSources'] is List &&
+          (library['knownSources'] as List).contains(SourceSite.youtube.id))) {
+        hiddenSources.add(SourceSite.youtube.id);
+      }
       values.addAll({
         if (syncRecords != null)
           _key('lanRecords', profile.id): jsonEncode(
@@ -1790,6 +1888,9 @@ class LocalStore extends ChangeNotifier {
           ),
         _key('history', profile.id): jsonEncode(library['history']),
         _key('favorites', profile.id): jsonEncode(library['favorites']),
+        _key('followedCreators', profile.id): jsonEncode(
+          library['followedCreators'] ?? [],
+        ),
         _key('followStates', profile.id): jsonEncode(
           library['followStates'] ?? {},
         ),

@@ -13,6 +13,7 @@ import (
 	fhttp "github.com/bogdanfinn/fhttp"
 	tlsclient "github.com/bogdanfinn/tls-client"
 	"github.com/bogdanfinn/tls-client/profiles"
+	"golang.org/x/net/publicsuffix"
 )
 
 const huangguoBrowserProfile = "Chrome 150"
@@ -26,6 +27,7 @@ type huangguoBrowserTransport struct {
 	base      http.RoundTripper
 	router    *proxyRouter
 	host      string
+	source    string
 	insecure  bool
 	record    func(diagnosticEvent)
 	mu        sync.Mutex
@@ -36,7 +38,7 @@ type huangguoBrowserTransport struct {
 func newHuangguoBrowserTransport(base http.RoundTripper, downloader *Downloader) *huangguoBrowserTransport {
 	configured, _ := url.Parse(downloader.providerBaseURL(sourceHuangguoVideo))
 	transport := &huangguoBrowserTransport{
-		base: base, router: downloader.proxyRouter, host: configured.Host,
+		base: base, router: downloader.proxyRouter, host: configured.Host, source: sourceHuangguoVideo,
 		insecure: downloader.cfg.InsecureTLS, record: downloader.recordDiagnostic,
 		clients: make(map[string]browserHTTPClient),
 	}
@@ -45,14 +47,26 @@ func newHuangguoBrowserTransport(base http.RoundTripper, downloader *Downloader)
 }
 
 type subscriptionBrowserKey struct{}
+type subscriptionBrowserSourceKey struct{}
 
 func newSubscriptionBrowserTransport(base http.RoundTripper, downloader *Downloader) *huangguoBrowserTransport {
-	transport := &huangguoBrowserTransport{base: base, router: downloader.proxyRouter, insecure: downloader.cfg.InsecureTLS, record: downloader.recordDiagnostic, clients: make(map[string]browserHTTPClient)}
+	transport := &huangguoBrowserTransport{base: base, router: downloader.proxyRouter, source: "subscription", insecure: downloader.cfg.InsecureTLS, record: downloader.recordDiagnostic, clients: make(map[string]browserHTTPClient)}
 	transport.newClient = transport.createClient
 	return transport
 }
-func subscriptionBrowserContext(ctx context.Context) context.Context {
-	return context.WithValue(ctx, subscriptionBrowserKey{}, true)
+func subscriptionBrowserContext(ctx context.Context, source ...string) context.Context {
+	ctx = context.WithValue(ctx, subscriptionBrowserKey{}, true)
+	if len(source) > 0 && source[0] != "" {
+		ctx = context.WithValue(ctx, subscriptionBrowserSourceKey{}, source[0])
+	}
+	return ctx
+}
+
+func subscriptionBrowserSource(ctx context.Context, fallback string) string {
+	if source, ok := ctx.Value(subscriptionBrowserSourceKey{}).(string); ok && source != "" {
+		return source
+	}
+	return fallback
 }
 
 func (transport *huangguoBrowserTransport) matches(request *http.Request) bool {
@@ -113,6 +127,7 @@ func (transport *huangguoBrowserTransport) client(request *http.Request) (browse
 }
 
 func huangguoBrowserHeaders(request *http.Request) fhttp.Header {
+	subscriptionBrowser := request.Context().Value(subscriptionBrowserKey{}) == true
 	headers := fhttp.Header{
 		"sec-ch-ua":                 {`"Chromium";v="150", "Google Chrome";v="150", "Not_A Brand";v="24"`},
 		"sec-ch-ua-mobile":          {"?0"},
@@ -127,6 +142,19 @@ func huangguoBrowserHeaders(request *http.Request) fhttp.Header {
 		"accept-language":           {"zh-CN,zh;q=0.9"},
 		fhttp.HeaderOrderKey:        {"sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "upgrade-insecure-requests", "user-agent", "accept", "sec-fetch-site", "sec-fetch-mode", "sec-fetch-user", "sec-fetch-dest", "referer", "accept-encoding", "accept-language", "cookie"},
 	}
+	if userAgent := request.Header.Get("User-Agent"); subscriptionBrowser && userAgent != "" {
+		headers["user-agent"] = []string{userAgent}
+		switch {
+		case strings.Contains(userAgent, "Windows NT"):
+			headers["sec-ch-ua-platform"] = []string{`"Windows"`}
+		case strings.Contains(userAgent, "Macintosh") || strings.Contains(userAgent, "Mac OS X"):
+			headers["sec-ch-ua-platform"] = []string{`"macOS"`}
+		case strings.Contains(userAgent, "Android"):
+			headers["sec-ch-ua-platform"] = []string{`"Android"`}
+		case strings.Contains(userAgent, "Linux"):
+			headers["sec-ch-ua-platform"] = []string{`"Linux"`}
+		}
+	}
 	if mode := request.Header.Get("Sec-Fetch-Mode"); mode != "" && mode != "navigate" {
 		headers["accept"] = []string{firstNonEmpty(request.Header.Get("Accept"), "*/*")}
 		headers["sec-fetch-mode"] = []string{mode}
@@ -136,6 +164,10 @@ func huangguoBrowserHeaders(request *http.Request) fhttp.Header {
 	}
 	for key, values := range request.Header {
 		lower := strings.ToLower(key)
+		if subscriptionBrowser && (lower == "user-agent" || lower == "accept") {
+			headers[lower] = append([]string(nil), values...)
+			continue
+		}
 		if _, fixed := headers[lower]; fixed || lower == "host" || lower == "connection" {
 			continue
 		}
@@ -143,10 +175,26 @@ func huangguoBrowserHeaders(request *http.Request) fhttp.Header {
 	}
 	if referer := request.Header.Get("Referer"); referer == "" {
 		headers["sec-fetch-site"] = []string{"none"}
-	} else if parsed, err := url.Parse(referer); err == nil && !strings.EqualFold(parsed.Host, request.URL.Host) {
-		headers["sec-fetch-site"] = []string{"cross-site"}
+	} else if parsed, err := url.Parse(referer); err == nil && providerMediaOrigin(parsed) != providerMediaOrigin(request.URL) {
+		if browserSameSite(parsed, request.URL) {
+			headers["sec-fetch-site"] = []string{"same-site"}
+		} else {
+			headers["sec-fetch-site"] = []string{"cross-site"}
+		}
 	}
 	return headers
+}
+
+func browserSameSite(left, right *url.URL) bool {
+	if left == nil || right == nil || !strings.EqualFold(left.Scheme, right.Scheme) {
+		return false
+	}
+	leftDomain, leftErr := publicsuffix.EffectiveTLDPlusOne(strings.TrimSuffix(strings.ToLower(left.Hostname()), "."))
+	rightDomain, rightErr := publicsuffix.EffectiveTLDPlusOne(strings.TrimSuffix(strings.ToLower(right.Hostname()), "."))
+	if leftErr != nil || rightErr != nil {
+		return strings.EqualFold(left.Hostname(), right.Hostname())
+	}
+	return leftDomain == rightDomain
 }
 
 func standardBrowserHeaders(headers fhttp.Header) http.Header {
@@ -163,7 +211,7 @@ func (transport *huangguoBrowserTransport) RoundTrip(request *http.Request) (*ht
 	}
 	client, err := transport.client(request)
 	if err != nil {
-		return nil, fmt.Errorf("黄果浏览器客户端初始化失败：%w", publicError(err))
+		return nil, fmt.Errorf("浏览器兼容客户端初始化失败：%w", publicError(err))
 	}
 	upstream, err := fhttp.NewRequestWithContext(request.Context(), request.Method, request.URL.String(), request.Body)
 	if err != nil {
@@ -198,10 +246,10 @@ func (transport *huangguoBrowserTransport) RoundTrip(request *http.Request) (*ht
 		if result.StatusCode >= 400 || strings.EqualFold(result.Header.Get("Cf-Mitigated"), "challenge") {
 			level = "warning"
 		}
-		transport.record(diagnosticEvent{Event: "network.browser_request", Level: level, Source: sourceHuangguoVideo,
+		transport.record(diagnosticEvent{Event: "network.browser_request", Level: level, Source: subscriptionBrowserSource(request.Context(), transport.source),
 			Host: request.URL.Hostname(), HTTPStatus: result.StatusCode, Client: huangguoBrowserProfile,
 			Protocol: result.Proto, CFRay: truncate(result.Header.Get("Cf-Ray"), 128),
-			ResponseType: truncate(result.Header.Get("Content-Type"), 128), Message: "黄果浏览器指纹请求完成"})
+			ResponseType: truncate(result.Header.Get("Content-Type"), 128), Message: "浏览器指纹请求完成"})
 	}
 	return result, nil
 }

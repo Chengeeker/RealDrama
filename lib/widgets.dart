@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'app_layout.dart';
 import 'core_bridge.dart';
+import 'app_diagnostics.dart';
 import 'models.dart';
 import 'remote_widgets.dart';
 
@@ -249,7 +250,7 @@ class DramaCover extends StatelessWidget {
               ),
             ),
           ),
-          if (drama.episodes > 0)
+          if (SourceSite.isSeries(drama.source) && drama.episodes > 0)
             Positioned(
               left: 9,
               bottom: 9,
@@ -312,9 +313,16 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   bool _retryQueued = false;
   String? _failedPath;
 
-  Map<String, String>? get _imageHeaders => widget.drama.source == 'bilibili'
-      ? const {'Referer': 'https://www.bilibili.com/'}
-      : null;
+  Map<String, String>? get _imageHeaders => switch (widget.drama.source) {
+    'crj91' => const {
+      'Referer': 'https://91crdj.com/',
+      'User-Agent':
+          'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+    },
+    'bilibili' => const {'Referer': 'https://www.bilibili.com/'},
+    'bilibili-live' => const {'Referer': 'https://live.bilibili.com/'},
+    _ => null,
+  };
 
   @override
   void initState() {
@@ -430,7 +438,14 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
           fit: BoxFit.cover,
           cacheWidth: 440,
           excludeFromSemantics: true,
-          errorBuilder: (_, error, stack) => _failed(snapshot.data),
+          errorBuilder: (_, error, stack) {
+            if (!_coverFailed)
+              AppDiagnostics.record('cover_decode_failed', {
+                'source': widget.drama.source,
+                'exceptionType': error.runtimeType.toString(),
+              });
+            return _failed(snapshot.data);
+          },
         );
       }
       return Image.file(
@@ -438,7 +453,14 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
         fit: BoxFit.cover,
         cacheWidth: 440,
         excludeFromSemantics: true,
-        errorBuilder: (_, error, stack) => _failed(snapshot.data),
+        errorBuilder: (_, error, stack) {
+          if (!_coverFailed)
+            AppDiagnostics.record('cover_decode_failed', {
+              'source': widget.drama.source,
+              'exceptionType': error.runtimeType.toString(),
+            });
+          return _failed(snapshot.data);
+        },
       );
     },
   );
@@ -492,6 +514,12 @@ class DramaTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final television = AppLayout.isTelevision(context);
+    final contentKind = SourceSite.libraryKindFor(drama.source);
+    final semanticLabel = switch (contentKind) {
+      'video' => '${drama.title}，视频',
+      'live' => '${drama.title}，直播间',
+      _ => '${drama.title}，${drama.episodes}集',
+    };
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -607,8 +635,7 @@ class DramaTile extends StatelessWidget {
           onFocus: onFocus,
           onPressed: onTap,
           selected: selected ?? false,
-          label:
-              '${drama.title}，${drama.episodes}集${badge == null ? '' : '，$badge'}',
+          label: '$semanticLabel${badge == null ? '' : '，$badge'}',
           child: content,
         ),
       );
@@ -616,7 +643,7 @@ class DramaTile extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: '${drama.title}，${drama.episodes}集',
+      label: semanticLabel,
       child: InkWell(
         enableFeedback: !hapticOnTap,
         onTap: onTap,

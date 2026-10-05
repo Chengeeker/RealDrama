@@ -1210,7 +1210,7 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
                 child: SizedBox.expand(
                   child: _ShortDramaPage(
                     drama: _items[index],
-                    active: index == _index,
+                    active: widget.active && index == _index,
                     keepPlayerAlive:
                         !{
                           'douyin',
@@ -1738,8 +1738,9 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
                 builder: (context, _) => DouyinAuthorPanel(
                   drama: detail.drama,
                   onOpen: () => widget.onOpenDetail(detail.drama),
-                  followed: widget.store.isFavorite(widget.drama.id),
-                  onFollow: () => widget.onFollow(widget.drama),
+                  followed: widget.store.isCreatorFollowed(detail.drama),
+                  onFollow: () =>
+                      unawaited(widget.store.toggleCreatorFollow(detail.drama)),
                 ),
               )
             : AppHaptics.tapTarget(
@@ -1778,10 +1779,25 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
                             ),
                           ],
                         ),
-                        ValueListenableBuilder<int>(
-                          valueListenable: _episode,
-                          builder: (_, index, _) => Text(
-                            '${widget.drama.category.isEmpty ? '短剧' : widget.drama.category} · 第 ${detail.episodes[index.clamp(0, detail.episodes.length - 1)].number} 集',
+                        if (SourceSite.isSeries(widget.drama.source))
+                          ValueListenableBuilder<int>(
+                            valueListenable: _episode,
+                            builder: (_, index, _) => Text(
+                              '${widget.drama.category.isEmpty ? '短剧' : widget.drama.category} · 第 ${detail.episodes[index.clamp(0, detail.episodes.length - 1)].number} 集',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                shadows: [
+                                  Shadow(color: Colors.black, blurRadius: 8),
+                                ],
+                              ),
+                            ),
+                          )
+                        else
+                          Text(
+                            '${SourceSite.libraryKindFor(widget.drama.source) == 'live' ? '直播' : '视频'} · ${SourceSite.byId(widget.drama.source).name}',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -1792,7 +1808,6 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
                               ],
                             ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -1819,17 +1834,15 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
                 },
               ),
               const SizedBox(height: 20),
-              if (!SourceSite.byId(widget.drama.source).supportsCreator)
-                _FeedAction(
-                  icon: widget.store.isFavorite(widget.drama.id)
-                      ? Icons.bookmark_rounded
-                      : Icons.bookmark_border_rounded,
-                  label: '追剧',
-                  active: widget.store.isFavorite(widget.drama.id),
-                  onTap: () => widget.onFollow(widget.drama),
-                ),
-              if (!SourceSite.byId(widget.drama.source).supportsCreator)
-                const SizedBox(height: 20),
+              _FeedAction(
+                icon: widget.store.isFavorite(widget.drama.id)
+                    ? Icons.bookmark_rounded
+                    : Icons.bookmark_border_rounded,
+                label: SourceSite.isSeries(widget.drama.source) ? '追剧' : '收藏',
+                active: widget.store.isFavorite(widget.drama.id),
+                onTap: () => widget.onFollow(widget.drama),
+              ),
+              const SizedBox(height: 20),
               if ({'douyin', 'bilibili'}.contains(widget.drama.source))
                 _FeedAction(
                   icon: Icons.chat_bubble_outline_rounded,

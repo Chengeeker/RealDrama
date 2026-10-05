@@ -16,24 +16,36 @@ Future<void> showDramaActions(
 }) async {
   final epoch = store.profileEpoch;
   final following = store.following(drama.id);
+  final series = SourceSite.isSeries(drama.source);
   final choices = <(String, String, IconData)>[
     if (onContinue != null && store.watched(drama.id) != null)
       ('continue', '继续观看', Icons.play_arrow_rounded),
-    ('favorite', following == null ? '加入追剧' : '取消追剧', Icons.bookmark_outline),
-    for (final status in FollowStatus.values)
-      (
-        'status:${status.name}',
-        '标记${status.label}',
-        switch (status) {
-          FollowStatus.planned => Icons.bookmark_add_outlined,
-          FollowStatus.watching => Icons.play_circle_outline,
-          FollowStatus.watched => Icons.check_circle_outline,
-        },
-      ),
-    if (following != null && following.hasUpdates)
+    (
+      'favorite',
+      series
+          ? following == null
+                ? '加入追剧'
+                : '取消追剧'
+          : store.isFavorite(drama.id)
+          ? '取消收藏'
+          : '加入收藏',
+      Icons.bookmark_outline,
+    ),
+    if (series)
+      for (final status in FollowStatus.values)
+        (
+          'status:${status.name}',
+          '标记${status.label}',
+          switch (status) {
+            FollowStatus.planned => Icons.bookmark_add_outlined,
+            FollowStatus.watching => Icons.play_circle_outline,
+            FollowStatus.watched => Icons.check_circle_outline,
+          },
+        ),
+    if (series && following != null && following.hasUpdates)
       ('read', '标记 ${following.updateLabel}已读', Icons.mark_email_read_outlined),
     if (onDownload != null && store.canDownload)
-      ('download', '下载选集', Icons.download_outlined),
+      ('download', series ? '下载选集' : '下载内容', Icons.download_outlined),
     if (onSelect != null && store.canDownload)
       ('select', '多选下载', Icons.checklist_rounded),
     if (history && store.watched(drama.id) != null)
@@ -57,13 +69,14 @@ Future<void> showDramaActions(
               ],
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 10, 24, 8),
-          child: Text(
-            '手动标记已看会保留真实播放进度。',
-            style: Theme.of(context).textTheme.bodySmall,
+        if (series)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 10, 24, 8),
+            child: Text(
+              '手动标记已看会保留真实播放进度。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ),
-        ),
       ],
     ),
   );

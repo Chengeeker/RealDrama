@@ -12,6 +12,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import 'local_store.dart';
+import 'app_diagnostics.dart';
 import 'models.dart';
 import 'source_subscriptions.dart';
 import 'source_status.dart';
@@ -297,6 +298,14 @@ class SubscriptionRuntime {
         final stepRequest = request;
         final envelope = await _runSourceWorker(stepRequest);
         if (envelope['ok'] != true) {
+          AppDiagnostics.record('subscription_failure', {
+            'source': source,
+            'operation': action,
+            'code': envelope['code'],
+            'httpStatus': envelope['httpStatus'],
+            'exceptionType': envelope['exceptionType'],
+            'scriptLine': envelope['scriptLine'],
+          });
           final status = envelope['httpStatus'];
           if (status is int && status >= 400 && status <= 599) {
             if (status == 401 || status == 403) {
@@ -358,6 +367,14 @@ class SubscriptionRuntime {
         request = {'command': 'next', 'id': id, 'response': response};
       }
       throw const FormatException('站源单次请求次数过多');
+    } catch (error) {
+      AppDiagnostics.record('subscription_request_failed', {
+        'source': source,
+        'operation': action,
+        'exceptionType': error.runtimeType.toString(),
+        'code': error is TimeoutException ? 'timeout' : 'request_failed',
+      });
+      rethrow;
     } finally {
       final read = _httpReads.remove(id);
       if (read != null) {
@@ -396,6 +413,9 @@ class SubscriptionRuntime {
       throw const FormatException('站源请求超出声明域名');
     if (deadline.difference(DateTime.now()) <= Duration.zero)
       throw const FormatException('站源请求超时');
+    final requestHeaders = Map<String, dynamic>.from(
+      command['headers'] as Map? ?? const {},
+    );
     String? cookie;
     if (command['credential'] == true) {
       if (!package.credentialDomains.contains(uri.host))
@@ -409,34 +429,49 @@ class SubscriptionRuntime {
       cookie = await const FlutterSecureStorage().read(key: key);
       if ((cookie == null || cookie.isEmpty) &&
           package.document['credentialRequired'] == true)
-        throw const FormatException('请在站源管理中配置账号 Cookie');
+        throw FormatException(
+          group == 'youtube'
+              ? '请在 YouTube 源设置中配置 Cookie'
+              : '请在站源管理中配置账号 Cookie',
+        );
     }
     if (command['sign'] == true) {
-      if (package.credentialGroup != 'douyin' ||
-          !Platform.isAndroid ||
-          !package.credentialDomains.contains(uri.host))
-        throw const FormatException('抖音签名目前仅支持 Android');
-      final token = (cookie ?? '')
-          .split(';')
-          .map((item) => item.trim())
-          .where((item) => item.startsWith('msToken='))
-          .firstOrNull;
-      final parameters = {
-        ...uri.queryParameters,
-        if (token != null) 'msToken': token.substring('msToken='.length),
-      };
-      uri = uri.replace(queryParameters: parameters);
-      final signature = await const MethodChannel('realdrama/douyin')
-          .invokeMethod<String>('sign', {
-            'query': uri.query,
-            'userAgent': (command['headers'] as Map?)?['User-Agent'] ?? '',
-          })
-          .timeout(const Duration(seconds: 6));
-      if (signature == null || signature.isEmpty)
-        throw const FormatException('抖音签名暂不可用');
-      uri = uri.replace(
-        query: '${uri.query}&a_bogus=${Uri.encodeComponent(signature)}',
-      );
+      if (package.credentialGroup == 'youtube') {
+        if (cookie?.isNotEmpty != true ||
+            !package.credentialDomains.contains(uri.host)) {
+          throw const FormatException('YouTube 授权参数不可用');
+        }
+        requestHeaders['Authorization'] = _youtubeAuthorization(
+          cookie!,
+          uri.origin,
+        );
+      } else {
+        if (package.credentialGroup != 'douyin' ||
+            !Platform.isAndroid ||
+            !package.credentialDomains.contains(uri.host))
+          throw const FormatException('抖音签名目前仅支持 Android');
+        final token = (cookie ?? '')
+            .split(';')
+            .map((item) => item.trim())
+            .where((item) => item.startsWith('msToken='))
+            .firstOrNull;
+        final parameters = {
+          ...uri.queryParameters,
+          if (token != null) 'msToken': token.substring('msToken='.length),
+        };
+        uri = uri.replace(queryParameters: parameters);
+        final signature = await const MethodChannel('realdrama/douyin')
+            .invokeMethod<String>('sign', {
+              'query': uri.query,
+              'userAgent': (command['headers'] as Map?)?['User-Agent'] ?? '',
+            })
+            .timeout(const Duration(seconds: 6));
+        if (signature == null || signature.isEmpty)
+          throw const FormatException('抖音签名暂不可用');
+        uri = uri.replace(
+          query: '${uri.query}&a_bogus=${Uri.encodeComponent(signature)}',
+        );
+      }
     }
     final body = command['body'];
     final read = {
@@ -450,8 +485,10 @@ class SubscriptionRuntime {
       ...read,
       'subscriptionHttp': {
         'url': uri.toString(),
+        'source': package.id,
+        'operation': _activeActions[id] ?? '',
         'method': command['method'] ?? 'GET',
-        'headers': command['headers'] ?? {},
+        'headers': requestHeaders,
         'binary': command['binary'] == true,
         'body': body == null
             ? ''
@@ -474,7 +511,11 @@ class SubscriptionRuntime {
         request,
         'DuanjuRequest',
       ).timeout(remaining);
-      if (envelope['ok'] != true) return {'status': 0, 'text': ''};
+      if (envelope['ok'] != true) {
+        final error = envelope['error'];
+        if (error is String && error.isNotEmpty) throw FormatException(error);
+        throw const FormatException('站源网络请求失败，请稍后重试');
+      }
       return Map<String, dynamic>.from(envelope['data'] as Map);
     }
 
@@ -483,6 +524,12 @@ class SubscriptionRuntime {
           'catalog',
           'categories',
           'search',
+          'detail',
+          'resolve',
+          'live',
+          'creator',
+          'comments',
+          'danmaku',
         }.contains(_activeActions[id])) {
       return _pacedDouyinRequest('$profile:douyin', id, deadline, send);
     }
@@ -550,7 +597,9 @@ class SubscriptionRuntime {
         _douyinCooldownUntil[key] = pauseUntil;
         _douyinNextRequestAt[key] = pauseUntil;
         final seconds = cooldown.inSeconds;
-        throw FormatException('抖音接口拒绝或限制了请求，已暂停相关请求约 $seconds 秒，请稍后手动重试');
+        throw FormatException(
+          '抖音接口拒绝或限制了请求（HTTP $statusCode），已暂停约 $seconds 秒，请稍后手动重试',
+        );
       }
       return response;
     } finally {
@@ -948,4 +997,19 @@ class SubscriptionRuntime {
       }
     }
   }
+}
+
+String _youtubeAuthorization(String cookie, String origin) {
+  final sapisid = cookie
+      .split(';')
+      .map((item) => item.trim())
+      .where((item) => item.startsWith('SAPISID='))
+      .map((item) => item.substring('SAPISID='.length))
+      .firstOrNull;
+  if (sapisid == null || sapisid.isEmpty) {
+    throw const FormatException('YouTube Cookie 缺少 SAPISID 授权字段');
+  }
+  final timestamp = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
+  final digest = sha1.convert(utf8.encode('$timestamp $sapisid $origin'));
+  return 'SAPISIDHASH ${timestamp}_${digest.toString()}';
 }

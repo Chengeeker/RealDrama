@@ -4,12 +4,19 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'core_bridge.dart';
 import 'local_store.dart';
 import 'source_subscriptions.dart';
+import 'youtube_settings_screen.dart';
 
 class SourceSubscriptionsScreen extends StatefulWidget {
-  const SourceSubscriptionsScreen({super.key, required this.store});
+  const SourceSubscriptionsScreen({
+    super.key,
+    required this.store,
+    required this.repository,
+  });
   final LocalStore store;
+  final AppRepository repository;
   @override
   State<SourceSubscriptionsScreen> createState() =>
       _SourceSubscriptionsScreenState();
@@ -154,6 +161,15 @@ class _SourceSubscriptionsScreenState extends State<SourceSubscriptionsScreen> {
     );
     if (accepted == true) await manager.install(current, entry);
   });
+
+  Future<void> configureYouTube() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => YouTubeSettingsScreen(
+        store: widget.store,
+        repository: widget.repository,
+      ),
+    ),
+  );
   Future<void> remove(String id) => run(() async {
     final accepted = await showDialog<bool>(
       context: context,
@@ -386,6 +402,14 @@ class _SourceSubscriptionsScreenState extends State<SourceSubscriptionsScreen> {
                       Wrap(
                         spacing: 8,
                         children: [
+                          if (package.sources.any(
+                            (source) => source.id == 'youtube',
+                          ))
+                            IconButton(
+                              tooltip: 'YouTube Cookie 设置',
+                              onPressed: working ? null : configureYouTube,
+                              icon: const Icon(Icons.key_outlined),
+                            ),
                           if (manager.updates.containsKey(package.id))
                             FilledButton.icon(
                               onPressed: working

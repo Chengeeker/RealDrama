@@ -58,7 +58,7 @@ class PersonalizationScreen extends StatelessWidget {
                     items: const [
                       DropdownMenuItem(value: 'home', child: Text('首页')),
                       DropdownMenuItem(value: 'discover', child: Text('发现')),
-                      DropdownMenuItem(value: 'following', child: Text('追剧')),
+                      DropdownMenuItem(value: 'following', child: Text('收藏')),
                       DropdownMenuItem(value: 'settings', child: Text('设置')),
                     ],
                     onChanged: (value) {

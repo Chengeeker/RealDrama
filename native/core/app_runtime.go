@@ -171,6 +171,7 @@ type nativeEngine struct {
 	recommendations  map[string]nativeRecommendationState
 	catalogSaveError error
 	sourceSaveError  error
+	coverOnce        sync.Once
 	covers           *nativeCoverCache
 	stream           *nativeStreamServer
 	playbacks        map[string]nativePlaybackChoice
@@ -381,6 +382,8 @@ func nativeDispatch(input nativeInput) (any, error) {
 		ctx = work
 	}
 	switch input.Action {
+	case "subscriptionCover":
+		return engine.subscriptionCover(ctx, input)
 	case "subscriptionPlan":
 		return engine.subscriptionPlan(ctx, input.Subscription)
 	case "subscriptionPrefetch":

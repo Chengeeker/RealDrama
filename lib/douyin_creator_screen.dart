@@ -222,13 +222,21 @@ class _DouyinCreatorScreenState extends State<DouyinCreatorScreen> {
                       builder: (context, _) => SizedBox(
                         width: double.infinity,
                         child: FilledButton.tonal(
-                          onPressed: () => unawaited(
-                            widget.store.toggleFavorite(widget.drama),
-                          ),
+                          onPressed:
+                              !SourceSite.byId(
+                                    widget.drama.source,
+                                  ).supportsCreator ||
+                                  FollowedCreator.keyFor(widget.drama) == null
+                              ? null
+                              : () => unawaited(
+                                  widget.store.toggleCreatorFollow(
+                                    widget.drama,
+                                  ),
+                                ),
                           child: Text(
-                            widget.store.isFavorite(widget.drama.id)
-                                ? '已关注 · 本地收藏'
-                                : '关注 · 加入本地收藏',
+                            widget.store.isCreatorFollowed(widget.drama)
+                                ? '已关注 · 仅保存在本机'
+                                : '关注作者 · 仅保存在本机',
                           ),
                         ),
                       ),

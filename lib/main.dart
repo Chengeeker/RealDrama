@@ -27,6 +27,7 @@ import 'widgets.dart';
 
 Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
+  ErrorWidget.builder = _buildFailurePanel;
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks([
       'dart_simple_live / Douyin request signer',
@@ -53,6 +54,38 @@ Future<void> main(List<String> arguments) async {
   }
   final device = await AppDevice.detect();
   runApp(AppBootstrap(device: device));
+}
+
+Widget _buildFailurePanel(FlutterErrorDetails details) {
+  final frames = details.stack?.toString().split('\n') ?? const <String>[];
+  final location = frames
+      .where((frame) => frame.contains('package:duanju_app/'))
+      .map(
+        (frame) =>
+            RegExp(r'package:duanju_app/[^)\s]+').firstMatch(frame)?.group(0),
+      )
+      .whereType<String>()
+      .take(3)
+      .join('\n');
+  final diagnostic = '${details.exception.runtimeType}\n$location';
+  return ColoredBox(
+    color: const Color(0xFF1B1B20),
+    child: Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          '界面出现异常\n请保留此页面截图，便于定位问题。\n\n$diagnostic',
+          textDirection: TextDirection.ltr,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Color(0xFFE5E5EA),
+            fontSize: 16,
+            decoration: TextDecoration.none,
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class AppBootstrap extends StatefulWidget {

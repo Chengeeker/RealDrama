@@ -218,7 +218,8 @@ class CatalogBrowser {
   List<_CatalogChoice> _choices(SourceGroup group) {
     if (group.sources.length == 1 &&
         (group.sources.single.isDouyin ||
-            group.sources.single.id == 'bilibili')) {
+            group.sources.single.id == 'bilibili' ||
+            group.sources.single.id == 'bilibili-live')) {
       final source = group.sources.single;
       return [
         for (final category in _menus[source.id] ?? const <CatalogCategory>[])
@@ -334,6 +335,8 @@ class CatalogBrowser {
   List<CatalogCategory> categories(SourceGroup group) => [
     group.id == 'bilibili'
         ? const CatalogCategory('', '个性推荐')
+        : group.id == 'bilibili-live'
+        ? const CatalogCategory('', '推荐')
         : group.id == 'douyin'
         ? const CatalogCategory('', '推荐')
         : group.id == 'douyin-live'

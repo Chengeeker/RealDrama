@@ -16,7 +16,7 @@ class PlaybackRecovery {
     if (_attempts >= maxAttempts) {
       return PlaybackRecoveryAction.stop;
     }
-    if (plan.hasAlternative) {
+    if (plan.hasAlternative && (_refreshed || _attempts < maxAttempts - 1)) {
       _attempts++;
       return PlaybackRecoveryAction.alternative;
     }

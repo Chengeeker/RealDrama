@@ -56,6 +56,9 @@ class DouyinAuthorPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name = drama.creatorName.isEmpty ? '查看作者' : drama.creatorName;
+    final canFollow =
+        SourceSite.byId(drama.source).supportsCreator &&
+        FollowedCreator.keyFor(drama) != null;
     final descriptionStyle = DefaultTextStyle.of(context).style.merge(
       const TextStyle(
         color: Colors.white,
@@ -126,13 +129,16 @@ class DouyinAuthorPanel extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            FilledButton.tonal(
-              onPressed: onFollow,
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                minimumSize: const Size(0, 34),
+            Tooltip(
+              message: '仅保存在本机，不会修改源站账号',
+              child: FilledButton.tonal(
+                onPressed: canFollow ? onFollow : null,
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  minimumSize: const Size(0, 34),
+                ),
+                child: Text(followed ? '已关注' : '关注'),
               ),
-              child: Text(followed ? '已关注' : '关注'),
             ),
           ],
         ),

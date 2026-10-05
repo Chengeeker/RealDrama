@@ -9,6 +9,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import 'models.dart';
+import 'cover_decoder.dart';
 import 'subscription_runtime.dart';
 import 'source_subscriptions.dart';
 import 'douyin_source.dart';
@@ -788,6 +789,7 @@ class NativeRepository extends AppRepository {
       if ({
         'cover',
         'prepareCover',
+        'subscriptionCover',
         'detail',
         'metadata',
         'resolve',
@@ -926,11 +928,40 @@ class NativeRepository extends AppRepository {
   Future<CatalogPage> cached(String source, {String category = ''}) =>
       _subscriptions.loadCached(source, category);
 
+  final _coverDecoder = CoverDecoder();
+
   @override
   Future<String> cover(Drama drama, {bool force = false}) async {
     _authorize(drama.source);
     if (drama.cover.isEmpty) throw AppFailure('海报暂不可用');
-    return drama.source == 'bilibili'
+    if (drama.source == 'crj91') {
+      final address = Uri.parse(
+        'https://91crdj.com/',
+      ).resolve(drama.cover.replaceAll('&amp;', '&'));
+      final input = {
+        ...drama.toJson(),
+        'cover': address.scheme == 'http'
+            ? address.replace(scheme: 'https').toString()
+            : address.toString(),
+      };
+      final prepared = await _call({
+        'action': 'subscriptionCover',
+        'drama': input,
+        'force': force,
+      });
+      final file = prepared['path'] as String;
+      if (prepared['heic'] != true) return file;
+      return _coverDecoder.convert(
+        file,
+        () => _call({
+          'action': 'subscriptionCover',
+          'drama': input,
+          'command': 'prepare',
+        }),
+        force: force,
+      );
+    }
+    return {'bilibili', 'bilibili-live'}.contains(drama.source)
         ? BilibiliSource.imageURL(drama.cover)
         : drama.cover;
   }
@@ -1201,7 +1232,17 @@ class NativeRepository extends AppRepository {
     Drama drama,
     Episode episode, {
     int quality = 0,
-  }) => resolve(drama, episode, quality: quality);
+  }) async {
+    final epoch = _playbackEpoch;
+    final data = await _subscriptions.execute(drama.source, 'resolve', {
+      'drama': drama.toJson(),
+      'chapter': episode.raw,
+      'index': episode.number,
+      'quality': quality,
+      'force': true,
+    });
+    return _openSubscriptionPlan(drama.source, data, epoch);
+  }
 
   @override
   Future<void> release(String session) async {

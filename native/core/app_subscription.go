@@ -45,6 +45,8 @@ var subscriptionID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 var subscriptionDigest = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 type subscriptionHTTPRequest struct {
+	Source            string            `json:"source"`
+	Operation         string            `json:"operation"`
 	URL               string            `json:"url"`
 	Binary            bool              `json:"binary"`
 	Method            string            `json:"method"`
@@ -76,7 +78,11 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 		ctx = context.WithValue(ctx, backgroundCatalogKey{}, true)
 	}
 	if command.Browser && command.Cookie == "" {
-		ctx = subscriptionBrowserContext(ctx)
+		source := command.Source
+		if !subscriptionID.MatchString(source) {
+			source = "subscription"
+		}
+		ctx = subscriptionBrowserContext(ctx, source)
 	}
 	request, err := http.NewRequestWithContext(ctx, command.Method, command.URL, strings.NewReader(command.Body))
 	if err != nil {
@@ -89,12 +95,24 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 				return nil, errors.New("请求头过大")
 			}
 			request.Header.Set(key, value)
+		case "x-origin", "x-goog-visitor-id", "x-youtube-client-name", "x-youtube-client-version":
+			if address.Hostname() != "www.youtube.com" || address.Path != "/youtubei/v1/browse" {
+				return nil, errors.New("YouTube 请求头仅允许用于信息流")
+			}
+			if len(value) > 16384 {
+				return nil, errors.New("请求头过大")
+			}
+			request.Header.Set(key, value)
 		default:
 			return nil, errors.New("请求头不受支持")
 		}
 	}
 	if command.Cookie != "" {
-		if command.Method != "GET" && !(command.Method == "POST" && address.Hostname() == "www.douyin.com" && address.Path == "/aweme/v2/web/module/feed/" && command.Body == "") {
+		allowedReadPost := command.Method == "POST" &&
+			((address.Hostname() == "www.douyin.com" && address.Path == "/aweme/v2/web/module/feed/" && command.Body == "") ||
+				(address.Hostname() == "www.tiktok.com" && address.Path == "/api/recommend/item_list/" && command.Body == "") ||
+				(address.Hostname() == "www.youtube.com" && address.Path == "/youtubei/v1/browse"))
+		if command.Method != "GET" && !allowedReadPost {
 			return nil, errors.New("账号订阅仅支持读取请求")
 		}
 		if !slices.Contains(command.CredentialDomains, address.Hostname()) || len(command.Cookie) > 65536 {
@@ -117,6 +135,18 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 	}
 	defer response.Body.Close()
 	engine.downloader.limiter.observe(request, response)
+	if response.StatusCode >= 400 {
+		source := command.Source
+		if !subscriptionID.MatchString(source) {
+			source = ""
+		}
+		operation := "request"
+		switch command.Operation {
+		case "catalog", "categories", "search", "detail", "resolve", "live", "creator", "comments", "danmaku":
+			operation = command.Operation
+		}
+		engine.downloader.recordDiagnostic(diagnosticEvent{Event: "subscription_http", Source: source, Host: address.Hostname(), HTTPStatus: response.StatusCode, Message: "站源接口请求被拒绝，操作：" + operation})
+	}
 	limit := int64(8 << 20)
 	if command.Binary {
 		limit = 1 << 20
@@ -234,7 +264,11 @@ func subscriptionProvider(parent context.Context, raw []byte) (providerMedia, na
 			return providerMedia{}, nativePlan{}, errors.New("媒体凭据格式无效")
 		}
 	}
-	media.credentials = &providerMediaCredentials{origin: providerMediaOrigin(address), cookie: strings.Join(value.MediaCookies, "; "), referer: media.Referer, userAgent: value.Headers["User-Agent"], browser: value.Browser, headers: map[string]string{}}
+	source := value.Source
+	if !subscriptionID.MatchString(source) {
+		source = "subscription"
+	}
+	media.credentials = &providerMediaCredentials{source: source, origin: providerMediaOrigin(address), cookie: strings.Join(value.MediaCookies, "; "), referer: media.Referer, userAgent: value.Headers["User-Agent"], browser: value.Browser, headers: map[string]string{}}
 	for key, header := range value.Headers {
 		if strings.ToLower(key) == "x-preview-token" {
 			media.credentials.headers[key] = header
@@ -388,4 +422,35 @@ func (engine *nativeEngine) subscriptionDownload(ctx context.Context, job native
 		request = map[string]any{"command": "next", "id": id, "response": response}
 	}
 	return providerMedia{}, errors.New("站源请求次数超限")
+}
+
+func (engine *nativeEngine) subscriptionCover(ctx context.Context, input nativeInput) (any, error) {
+	drama := input.Drama
+	if !subscriptionID.MatchString(drama.Source) || drama.Cover == "" {
+		return nil, errors.New("海报参数无效")
+	}
+	if _, err := subscriptionURL(ctx, drama.Cover); err != nil {
+		return nil, err
+	}
+	engine.ensureCoverCache()
+	ctx = context.WithValue(ctx, subscriptionCoverNetworkKey{}, true)
+	cached, err := engine.covers.loadAddress(ctx, drama, input.Force)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(cached)
+	if err != nil {
+		return nil, err
+	}
+	header := make([]byte, 256)
+	count, readErr := file.Read(header)
+	file.Close()
+	if readErr != nil && readErr != io.EOF {
+		return nil, readErr
+	}
+	result := map[string]any{"path": cached, "heic": isHEICImage(header[:count])}
+	if input.Command == "prepare" {
+		return engine.prepareCoverResult(result)
+	}
+	return result, nil
 }

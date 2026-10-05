@@ -10,6 +10,7 @@ class ScriptedPlayer extends PlatformPlayer {
   final opened = <Media>[];
   final played = <bool>[];
   bool disposed = false;
+  bool stallStop = false;
   final rates = <double>[];
 
   @override
@@ -42,6 +43,7 @@ class ScriptedPlayer extends PlatformPlayer {
 
   @override
   Future<void> stop() async {
+    if (stallStop) return Completer<void>().future;
     state = state.copyWith(
       position: Duration.zero,
       duration: Duration.zero,
@@ -111,6 +113,7 @@ class ScriptedPlayer extends PlatformPlayer {
 
 class RouteRepository extends FixtureRepository {
   int primaryCalls = 0;
+  int freshCalls = 0;
   int fallbackCalls = 0;
   final requestedQualities = <int>[];
   final requestedEpisodes = <int>[];
@@ -118,6 +121,16 @@ class RouteRepository extends FixtureRepository {
   bool deferFallback = false;
   final active = <String>{};
   Completer<PlaybackPlan>? pending;
+
+  @override
+  Future<PlaybackPlan> resolveOnline(
+    Drama drama,
+    Episode episode, {
+    int quality = 0,
+  }) async {
+    freshCalls++;
+    return resolve(drama, episode, quality: quality);
+  }
 
   PlaybackPlan plan(bool alternate) {
     final session = 'route-${primaryCalls + fallbackCalls}';

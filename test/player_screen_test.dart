@@ -3,6 +3,7 @@ import 'package:duanju_app/models.dart';
 import 'package:duanju_app/player_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +12,14 @@ import 'fixtures.dart';
 import 'player_fixtures.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('window_manager'),
+          (_) async => null,
+        );
+  });
   Future<void> settleOperations(WidgetTester tester) async {
     for (var i = 0; i < 12; i++) {
       await tester.pump(const Duration(milliseconds: 10));
@@ -57,9 +66,28 @@ void main() {
     tester.view.resetDevicePixelRatio();
     tester.view.resetPadding();
     await settleOperations(tester);
+    await tester.runAsync(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    });
+    await settleOperations(tester);
     expect(player.disposed, isTrue);
     expect(tester.takeException(), isNull);
   }
+
+  testWidgets('unresponsive player initialization leaves the loading state', (
+    tester,
+  ) async {
+    final repository = RouteRepository();
+    final player = ScriptedPlayer()..stallStop = true;
+    await mount(tester, repository, player);
+    await tester.pump(const Duration(seconds: 16));
+    await settleOperations(tester);
+    expect(find.text('暂时无法播放'), findsOneWidget);
+    expect(find.text('播放器初始化或停止超时，请重新打开播放页面'), findsOneWidget);
+    expect(repository.primaryCalls, 0);
+    player.stallStop = false;
+    await unmount(tester, player);
+  });
 
   testWidgets(
     'duplicate errors switch once while keeping progress, rate and pause state',
@@ -104,6 +132,7 @@ void main() {
         await settleOperations(tester);
       }
       expect(repository.primaryCalls, 2);
+      expect(repository.freshCalls, 1);
       expect(repository.fallbackCalls, 2);
       expect(find.text('暂时无法播放'), findsOneWidget);
       expect(repository.active, isEmpty);

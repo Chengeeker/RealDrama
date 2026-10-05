@@ -208,6 +208,8 @@ class _HomeScreenState extends State<HomeScreen> {
     return [
       _group.id == 'douyin'
           ? const CatalogCategory('', '推荐')
+          : _group.id == 'bilibili-live'
+          ? const CatalogCategory('', '推荐')
           : _group.id == 'douyin-live'
           ? const CatalogCategory('', '精选')
           : _group.id == 'douyin-series'
@@ -1092,6 +1094,8 @@ class _HomeScreenState extends State<HomeScreen> {
     animation: widget.store.viewChanges,
     builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
+        final feedActive =
+            _tab == 0 && (ModalRoute.of(context)?.isCurrent ?? true);
         final television = AppLayout.isTelevision(context);
         final desktop = constraints.maxWidth >= 840;
         final compactNavigation = !desktop && !television && !_selectionMode;
@@ -1148,9 +1152,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         )
+                      : _tab == 2
+                      ? Text(
+                          '我的收藏 · ${widget.store.favorites.length + widget.store.followedCreators.length}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        )
                       : Text(switch (_tab) {
                           0 => '首页',
-                          2 => '追剧',
                           3 => '设置',
                           _ => appName,
                         }),
@@ -1172,7 +1181,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (_tab == 2)
                         IconButton(
                           key: const ValueKey('follow-lan-sync'),
-                          tooltip: '追剧同步',
+                          tooltip: '收藏与观看进度同步',
                           onPressed: () => openLanSync(context),
                           icon: const Icon(Icons.sync_rounded),
                         ),
@@ -1259,7 +1268,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           for (final entry in [
                             (Icons.play_arrow_rounded, '首页'),
                             (Icons.explore_rounded, '发现'),
-                            (Icons.bookmark_rounded, '追剧'),
+                            (Icons.bookmark_rounded, '收藏'),
                             (Icons.settings_rounded, '设置'),
                           ].indexed)
                             Padding(
@@ -1298,7 +1307,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       NavigationRailDestination(
                         icon: Icon(Icons.bookmark_border_rounded),
                         selectedIcon: Icon(Icons.bookmark_rounded),
-                        label: Text('追剧'),
+                        label: Text('收藏'),
                       ),
                       NavigationRailDestination(
                         icon: Icon(Icons.settings_outlined),
@@ -1315,15 +1324,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       if (_feedMounted)
                         ExcludeFocus(
-                          excluding: _tab != 0,
+                          excluding: !feedActive,
                           child: Offstage(
-                            offstage: _tab != 0,
+                            offstage: !feedActive,
                             child: TickerMode(
-                              enabled: _tab == 0,
+                              enabled: feedActive,
                               child: ShortDramaFeedScreen(
                                 repository: widget.repository,
                                 store: widget.store,
-                                active: _tab == 0,
+                                active: feedActive,
                                 onBack: () => _onNavSelected(1),
                                 onCleanModeChanged: _setFeedCleanMode,
                                 navigationInset: compactNavigation ? 56 : 16,
@@ -1399,7 +1408,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   selectedIndex: _tab,
                   overVideo: false,
                   onDestinationSelected: _onNavSelected,
-                  destinations: const ['首页', '发现', '追剧', '设置'],
+                  destinations: const ['首页', '发现', '收藏', '设置'],
                 ),
         );
         if (!television && !_selectionMode) return scaffold;

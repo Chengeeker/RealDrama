@@ -184,7 +184,7 @@ extension LocalStoreSync on LocalStore {
       }
       if (favorites.length > 20000 ||
           document.records.length > LanDocument.limit) {
-        throw StateError('合并后的追剧记录超过本机上限，原记录已保留');
+        throw StateError('合并后的收藏记录超过本机上限，原记录已保留');
       }
       final sorted = history.values.toList()
         ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));

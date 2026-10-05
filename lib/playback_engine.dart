@@ -147,49 +147,59 @@ class MediaKitPlaybackEngine extends PlaybackEngine {
 
   Future<void> configure(PlaybackPreferences preferences) {
     _preferences = preferences;
-    final next = _configurationTail.then((_) async {
-      if (_closing) return;
-      final native = player.platform;
-      if (native is! NativePlayer) return;
-      await native.waitForPlayerInitialization;
-      await native.waitForVideoControllerInitializationIfAttached;
-      if (_closing) return;
-      final current = _preferences;
-      final configuration = (
-        current.hardwareDecoding,
-        current.hardwareDecoder,
-        current.lowMemory,
-      );
-      if (configuration == _appliedConfiguration) return;
-      final decoder = current.hardwareDecoder;
-      final compatible = Platform.isAndroid
-          ? decoder != HardwareDecoder.d3d11 &&
-                decoder != HardwareDecoder.d3d11Copy
-          : Platform.isWindows
-          ? decoder != HardwareDecoder.mediaCodec &&
-                decoder != HardwareDecoder.mediaCodecCopy
-          : decoder == HardwareDecoder.automatic ||
-                decoder == HardwareDecoder.copy;
-      final hwdec = !current.hardwareDecoding || Platform.isIOS
-          ? 'no'
-          : compatible
-          ? decoder.mpvValue
-          : 'auto-safe';
-      try {
-        await native.setProperty('hwdec', hwdec);
-      } catch (_) {
-        if (_closing) return;
-        await native.setProperty('hwdec', 'no');
-      }
-      if (_closing) return;
-      await native.setProperty('demuxer-max-bytes', '${current.bufferBytes}');
-      if (_closing) return;
-      await native.setProperty(
-        'demuxer-max-back-bytes',
-        '${current.lowMemory ? 0 : current.bufferBytes}',
-      );
-      _appliedConfiguration = configuration;
-    });
+    final next = _configurationTail
+        .then((_) async {
+          if (_closing) return;
+          final native = player.platform;
+          if (native is! NativePlayer) return;
+          await native.waitForPlayerInitialization;
+          await native.waitForVideoControllerInitializationIfAttached;
+          if (_closing) return;
+          final current = _preferences;
+          final configuration = (
+            current.hardwareDecoding,
+            current.hardwareDecoder,
+            current.lowMemory,
+          );
+          if (configuration == _appliedConfiguration) return;
+          final decoder = current.hardwareDecoder;
+          final compatible = Platform.isAndroid
+              ? decoder != HardwareDecoder.d3d11 &&
+                    decoder != HardwareDecoder.d3d11Copy
+              : Platform.isWindows
+              ? decoder != HardwareDecoder.mediaCodec &&
+                    decoder != HardwareDecoder.mediaCodecCopy
+              : decoder == HardwareDecoder.automatic ||
+                    decoder == HardwareDecoder.copy;
+          final hwdec = !current.hardwareDecoding || Platform.isIOS
+              ? 'no'
+              : compatible
+              ? decoder.mpvValue
+              : 'auto-safe';
+          try {
+            await native.setProperty('hwdec', hwdec);
+          } catch (_) {
+            if (_closing) return;
+            await native.setProperty('hwdec', 'no');
+          }
+          if (_closing) return;
+          await native.setProperty(
+            'demuxer-max-bytes',
+            '${current.bufferBytes}',
+          );
+          if (_closing) return;
+          await native.setProperty(
+            'demuxer-max-back-bytes',
+            '${current.lowMemory ? 0 : current.bufferBytes}',
+          );
+          _appliedConfiguration = configuration;
+        })
+        .timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            throw const FormatException('播放器初始化超时，请重新打开播放页面');
+          },
+        );
     _configurationTail = next.catchError((Object _) {});
     return next;
   }

@@ -1,6 +1,10 @@
 import 'douyin_settings_screen.dart';
 import 'douyin_source.dart';
 import 'bilibili_settings_screen.dart';
+import 'tiktok_settings_screen.dart';
+import 'tiktok_source.dart';
+import 'youtube_settings_screen.dart';
+import 'youtube_source.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -59,6 +63,12 @@ class _SourcesScreenState extends State<SourcesScreen> {
   final _expandedSections = <String>{};
   final _pollingSources = <String>{};
   Timer? _timer;
+  Timer? _reorderTimer;
+  List<String>? _heldSourceOrder;
+  List<String>? _heldManagementGroupOrder;
+  List<String>? _lastSourceOrder;
+  List<String>? _lastManagementGroupOrder;
+  int _visibilityOperations = 0;
   bool _polling = false;
   String? _bulkOperation;
   int _ticks = 0;
@@ -77,6 +87,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
     if (widget.initialSource != null &&
         SourceSite.byId(widget.initialSource!).isDouyin) {
       _expandedSections.add('source-group-douyin');
+    }
+    if ({'bilibili', 'bilibili-live'}.contains(widget.initialSource)) {
+      _expandedSections.add('source-group-bilibili');
     }
     unawaited(_refresh());
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -97,6 +110,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _reorderTimer?.cancel();
     super.dispose();
   }
 
@@ -144,14 +158,28 @@ class _SourcesScreenState extends State<SourcesScreen> {
   List<SourceSite> get _douyinSources =>
       SourceSite.values.where((source) => source.isDouyin).toList();
 
+  List<SourceSite> get _bilibiliSources => SourceSite.values
+      .where((source) => {'bilibili', 'bilibili-live'}.contains(source.id))
+      .toList();
+
   List<SourceGroup> _managementGroups(List<SourceSite> sources) {
     final groups = <SourceGroup>[];
     var douyinAdded = false;
+    var bilibiliAdded = false;
     for (final group in SourceGroup.fromSources(sources)) {
       if (group.sources.any((source) => source.isDouyin)) {
         if (!douyinAdded) {
           groups.add(SourceGroup('douyin-family', '抖音', _douyinSources));
           douyinAdded = true;
+        }
+      } else if (group.sources.any(
+        (source) => {'bilibili', 'bilibili-live'}.contains(source.id),
+      )) {
+        if (!bilibiliAdded) {
+          groups.add(
+            SourceGroup('bilibili-family', 'Bilibili', _bilibiliSources),
+          );
+          bilibiliAdded = true;
         }
       } else {
         groups.add(group);
@@ -159,6 +187,79 @@ class _SourcesScreenState extends State<SourcesScreen> {
     }
     return groups;
   }
+
+  List<SourceGroup> _orderedManagementGroups(List<SourceSite> sources) {
+    final groups = _managementGroups(sources);
+    final heldOrder = _heldManagementGroupOrder;
+    if (heldOrder != null) {
+      groups.sort((a, b) {
+        int rank(String id) {
+          final index = heldOrder.indexOf(id);
+          return index < 0 ? heldOrder.length + 1 : index;
+        }
+
+        return rank(a.id).compareTo(rank(b.id));
+      });
+      return groups;
+    }
+
+    final indexedGroups = groups.asMap().entries.toList();
+    int enabledCount(SourceGroup group) => group.sources
+        .where((source) => widget.store.allowsSource(source.id))
+        .length;
+    indexedGroups.sort((a, b) {
+      final enabledOrder = enabledCount(
+        b.value,
+      ).compareTo(enabledCount(a.value));
+      if (enabledOrder != 0) return enabledOrder;
+      final aSelected = a.value.sources.any(
+        (source) => source.id == widget.initialSource,
+      );
+      final bSelected = b.value.sources.any(
+        (source) => source.id == widget.initialSource,
+      );
+      if (aSelected != bSelected) return aSelected ? -1 : 1;
+      return a.key.compareTo(b.key);
+    });
+    final ordered = indexedGroups.map((entry) => entry.value).toList();
+    if (_visibilityOperations == 0) {
+      _lastManagementGroupOrder = ordered.map((group) => group.id).toList();
+    }
+    return ordered;
+  }
+
+  void _beginVisibilityChange() {
+    _reorderTimer?.cancel();
+    if (_visibilityOperations == 0) {
+      _heldSourceOrder =
+          _lastSourceOrder ??
+          SourceSite.values.map((source) => source.id).toList();
+      _heldManagementGroupOrder =
+          _lastManagementGroupOrder ??
+          _managementGroups(
+            SourceSite.values,
+          ).map((group) => group.id).toList();
+    }
+    _visibilityOperations++;
+  }
+
+  void _finishVisibilityChange() {
+    if (_visibilityOperations > 0) _visibilityOperations--;
+    if (_visibilityOperations != 0 || !mounted) return;
+    _reorderTimer?.cancel();
+    _reorderTimer = Timer(const Duration(milliseconds: 280), () {
+      if (!mounted) return;
+      setState(() {
+        _heldSourceOrder = null;
+        _heldManagementGroupOrder = null;
+      });
+    });
+  }
+
+  ShapeBorder _sourceCardShape(ColorScheme colors) => RoundedRectangleBorder(
+    borderRadius: BorderRadius.circular(24),
+    side: BorderSide(color: colors.outlineVariant.withValues(alpha: .6)),
+  );
 
   Future<void> _configureDouyin() async {
     await Navigator.of(context).push(
@@ -187,8 +288,40 @@ class _SourcesScreenState extends State<SourcesScreen> {
         ),
       ),
     );
-    if (mounted && widget.store.allowsSource(SourceSite.bilibili.id)) {
-      unawaited(_refreshSource(SourceSite.bilibili));
+    if (mounted) {
+      for (final source in _bilibiliSources) {
+        if (widget.store.allowsSource(source.id)) {
+          unawaited(_refreshSource(source));
+        }
+      }
+    }
+  }
+
+  Future<void> _configureTikTok() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TikTokSettingsScreen(
+          store: widget.store,
+          repository: widget.repository,
+        ),
+      ),
+    );
+    if (mounted && widget.store.allowsSource(SourceSite.tiktok.id)) {
+      unawaited(_refreshSource(SourceSite.tiktok));
+    }
+  }
+
+  Future<void> _configureYouTube() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => YouTubeSettingsScreen(
+          store: widget.store,
+          repository: widget.repository,
+        ),
+      ),
+    );
+    if (mounted && widget.store.allowsSource(SourceSite.youtube.id)) {
+      unawaited(_refreshSource(SourceSite.youtube));
     }
   }
 
@@ -201,6 +334,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
     String? family,
   }) async {
     if (sources.any((source) => _visibilityPending.contains(source.id))) return;
+    _beginVisibilityChange();
     final epoch = widget.store.profileEpoch;
     final ids = sources.map((source) => source.id).toSet();
     setState(() => _visibilityPending.addAll(ids));
@@ -221,6 +355,48 @@ class _SourcesScreenState extends State<SourcesScreen> {
             return;
           cookie = await DouyinSource.storage.read(
             key: DouyinSource.cookieKey(widget.store.profile.id),
+          );
+          if (cookie?.isNotEmpty != true) return;
+        }
+      }
+      if (visible &&
+          sources.any((source) => source.id == SourceSite.tiktok.id)) {
+        var cookie = await TikTokSource.storage.read(
+          key: TikTokSource.cookieKey(widget.store.profile.id),
+        );
+        if (!mounted ||
+            epoch != widget.store.profileEpoch ||
+            widget.store.locked)
+          return;
+        if (cookie?.isNotEmpty != true) {
+          await _configureTikTok();
+          if (!mounted ||
+              epoch != widget.store.profileEpoch ||
+              widget.store.locked)
+            return;
+          cookie = await TikTokSource.storage.read(
+            key: TikTokSource.cookieKey(widget.store.profile.id),
+          );
+          if (cookie?.isNotEmpty != true) return;
+        }
+      }
+      if (visible &&
+          sources.any((source) => source.id == SourceSite.youtube.id)) {
+        var cookie = await YouTubeSource.storage.read(
+          key: YouTubeSource.cookieKey(widget.store.profile.id),
+        );
+        if (!mounted ||
+            epoch != widget.store.profileEpoch ||
+            widget.store.locked)
+          return;
+        if (cookie?.isNotEmpty != true) {
+          await _configureYouTube();
+          if (!mounted ||
+              epoch != widget.store.profileEpoch ||
+              widget.store.locked)
+            return;
+          cookie = await YouTubeSource.storage.read(
+            key: YouTubeSource.cookieKey(widget.store.profile.id),
           );
           if (cookie?.isNotEmpty != true) return;
         }
@@ -250,6 +426,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
         ).showSnackBar(SnackBar(content: Text('保存站源显示设置失败：$error')));
       }
     } finally {
+      _finishVisibilityChange();
       if (mounted) setState(() => _visibilityPending.removeAll(ids));
     }
   }
@@ -262,27 +439,42 @@ class _SourcesScreenState extends State<SourcesScreen> {
     final busy = sources.any(
       (source) => _visibilityPending.contains(source.id),
     );
-    return ListTile(
+    final colors = Theme.of(context).colorScheme;
+    return Card(
       key: ValueKey('visible-${group.id}'),
-      title: Text(group.name),
-      subtitle: Text('已开启 $enabled/${sources.length} · 子项在下方管理'),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (sources.any((source) => source.isDouyin))
-            IconButton(
-              tooltip: '统一配置抖音 Cookie',
-              icon: const Icon(Icons.manage_accounts_outlined),
-              onPressed: busy ? null : _configureDouyin,
+      margin: const EdgeInsets.only(bottom: 8),
+      color: colors.surfaceContainerLow,
+      elevation: 0,
+      shape: _sourceCardShape(colors),
+      child: ListTile(
+        title: Text(group.name),
+        subtitle: Text('已开启 $enabled/${sources.length} · 子项在下方管理'),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (sources.any((source) => source.isDouyin))
+              IconButton(
+                tooltip: '统一配置抖音 Cookie',
+                icon: const Icon(Icons.manage_accounts_outlined),
+                onPressed: busy ? null : _configureDouyin,
+              ),
+            if (sources.any(
+              (source) => {'bilibili', 'bilibili-live'}.contains(source.id),
+            ))
+              IconButton(
+                tooltip: '统一配置 Bilibili Cookie',
+                icon: const Icon(Icons.manage_accounts_outlined),
+                onPressed: busy ? null : _configureBilibili,
+              ),
+            Switch(
+              value: enabled > 0,
+              onChanged: busy
+                  ? null
+                  : (visible) =>
+                        _setVisibility(sources, visible, family: group.id),
             ),
-          Switch(
-            value: enabled > 0,
-            onChanged: busy
-                ? null
-                : (visible) =>
-                      _setVisibility(sources, visible, family: group.id),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -421,6 +613,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
       margin: EdgeInsets.zero,
       color: colors.surfaceContainerLow,
       elevation: 0,
+      shape: _sourceCardShape(colors),
       clipBehavior: Clip.antiAlias,
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -460,32 +653,63 @@ class _SourcesScreenState extends State<SourcesScreen> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: widget.store,
     builder: (context, _) {
-      final sources =
-          SourceSite.values
-              .where(
-                (source) =>
-                    source.isDouyin ||
-                    source.groupId == 'huangguo' ||
-                    widget.store.allowsSource(source.id),
-              )
-              .toList()
-            ..sort((a, b) {
-              final aFirst = a.id == widget.initialSource ? 0 : 1;
-              final bFirst = b.id == widget.initialSource ? 0 : 1;
-              final priority = aFirst.compareTo(bFirst);
-              return priority != 0
-                  ? priority
-                  : SourceSite.values
-                        .indexOf(a)
-                        .compareTo(SourceSite.values.indexOf(b));
-            });
+      final sources = SourceSite.values
+          .where(
+            (source) =>
+                source.isDouyin ||
+                source.groupId == 'huangguo' ||
+                widget.store.allowsSource(source.id),
+          )
+          .toList();
+      final heldSourceOrder = _heldSourceOrder;
+      if (heldSourceOrder != null) {
+        sources.sort((a, b) {
+          int rank(SourceSite source) {
+            final index = heldSourceOrder.indexOf(source.id);
+            return index < 0
+                ? heldSourceOrder.length + SourceSite.values.indexOf(source)
+                : index;
+          }
+
+          return rank(a).compareTo(rank(b));
+        });
+      } else {
+        sources.sort((a, b) {
+          final aEnabled = widget.store.allowsSource(a.id);
+          final bEnabled = widget.store.allowsSource(b.id);
+          if (aEnabled != bEnabled) return aEnabled ? -1 : 1;
+          final aFirst = a.id == widget.initialSource ? 0 : 1;
+          final bFirst = b.id == widget.initialSource ? 0 : 1;
+          final priority = aFirst.compareTo(bFirst);
+          return priority != 0
+              ? priority
+              : SourceSite.values
+                    .indexOf(a)
+                    .compareTo(SourceSite.values.indexOf(b));
+        });
+        if (_visibilityOperations == 0) {
+          _lastSourceOrder = sources.map((source) => source.id).toList();
+        }
+      }
       final visibleGroups = SourceSite.values
           .where((source) => widget.store.allowsSource(source.id))
-          .map((source) => source.isDouyin ? 'douyin-family' : source.groupId)
+          .map(
+            (source) => source.isDouyin
+                ? 'douyin-family'
+                : {'bilibili', 'bilibili-live'}.contains(source.id)
+                ? 'bilibili-family'
+                : source.groupId,
+          )
           .toSet()
           .length;
       final totalGroups = SourceSite.values
-          .map((source) => source.isDouyin ? 'douyin-family' : source.groupId)
+          .map(
+            (source) => source.isDouyin
+                ? 'douyin-family'
+                : {'bilibili', 'bilibili-live'}.contains(source.id)
+                ? 'bilibili-family'
+                : source.groupId,
+          )
           .toSet()
           .length;
       final viewPaddingBottom = MediaQuery.viewPaddingOf(context).bottom;
@@ -537,20 +761,33 @@ class _SourcesScreenState extends State<SourcesScreen> {
                     title: '显示的站源',
                     subtitle: '已显示 $visibleGroups/$totalGroups · 点击选择隐藏',
                     children: [
-                      for (final group in _managementGroups(SourceSite.values))
+                      for (final group in _orderedManagementGroups(
+                        SourceSite.values,
+                      ))
                         if (group.id == 'douyin-family' ||
+                            group.id == 'bilibili-family' ||
                             group.id == 'huangguo')
                           _familyVisibility(group)
                         else
-                          ListTile(
+                          Card(
                             key: ValueKey('visible-${group.sources.first.id}'),
-                            title: Text(group.name),
-                            trailing: Switch(
-                              value: widget.store.allowsSource(
-                                group.sources.first.id,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.surfaceContainerLow,
+                            elevation: 0,
+                            shape: _sourceCardShape(
+                              Theme.of(context).colorScheme,
+                            ),
+                            child: ListTile(
+                              title: Text(group.name),
+                              trailing: Switch(
+                                value: widget.store.allowsSource(
+                                  group.sources.first.id,
+                                ),
+                                onChanged: (visible) =>
+                                    _setVisible(group.sources.first, visible),
                               ),
-                              onChanged: (visible) =>
-                                  _setVisible(group.sources.first, visible),
                             ),
                           ),
                     ],
@@ -570,6 +807,20 @@ class _SourcesScreenState extends State<SourcesScreen> {
                           icon: Icons.video_library_outlined,
                           title: '抖音',
                           subtitle: '短视频、直播、短剧、放映厅 · 共用一个 Cookie',
+                          children: [
+                            for (final source in group.sources)
+                              _sourceCard(source),
+                          ],
+                        ),
+                      )
+                    else if (group.id == 'bilibili-family')
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: _expandableSection(
+                          section: 'source-group-bilibili',
+                          icon: Icons.video_library_outlined,
+                          title: 'Bilibili',
+                          subtitle: '视频、直播 · 共用一个 Cookie',
                           children: [
                             for (final source in group.sources)
                               _sourceCard(source),
@@ -602,9 +853,16 @@ class _SourcesScreenState extends State<SourcesScreen> {
 
   Widget _sourceCard(SourceSite source) {
     final visible = widget.store.allowsSource(source.id);
-    if ((source.isDouyin || source.groupId == 'huangguo') && !visible) {
+    if ((source.isDouyin ||
+            {'bilibili', 'bilibili-live'}.contains(source.id) ||
+            source.groupId == 'huangguo') &&
+        !visible) {
       return Card(
+        key: ValueKey('source-${source.id}'),
+        margin: const EdgeInsets.only(bottom: 16),
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
         elevation: 0,
+        shape: _sourceCardShape(Theme.of(context).colorScheme),
         child: ListTile(
           title: Text(
             source.id == SourceSite.douyin.id ? '抖音短视频' : source.name,
@@ -635,10 +893,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
     return Card(
       key: ValueKey('source-${source.id}'),
       margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: colors.outlineVariant.withValues(alpha: .6)),
-      ),
+      color: colors.surfaceContainerLow,
+      elevation: 0,
+      shape: _sourceCardShape(colors),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -655,15 +912,23 @@ class _SourcesScreenState extends State<SourcesScreen> {
                   ),
                 ),
                 Text(
-                  '${status?.count ?? 0} ${source.id == SourceSite.douyinLive.id ? '个直播间' : '部'}',
+                  '${status?.count ?? 0} ${{'douyin-live', 'bilibili-live'}.contains(source.id) ? '个直播间' : '部'}',
                 ),
-                if (source.id == SourceSite.bilibili.id)
+                if (source.id == SourceSite.tiktok.id)
                   IconButton(
-                    tooltip: '哔哩哔哩 Cookie 设置',
-                    onPressed: _configureBilibili,
+                    tooltip: 'TikTok Cookie 设置',
+                    onPressed: _configureTikTok,
                     icon: const Icon(Icons.key_outlined),
                   ),
-                if (source.isDouyin || source.groupId == 'huangguo')
+                if (source.id == SourceSite.youtube.id)
+                  IconButton(
+                    tooltip: 'YouTube Cookie 设置',
+                    onPressed: _configureYouTube,
+                    icon: const Icon(Icons.key_outlined),
+                  ),
+                if (source.isDouyin ||
+                    {'bilibili', 'bilibili-live'}.contains(source.id) ||
+                    source.groupId == 'huangguo')
                   Switch(
                     value: visible,
                     onChanged: _visibilityPending.contains(source.id)

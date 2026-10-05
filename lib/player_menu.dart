@@ -19,6 +19,7 @@ class PlayerMenu extends StatefulWidget {
     required this.actualQuality,
     required this.local,
     required this.favorite,
+    required this.series,
     required this.mobile,
     required this.onEpisode,
     required this.onPreferences,
@@ -34,6 +35,7 @@ class PlayerMenu extends StatefulWidget {
   final int actualQuality;
   final bool local;
   final bool favorite;
+  final bool series;
   final bool mobile;
   final String preloadStatus;
   final ValueChanged<int> onEpisode;
@@ -253,7 +255,15 @@ class _PlayerMenuState extends State<PlayerMenu> {
                   ? Icons.bookmark_rounded
                   : Icons.bookmark_border_rounded,
             ),
-            label: Text(widget.favorite ? '取消追剧' : '加入追剧'),
+            label: Text(
+              widget.series
+                  ? widget.favorite
+                        ? '取消追剧'
+                        : '加入追剧'
+                  : widget.favorite
+                  ? '取消收藏'
+                  : '加入收藏',
+            ),
           ),
           const SizedBox(height: 20),
           Text(

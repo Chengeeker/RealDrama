@@ -49,9 +49,44 @@ type nativeStreamServer struct {
 }
 
 func (stream *nativeStreamServer) nativeRequest(request *http.Request) (*http.Response, error) {
+	return stream.nativeRequestWithIdleTimeout(request, 20*time.Second)
+}
+
+type nativeMediaBody struct {
+	io.ReadCloser
+	cancel  context.CancelFunc
+	timeout time.Duration
+}
+
+func (body *nativeMediaBody) Read(buffer []byte) (int, error) {
+	timer := time.AfterFunc(body.timeout, body.cancel)
+	n, err := body.ReadCloser.Read(buffer)
+	timer.Stop()
+	return n, err
+}
+
+func (body *nativeMediaBody) Close() error {
+	body.cancel()
+	return body.ReadCloser.Close()
+}
+
+func (stream *nativeStreamServer) nativeRequestWithIdleTimeout(request *http.Request, timeout time.Duration) (*http.Response, error) {
+	ctx, cancel := context.WithCancel(request.Context())
+	request = request.Clone(ctx)
 	client := *stream.downloader.client
 	client.Timeout = 0
-	return stream.downloader.doMediaRequestWithClient(request, &client)
+	timer := time.AfterFunc(timeout, cancel)
+	response, err := stream.downloader.doMediaRequestWithClient(request, &client)
+	timer.Stop()
+	if err != nil {
+		cancel()
+		if response != nil && response.Body != nil {
+			response.Body.Close()
+		}
+		return nil, err
+	}
+	response.Body = &nativeMediaBody{ReadCloser: response.Body, cancel: cancel, timeout: timeout}
+	return response, nil
 }
 
 var nativePlaylistURI = regexp.MustCompile(`URI="([^"]+)"`)
@@ -379,6 +414,7 @@ func (stream *nativeStreamServer) nativeServe(writer http.ResponseWriter, reques
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusPartialContent {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
 		err := stream.downloader.catalogResponseError(upstream, response, body)
+		stream.downloader.recordDiagnostic(diagnosticEvent{Event: "playback_media_http", Host: upstream.URL.Hostname(), HTTPStatus: response.StatusCode, Message: "视频媒体请求被拒绝"})
 		http.Error(writer, err.Error(), response.StatusCode)
 		return
 	}

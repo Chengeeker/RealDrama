@@ -3,12 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'bilibili_source.dart';
 import 'core_bridge.dart';
 import 'local_store.dart';
+import 'models.dart';
+import 'tiktok_source.dart';
 
-class BilibiliSettingsScreen extends StatefulWidget {
-  const BilibiliSettingsScreen({
+class TikTokSettingsScreen extends StatefulWidget {
+  const TikTokSettingsScreen({
     super.key,
     required this.store,
     required this.repository,
@@ -18,10 +19,10 @@ class BilibiliSettingsScreen extends StatefulWidget {
   final AppRepository repository;
 
   @override
-  State<BilibiliSettingsScreen> createState() => _BilibiliSettingsScreenState();
+  State<TikTokSettingsScreen> createState() => _TikTokSettingsScreenState();
 }
 
-class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
+class _TikTokSettingsScreenState extends State<TikTokSettingsScreen> {
   final _cookie = TextEditingController();
   late final String _profile;
   late final int _epoch;
@@ -42,17 +43,19 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
 
   Future<void> _read() async {
     try {
-      final saved = await BilibiliSource.readCookie(_profile);
+      final saved = await TikTokSource.storage.read(
+        key: TikTokSource.cookieKey(_profile),
+      );
       if (_valid) {
         _cookie.text = saved ?? '';
         setState(
           () => _message = saved?.isNotEmpty == true
-              ? '已保存 Cookie，可查看、复制或替换'
-              : '未配置 Cookie，可匿名浏览公开内容',
+              ? '当前账号已保存 TikTok Cookie'
+              : '尚未配置 TikTok Cookie',
         );
       }
     } catch (_) {
-      if (mounted) setState(() => _message = '无法读取安全存储');
+      if (mounted) setState(() => _message = '无法读取设备安全存储');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -66,40 +69,31 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
     });
     try {
       if (action == 'clear') {
-        await BilibiliSource.storage.delete(
-          key: BilibiliSource.cookieKey(_profile),
+        await TikTokSource.storage.delete(
+          key: TikTokSource.cookieKey(_profile),
         );
         if (mounted) _cookie.clear();
-        if (_valid) setState(() => _message = '已清除本机保存的 Bilibili Cookie');
+        if (_valid) setState(() => _message = '已清除本机保存的 TikTok Cookie');
       } else {
+        final cookie = TikTokSource.normalizeCookie(_cookie.text);
+        await TikTokSource.storage.write(
+          key: TikTokSource.cookieKey(_profile),
+          value: cookie,
+        );
+        if (!_valid) return;
+        _cookie.text = cookie;
         if (action == 'save') {
-          final cookie = BilibiliSource.normalizeCookie(_cookie.text);
-          await BilibiliSource.storage.write(
-            key: BilibiliSource.cookieKey(_profile),
-            value: cookie,
+          setState(() => _message = 'Cookie 已保存在本机安全存储');
+        } else if (!widget.store.allowsSource(SourceSite.tiktok.id)) {
+          setState(() => _message = 'Cookie 已保存。请先在“显示的站源”中启用 TikTok，再回来检测接口');
+        } else {
+          final page = await widget.repository.catalog(
+            SourceSite.tiktok.id,
+            category: 'recommend',
+            force: true,
           );
           if (!_valid) return;
-          _cookie.text = cookie;
-          setState(() => _message = 'Cookie 已保存在本机安全存储');
-        } else {
-          if (_cookie.text.trim().isNotEmpty) {
-            final cookie = BilibiliSource.normalizeCookie(_cookie.text);
-            await BilibiliSource.storage.write(
-              key: BilibiliSource.cookieKey(_profile),
-              value: cookie,
-            );
-            if (!_valid) return;
-            _cookie.text = cookie;
-          }
-          final result = await widget.repository.bilibiliAccount();
-          if (!_valid) return;
-          final loggedIn = result['isLogin'] == true;
-          final name = (result['name'] as String? ?? '').trim();
-          setState(() {
-            _message = loggedIn
-                ? '接口可用，Cookie 登录有效${name.isEmpty ? '' : '：$name'}'
-                : '接口可用，但当前未登录或 Cookie 已失效；公开内容仍可浏览，登录可解锁更多清晰度';
-          });
+          setState(() => _message = '推荐信息流可用，返回 ${page.items.length} 条内容');
         }
       }
     } catch (error) {
@@ -123,7 +117,7 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Bilibili 账号与 Cookie')),
+    appBar: AppBar(title: const Text('TikTok Cookie 登录')),
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [
@@ -139,18 +133,16 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '可选 Cookie 登录',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+                Text('使用已登录账号', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 12),
                 const Text(
-                  '普通视频的公开推荐、排行、搜索和可访问内容可匿名读取。直播推荐、分区和播放的匿名可用性尚未实测；正在关注会使用已配置 Cookie 请求。登录网页后，在开发者工具的 Network 中选中 Bilibili API 请求，从请求标头复制完整 Cookie；需要包含 SESSDATA。Cookie 按当前本机用户保存在安全存储中，只发送到 api.bilibili.com 与 api.live.bilibili.com，不写入配置备份，也不会转发给视频 CDN。直播间访问、登录权限和会员内容仍由 Bilibili 控制。',
+                  'TikTok 信息流需要登录 Cookie。在 Edge 登录 TikTok 后，打开开发者工具的 Network，选中 www.tiktok.com 的信息流请求，从请求标头复制 Cookie 的完整值（Cookie: 后面的整行），不要复制 Set-Cookie。Cookie 按当前本机用户保存在设备安全存储，只发送到 www.tiktok.com；不会写入订阅包或配置备份，也不会转发给视频播放域名。请勿把 Cookie 发到聊天或公开位置。',
                 ),
                 const SizedBox(height: 16),
                 TextField(
                   controller: _cookie,
                   enabled: !_busy,
+                  onChanged: (_) => setState(() {}),
                   obscureText: _obscured,
                   autocorrect: false,
                   enableSuggestions: false,
@@ -164,8 +156,9 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
                             : Icons.visibility_off_outlined,
                       ),
                     ),
-                    labelText: '粘贴请求头 Cookie 的完整值',
-                    helperText: '字段名=字段值；多项用英文分号分隔。请勿手动修改字段值。',
+                    labelText: '粘贴完整 Cookie 请求头值',
+                    helperText:
+                        '从开发者工具 Network 的请求标头复制 Cookie 值（允许重复字段）；需包含 sessionid 或 sessionid_ss。',
                     helperMaxLines: 2,
                     border: const OutlineInputBorder(),
                   ),
@@ -181,18 +174,18 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
                     ),
                     OutlinedButton(
                       onPressed: _busy ? null : () => _run('check'),
-                      child: const Text('检测登录与接口'),
+                      child: const Text('保存并检测推荐信息流'),
                     ),
                     OutlinedButton(
-                      onPressed: _busy
+                      onPressed: _busy || _cookie.text.isEmpty
                           ? null
                           : () async {
-                              if (_cookie.text.isEmpty) return;
                               await Clipboard.setData(
                                 ClipboardData(text: _cookie.text),
                               );
-                              if (_valid)
+                              if (_valid) {
                                 setState(() => _message = '已复制 Cookie');
+                              }
                             },
                       child: const Text('复制 Cookie'),
                     ),
@@ -206,6 +199,11 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
                   const SizedBox(height: 12),
                   SelectableText(_message),
                 ],
+                if (_busy)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 16),
+                    child: LinearProgressIndicator(),
+                  ),
               ],
             ),
           ),

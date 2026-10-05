@@ -55,7 +55,7 @@ class _ProfilesScreenState extends State<ProfilesScreen> {
           builder: (context) => AlertDialog(
             title: const Text('从备份恢复用户与记录？'),
             content: const Text(
-              '将使用这份备份替换损坏的用户配置、追剧、观看记录和偏好。建议先导出原始配置；已下载视频保留。',
+              '将使用这份备份替换损坏的用户配置、收藏、观看记录和偏好。建议先导出原始配置；已下载视频保留。',
             ),
             actions: [
               TextButton(
@@ -174,7 +174,7 @@ class _ProfilesScreenState extends State<ProfilesScreen> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 8),
-                const Text('各用户的追剧和观看记录独立保存，下载文件由本机共享。'),
+                const Text('各用户的收藏、作者关注和观看记录独立保存；作者关注仅保存在本机。下载文件由本机共享。'),
                 if (!widget.store.locked && widget.store.profile.admin) ...[
                   const SizedBox(height: 12),
                   SwitchListTile(
@@ -351,7 +351,7 @@ class _ProfileEditorState extends State<ProfileEditor> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('删除此用户？'),
-        content: const Text('会同时删除该用户的追剧和观看记录。下载文件会保留。'),
+        content: const Text('会同时删除该用户的收藏和观看记录。下载文件会保留。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),

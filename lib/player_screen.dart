@@ -10,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'app_layout.dart';
+import 'app_diagnostics.dart';
 import 'app_haptics.dart';
 import 'app_orientation.dart';
 import 'app_theme.dart';
@@ -187,7 +188,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     WidgetsBinding.instance.addObserver(this);
     VideoDanmaku.enabled.addListener(_danmakuChanged);
     _index = widget.initialIndex;
-    if (widget.detail.drama.source == 'bilibili') {
+    if ({'bilibili', 'bilibili-live'}.contains(widget.detail.drama.source)) {
       _aspectRatio = 16 / 9;
     }
     if (widget.immersiveFeed) _lastFeedCanPop = !_feedPageIsActive;
@@ -287,7 +288,11 @@ class _PlayerScreenState extends State<PlayerScreen>
         unawaited(_play(next));
         return '第 ${widget.detail.episodes[next].number} 集';
       },
-      holdSpeed: widget.detail.drama.source == 'douyin-live' ? 1 : 2,
+      holdSpeed:
+          SourceSite.byId(widget.detail.drama.source).kind == 'live' ||
+              widget.detail.drama.source == 'douyin-live'
+          ? 1
+          : 2,
       onHoldStart: widget.immersiveFeed ? AppHaptics.light : null,
     );
     _playerFocus.addListener(() {
@@ -297,6 +302,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     _subscriptions.add(
       _playback.errors.listen((error) {
         if (!_closed && _acceptErrors && mounted && error.trim().isNotEmpty) {
+          AppDiagnostics.record('playback_error', {
+            'source': widget.detail.drama.source,
+            'code': AppDiagnostics.playbackCode(error),
+            'stage': widget.immersiveFeed ? 'feed' : 'detail',
+          });
           _queueRecovery();
         }
       }),
@@ -312,7 +322,7 @@ class _PlayerScreenState extends State<PlayerScreen>
           _error == null &&
           _health.stalled(
             position: _playback.state.position,
-            playing: _playback.state.playing && _playIntent,
+            playing: _playIntent && _openedIndex == _index,
             foreground: _foreground,
             now: DateTime.now(),
           )) {
@@ -720,6 +730,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     final action = current.local
         ? PlaybackRecoveryAction.stop
         : _recovery.next(current);
+    AppDiagnostics.record('playback_recovery', {
+      'source': widget.detail.drama.source,
+      'code': action.name,
+      'stage': widget.immersiveFeed ? 'feed' : 'detail',
+    });
     if (action == PlaybackRecoveryAction.stop) {
       _resumePosition = position;
       final ticket = _generation;
@@ -745,6 +760,8 @@ class _PlayerScreenState extends State<PlayerScreen>
               ? widget.allowOnlineFallback
                     ? '本地视频读取失败，请重试或重新下载；也可以手动改为在线播放。'
                     : '本地成品读取失败，请重试或重新生成。'
+              : SourceSite.byId(widget.detail.drama.source).kind == 'video'
+              ? '视频播放失败，备用地址和重新解析均未成功。请重试或更新站源。'
               : '自动恢复未成功，请检查网络后重试，也可换一集或选择其他清晰度。';
         });
         if (!current.local) _reportFeedPlaybackFailed();
@@ -891,7 +908,15 @@ class _PlayerScreenState extends State<PlayerScreen>
         await _saveProgress(flush: true);
         if (_closed || ticket != _generation) return;
         _openedIndex = -1;
-        await _playback.stop();
+        await _playback.stop().timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            throw AppFailure(
+              '播放器初始化或停止超时，请重新打开播放页面',
+              code: 'player_initialization',
+            );
+          },
+        );
         final previous = _plan;
         _plan = null;
         if (recoveryAction == PlaybackRecoveryAction.alternative) {
@@ -912,7 +937,9 @@ class _PlayerScreenState extends State<PlayerScreen>
               widget.detail.episodes[index],
               quality: _requestedQuality,
               localOnly: widget.localOnly,
-              online: _forceOnline,
+              online:
+                  _forceOnline ||
+                  recoveryAction == PlaybackRecoveryAction.refresh,
             );
       if (prepared == null) {
         return;
@@ -929,13 +956,23 @@ class _PlayerScreenState extends State<PlayerScreen>
         _plan = plan;
         installed = true;
         _acceptErrors = true;
-        await _playback.open(
-          plan,
-          position: position > 0
-              ? Duration(milliseconds: (position * 1000).round())
-              : Duration.zero,
-          play: _foreground && _playIntent,
-        );
+        await _playback
+            .open(
+              plan,
+              position: position > 0
+                  ? Duration(milliseconds: (position * 1000).round())
+                  : Duration.zero,
+              play: _foreground && _playIntent,
+            )
+            .timeout(
+              const Duration(seconds: 20),
+              onTimeout: () {
+                throw AppFailure(
+                  '播放器打开媒体超时，请重新打开播放页面',
+                  code: 'player_initialization',
+                );
+              },
+            );
         if (_closed || ticket != _generation) {
           return;
         }
@@ -955,20 +992,30 @@ class _PlayerScreenState extends State<PlayerScreen>
       });
     } catch (error) {
       if (!_closed && mounted && ticket == _generation) {
-        if (prepared != null && identical(_plan, prepared)) {
+        if (prepared != null &&
+            identical(_plan, prepared) &&
+            !(error is AppFailure && error.code == 'player_initialization') &&
+            error is! FormatException) {
           _acceptErrors = true;
           _queueRecovery();
         } else {
           if (prepared != null) {
             await widget.repository.release(prepared.session);
+            if (identical(_plan, prepared)) _plan = null;
           }
+          _acceptErrors = false;
+          _openedIndex = -1;
           if (mounted && !_closed && ticket == _generation) {
             setState(() {
               _loading = false;
               _localFailure =
                   (error is AppFailure && error.code == 'local_media') ||
                   (widget.localOnly && !_forceOnline);
-              _error = error is AppFailure ? error.message : '无法播放这一集，请重试或换一集。';
+              _error = error is AppFailure
+                  ? error.message
+                  : error is FormatException
+                  ? '${error.message}'
+                  : '无法播放这一集，请重试或换一集。';
               widget.handoff?.fail(_error!);
             });
             if (!_localFailure) _reportFeedPlaybackFailed();
@@ -1107,7 +1154,7 @@ class _PlayerScreenState extends State<PlayerScreen>
       await widget.store.toggleFavorite(widget.detail.drama);
       if (mounted && !_closed) setState(() {});
     } catch (_) {
-      _notice('追剧记录未能保存，请检查存储空间后重试');
+      _notice('收藏记录未能保存，请检查存储空间后重试');
     }
   }
 
@@ -1170,6 +1217,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               actualQuality: _plan?.quality ?? 0,
               local: _plan?.local == true,
               favorite: widget.store.isFavorite(widget.detail.drama.id),
+              series: SourceSite.isSeries(widget.detail.drama.source),
               mobile: _mobile,
               onEpisode: (index) => Navigator.pop(menuContext, index),
               onPreferences: _setPreferences,
@@ -1252,6 +1300,7 @@ class _PlayerScreenState extends State<PlayerScreen>
               quality: _requestedQuality,
               qualities: _plan?.qualities ?? [],
               favorite: widget.store.isFavorite(widget.detail.drama.id),
+              series: SourceSite.isSeries(widget.detail.drama.source),
               onFavorite: _toggleFavorite,
               autoAdvance: _autoAdvance,
               preload: _preloadEnabled,
@@ -1527,7 +1576,9 @@ class _PlayerScreenState extends State<PlayerScreen>
             onTogglePlayback: _togglePlayback,
             swipeEnabled: _mobile && !widget.immersiveFeed,
             immersiveFeed: widget.immersiveFeed,
-            live: widget.detail.drama.source == 'douyin-live',
+            live:
+                SourceSite.byId(widget.detail.drama.source).kind == 'live' ||
+                widget.detail.drama.source == 'douyin-live',
             hideFeedOverlays: widget.hideFeedOverlays,
             onFeedDoubleTap: widget.onFeedDoubleTap,
             onFullscreen: widget.immersiveFeed ? () {} : _toggleFullscreen,
@@ -1896,6 +1947,22 @@ class _PlayerScreenState extends State<PlayerScreen>
   }
 
   Widget _mobileFollowControl(Drama drama) {
+    if (!SourceSite.isSeries(drama.source)) {
+      final saved = widget.store.isFavorite(drama.id);
+      return FilledButton.tonalIcon(
+        key: const ValueKey('player-content-save'),
+        onPressed: () =>
+            saveUserChange(context, () => widget.store.toggleFavorite(drama)),
+        icon: Icon(
+          saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+        ),
+        label: Text(saved ? '已收藏' : '加入收藏'),
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(0, 36),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        ),
+      );
+    }
     final state = widget.store.following(drama.id);
     return PopupMenuButton<String>(
       key: const ValueKey('player-follow-status'),

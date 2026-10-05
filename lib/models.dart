@@ -56,14 +56,41 @@ class SourceSite {
   static const hongguo = SourceSite('hongguo', '红果', '短剧 · 漫剧 · AI 剧');
   static const bilibili = SourceSite(
     'bilibili',
-    '哔哩哔哩',
+    'Bilibili 视频',
     '个性推荐 · 正在关注 · 排行 · 分 P 播放',
+    kind: 'video',
   );
-  static const douyin = SourceSite('douyin', '抖音', '短视频推荐 · Cookie 登录');
+  static const bilibiliLive = SourceSite(
+    'bilibili-live',
+    'Bilibili 直播',
+    '推荐 · 关注 · 直播分区',
+    capabilities: {'catalog', 'categories', 'detail', 'resolve', 'live'},
+    kind: 'live',
+  );
+  static const tiktok = SourceSite(
+    'tiktok',
+    'TikTok',
+    '推荐 · 关注 · Cookie 登录',
+    kind: 'video',
+  );
+  static const youtube = SourceSite(
+    'youtube',
+    'YouTube',
+    '全部 · 游戏 · 直播 · 音乐 · 播客',
+    capabilities: {'catalog', 'categories', 'detail', 'resolve', 'live'},
+    kind: 'video',
+  );
+  static const douyin = SourceSite(
+    'douyin',
+    '抖音',
+    '短视频推荐 · Cookie 登录',
+    kind: 'video',
+  );
   static const douyinLive = SourceSite(
     'douyin-live',
     '抖音直播',
     '直播间 · 共用抖音 Cookie',
+    kind: 'live',
   );
   static const douyinSeries = SourceSite(
     'douyin-series',
@@ -95,10 +122,22 @@ class SourceSite {
 
   static const douyinValues = [douyin, douyinLive, douyinSeries, douyinTheater];
   bool get isDouyin => douyinValues.any((source) => source.id == id);
+  String get libraryKind => switch (kind) {
+    'video' || 'live' => kind,
+    _ => switch (id) {
+      'bilibili' || 'douyin' || 'tiktok' || 'youtube' => 'video',
+      'bilibili-live' || 'douyin-live' => 'live',
+      _ => 'drama',
+    },
+  };
+
+  static String libraryKindFor(String source) => byId(source).libraryKind;
+  static bool isSeries(String source) => libraryKindFor(source) == 'drama';
   static const otherValues = [...douyinValues, ...otherValuesWithoutDouyin];
   static const knownValues = [
     hongguo,
     bilibili,
+    bilibiliLive,
     ...douyinValues,
     hanxiaoquan,
     guipian,
@@ -108,6 +147,8 @@ class SourceSite {
   static const otherValuesWithoutDouyin = [
     SourceSite('huangju', '剧果', '热门 · 最新 · 分类短剧'),
     dsd,
+    tiktok,
+    youtube,
     crj91,
     stripchat,
     SourceSite('huangguo-video', '黄果视频', '视频剧集'),
@@ -312,6 +353,107 @@ class Drama {
           : fresh.creatorAvatar,
     );
   }
+}
+
+class FollowedCreator {
+  const FollowedCreator({
+    required this.id,
+    required this.source,
+    required this.name,
+    required this.avatar,
+    required this.creatorId,
+    required this.creatorSecUid,
+    required this.anchor,
+    required this.followedAt,
+  });
+
+  final String id;
+  final String source;
+  final String name;
+  final String avatar;
+  final String creatorId;
+  final String creatorSecUid;
+  final Drama anchor;
+  final DateTime followedAt;
+
+  static String? identifierFor(Drama drama) {
+    final stable = drama.creatorSecUid.trim();
+    if (stable.isNotEmpty) return stable;
+    final id = drama.creatorId.trim();
+    return id.isEmpty ? null : id;
+  }
+
+  static String? keyFor(Drama drama) {
+    final identifier = identifierFor(drama);
+    if (identifier == null) return null;
+    return '${drama.source}:${Uri.encodeComponent(identifier)}';
+  }
+
+  factory FollowedCreator.fromDrama(Drama drama, {DateTime? followedAt}) {
+    final identifier = identifierFor(drama);
+    final id = keyFor(drama);
+    if (identifier == null || id == null) {
+      throw StateError('该内容源没有提供可识别的作者编号');
+    }
+    final name = drama.creatorName.trim().isEmpty
+        ? '作者 $identifier'
+        : drama.creatorName.trim();
+    final anchor = Drama(
+      id: drama.id,
+      source: drama.source,
+      sourceId: drama.sourceId,
+      title: name,
+      creatorSecUid: drama.creatorSecUid,
+      creatorName: name,
+      creatorAvatar: drama.creatorAvatar,
+      creatorId: drama.creatorId,
+    );
+    return FollowedCreator(
+      id: id,
+      source: drama.source,
+      name: name,
+      avatar: drama.creatorAvatar,
+      creatorId: drama.creatorId,
+      creatorSecUid: drama.creatorSecUid,
+      anchor: anchor,
+      followedAt: followedAt ?? DateTime.now(),
+    );
+  }
+
+  factory FollowedCreator.fromJson(Map<String, dynamic> json) {
+    final source = json['source'] as String? ?? '';
+    final anchor = Drama.fromJson(
+      Map<String, dynamic>.from(json['anchor'] as Map),
+    );
+    final expectedId = keyFor(anchor);
+    final id = json['id'] as String? ?? '';
+    if (source.isEmpty || anchor.source != source || expectedId != id) {
+      throw const FormatException('作者收藏记录无效');
+    }
+    return FollowedCreator(
+      id: id,
+      source: source,
+      name: json['name'] as String? ?? anchor.creatorName,
+      avatar: json['avatar'] as String? ?? anchor.creatorAvatar,
+      creatorId: json['creatorId'] as String? ?? anchor.creatorId,
+      creatorSecUid: json['creatorSecUid'] as String? ?? anchor.creatorSecUid,
+      anchor: anchor,
+      followedAt:
+          DateTime.tryParse(json['followedAt']?.toString() ?? '') ??
+          DateTime(2000),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'source': source,
+    'name': name,
+    'avatar': avatar,
+    'creatorId': creatorId,
+    'creatorSecUid': creatorSecUid,
+    'anchor': anchor.toJson(),
+    'followedAt': followedAt.toIso8601String(),
+  };
 }
 
 class Episode {

@@ -854,6 +854,18 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Widget _followingControls(Drama drama) {
+    if (!SourceSite.isSeries(drama.source)) {
+      final saved = widget.store.isFavorite(drama.id);
+      return FilledButton.tonalIcon(
+        key: const ValueKey('content-save'),
+        onPressed: () =>
+            saveUserChange(context, () => widget.store.toggleFavorite(drama)),
+        icon: Icon(
+          saved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+        ),
+        label: Text(saved ? '已收藏' : '加入收藏'),
+      );
+    }
     final state = widget.store.following(drama.id);
     return Wrap(
       spacing: 8,

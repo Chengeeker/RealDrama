@@ -10,6 +10,7 @@ import (
 )
 
 type providerMediaCredentials struct {
+	source    string
 	cookie    string
 	origin    string
 	referer   string
@@ -23,7 +24,7 @@ type providerMediaCredentialsKey struct{}
 
 func providerMediaContext(ctx context.Context, credentials *providerMediaCredentials) context.Context {
 	if credentials != nil && credentials.browser {
-		ctx = subscriptionBrowserContext(ctx)
+		ctx = subscriptionBrowserContext(ctx, credentials.source)
 	}
 	return context.WithValue(ctx, providerMediaCredentialsKey{}, credentials)
 }
@@ -47,6 +48,11 @@ func (credentials *providerMediaCredentials) apply(request *http.Request) error 
 	}
 	if credentials.userAgent != "" {
 		request.Header.Set("User-Agent", credentials.userAgent)
+	}
+	if credentials.browser {
+		request.Header.Set("Accept", "*/*")
+		request.Header.Set("Sec-Fetch-Mode", "cors")
+		request.Header.Set("Sec-Fetch-Dest", "empty")
 	}
 	if credentials.referer != "" {
 		request.Header.Set("Referer", credentials.referer)

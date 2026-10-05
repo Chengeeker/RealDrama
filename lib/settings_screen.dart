@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_layout.dart';
+import 'app_diagnostics.dart';
 import 'core_bridge.dart';
 import 'local_store.dart';
 import 'models.dart';
@@ -73,6 +74,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  bool _exportingLogs = false;
+
+  Future<void> _exportLogs() async {
+    if (_exportingLogs) return;
+    setState(() => _exportingLogs = true);
+    try {
+      final bytes = await AppDiagnostics.export(AppLayout.versionOf(context));
+      final saved = await FilePicker.saveFile(
+        dialogTitle: '保存诊断日志',
+        fileName:
+            'RealDrama-logs-${DateTime.now().millisecondsSinceEpoch}.json',
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+        bytes: bytes,
+      );
+      if (mounted && saved != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('日志已导出，请将文件发送给开发者')));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('日志导出失败，请重新选择保存位置')));
+      }
+    } finally {
+      if (mounted) setState(() => _exportingLogs = false);
+    }
+  }
+
   void _showAbout() {
     final version = AppLayout.versionOf(context);
     showDialog<void>(
@@ -121,7 +153,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ],
           ),
-          content: Text('追剧收藏与观看记录保存在当前设备。', style: theme.textTheme.bodyLarge),
+          content: Text(
+            '作品收藏、作者关注与观看记录保存在当前设备。作者关注不会修改源站账号。',
+            style: theme.textTheme.bodyLarge,
+          ),
           actions: [
             TextButton(
               onPressed: () {
@@ -300,7 +335,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   key: const ValueKey('backup-settings'),
                   leading: const Icon(Icons.backup_outlined),
                   title: const Text('备份设置'),
-                  subtitle: const Text('导出或恢复本地用户、追剧、历史和设置'),
+                  subtitle: const Text('导出或恢复本地用户、收藏、历史和设置'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => Navigator.push(
                     context,
@@ -316,6 +351,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
               padding: EdgeInsets.all(16),
               child: Text('iOS 下载和媒体处理需要保持应用在前台；切到后台会暂停，回到前台后可继续。'),
             ),
+          SettingsSection(
+            title: '问题排查',
+            children: [
+              ListTile(
+                key: const ValueKey('export-diagnostic-logs'),
+                leading: const Icon(Icons.bug_report_outlined),
+                title: const Text('导出日志'),
+                subtitle: const Text('复现问题后导出；不包含 Cookie、视频链接和请求正文'),
+                trailing: _exportingLogs
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.file_upload_outlined),
+                onTap: _exportingLogs ? null : _exportLogs,
+              ),
+            ],
+          ),
           SettingsSection(
             title: '关于',
             children: [
@@ -370,8 +424,13 @@ class SourceManagementSettingsScreen extends StatelessWidget {
                     title: const Text('站源订阅'),
                     subtitle: const Text('导入站源程序，检测和更新订阅'),
                     trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () =>
-                        _open(context, SourceSubscriptionsScreen(store: store)),
+                    onTap: () => _open(
+                      context,
+                      SourceSubscriptionsScreen(
+                        store: store,
+                        repository: repository,
+                      ),
+                    ),
                   ),
                   ListTile(
                     key: const ValueKey('current-sources-settings'),

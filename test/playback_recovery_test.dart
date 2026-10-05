@@ -29,13 +29,37 @@ void main() {
 
   test('many failing alternatives cannot exceed the automatic retry limit', () {
     final recovery = PlaybackRecovery();
-    for (var i = 0; i < 3; i++) {
+    for (var i = 0; i < 2; i++) {
       expect(
         recovery.next(route(i, count: 10)),
         PlaybackRecoveryAction.alternative,
       );
     }
+    expect(recovery.next(route(2, count: 10)), PlaybackRecoveryAction.refresh);
     expect(recovery.next(route(3, count: 10)), PlaybackRecoveryAction.stop);
+  });
+
+  test('startup with zero progress times out when playback is requested', () {
+    final health = PlaybackHealth();
+    final start = DateTime(2026, 10, 5);
+    expect(
+      health.stalled(
+        position: Duration.zero,
+        playing: true,
+        foreground: true,
+        now: start,
+      ),
+      isFalse,
+    );
+    expect(
+      health.stalled(
+        position: Duration.zero,
+        playing: true,
+        foreground: true,
+        now: start.add(const Duration(seconds: 21)),
+      ),
+      isTrue,
+    );
   });
 
   test(

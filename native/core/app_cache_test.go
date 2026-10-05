@@ -53,6 +53,7 @@ func TestNativeCoverDecryptsAndPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	engine.ensureCoverCache()
 	drama := nativeDrama{ID: "huangguoai:1", Source: sourceHuangguoAI, Cover: upstream.URL + "/poster.jpg?signature=%2F%2b%3D&auth_key=fixture"}
 	var workers sync.WaitGroup
 	for range 12 {
@@ -78,6 +79,7 @@ func TestNativeCoverDecryptsAndPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	restarted.ensureCoverCache()
 	if _, err := restarted.covers.load(context.Background(), drama, false); err != nil || calls.Load() != 1 {
 		t.Fatal("restart did not reuse the disk image", err, calls.Load())
 	}
@@ -120,6 +122,7 @@ func TestNativeCoverFormatsFailuresAndOfflineFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	engine.ensureCoverCache()
 	drama := nativeDrama{ID: "huangguoai:2", Source: sourceHuangguoAI, Cover: upstream.URL + "/cover"}
 	if _, err := engine.covers.load(context.Background(), drama, false); err == nil || len(engine.covers.entries) != 0 {
 		t.Fatal("invalid cover was cached")
@@ -136,6 +139,7 @@ func TestNativeCoverFormatsFailuresAndOfflineFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	restarted.ensureCoverCache()
 	if cached, err := restarted.covers.load(context.Background(), drama, false); err != nil || cached != path || calls.Load() != 3 {
 		t.Fatal("expired image was not retained during a network failure", err, cached, calls.Load())
 	}
@@ -166,6 +170,7 @@ func TestNativeCoverRedirectAndBoundedDiskCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	engine.ensureCoverCache()
 	engine.covers.limit = int64(len(plain) * 2)
 	for _, path := range []string{"/redirect", "/second", "/third"} {
 		_, err := engine.covers.load(context.Background(), nativeDrama{Source: sourceHuangguoAI, Cover: upstream.URL + path}, false)
@@ -254,6 +259,7 @@ func TestNativeCatalogCacheMigratesAndKeepsHongguoCursorItems(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	engine.ensureCoverCache()
 	if cached := engine.nativeCached(sourceHongguo); len(cached.Items) != 1 || cached.Fresh {
 		t.Fatal("legacy data was lost or marked as freshly fetched", cached)
 	}

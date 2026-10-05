@@ -77,7 +77,7 @@ void main() {
       final store = await create({
         ...await gatePreferences(),
         'profiles': jsonEncode([
-          const LocalProfile(
+          LocalProfile(
             id: 'default',
             name: '管理员',
             admin: true,
@@ -105,7 +105,7 @@ void main() {
     final store = await create({
       'forceLogin': false,
       'profiles': jsonEncode([
-        const LocalProfile(
+        LocalProfile(
           id: 'default',
           name: '管理员',
           admin: true,

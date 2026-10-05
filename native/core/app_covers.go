@@ -98,6 +98,8 @@ func validNativeCoverURL(address *url.URL) bool {
 	return address != nil && (address.Scheme == "https" || address.Scheme == "http") && address.Hostname() != "" && address.User == nil
 }
 
+type subscriptionCoverNetworkKey struct{}
+
 func (cache *nativeCoverCache) loadAddress(ctx context.Context, drama nativeDrama, force bool) (string, error) {
 	drama.Cover = repairLegacyCoverURL(drama)
 	address, err := url.Parse(drama.Cover)
@@ -139,7 +141,7 @@ func (cache *nativeCoverCache) loadAddress(ctx context.Context, drama nativeDram
 		}
 		call = &nativeCoverCall{done: make(chan struct{})}
 		cache.pending[key] = call
-		go cache.fetch(key, drama, referer, fallback, call)
+		go cache.fetch(key, drama, referer, fallback, call, ctx.Value(subscriptionCoverNetworkKey{}) == true)
 	}
 	cache.mu.Unlock()
 	select {
@@ -150,9 +152,12 @@ func (cache *nativeCoverCache) loadAddress(ctx context.Context, drama nativeDram
 	}
 }
 
-func (cache *nativeCoverCache) fetch(key string, drama nativeDrama, referer, fallback string, call *nativeCoverCall) {
+func (cache *nativeCoverCache) fetch(key string, drama nativeDrama, referer, fallback string, call *nativeCoverCall, subscription bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 	defer cancel()
+	if subscription {
+		ctx = context.WithValue(ctx, subscriptionCoverNetworkKey{}, true)
+	}
 	var data []byte
 	var err error
 	select {
@@ -203,6 +208,11 @@ func (cache *nativeCoverCache) download(ctx context.Context, address, referer st
 	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
 		if len(via) >= 5 || !validNativeCoverURL(request.URL) {
 			return errors.New("海报重定向地址无效")
+		}
+		if ctx.Value(subscriptionCoverNetworkKey{}) == true {
+			if _, err := subscriptionURL(request.Context(), request.URL.String()); err != nil {
+				return err
+			}
 		}
 		request.Header.Set("Referer", referer)
 		return nil

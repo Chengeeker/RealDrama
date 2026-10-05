@@ -240,7 +240,10 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
       value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
 
   bool _isAggregate(CatalogCategory category, String source) {
-    if (SourceSite.byId(source).isDouyin || source == 'bilibili')
+    if (SourceSite.byId(source).isDouyin ||
+        source == SourceSite.bilibili.id ||
+        source == SourceSite.tiktok.id ||
+        source == SourceSite.youtube.id)
       return category.id.isEmpty;
     final id = category.id.trim().toLowerCase();
     final name = category.name.trim();

@@ -269,9 +269,12 @@ class _DouyinLivePlayerScreenState extends State<DouyinLivePlayerScreen>
                 builder: (context, _) => DouyinAuthorPanel(
                   drama: _roomDrama ?? widget.drama,
                   onOpen: _openCreator,
-                  followed: widget.store.isFavorite(widget.drama.id),
-                  onFollow: () =>
-                      widget.store.toggleFavorite(_roomDrama ?? widget.drama),
+                  followed: widget.store.isCreatorFollowed(
+                    _roomDrama ?? widget.drama,
+                  ),
+                  onFollow: () => widget.store.toggleCreatorFollow(
+                    _roomDrama ?? widget.drama,
+                  ),
                 ),
               ),
             ),

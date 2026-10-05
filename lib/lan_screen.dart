@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import 'lan_controller.dart';
 import 'local_store.dart';
+import 'models.dart';
 import 'widgets.dart';
 
 IconData lanDeviceIcon(String kind) => switch (kind) {
@@ -190,7 +191,7 @@ class _LanSyncScreenState extends State<LanSyncScreen> {
       final controlsEnabled =
           !_busy && !_cancelling && !link.syncing && !link.store.locked;
       return Scaffold(
-        appBar: AppBar(title: const Text('追剧同步')),
+        appBar: AppBar(title: const Text('收藏与进度同步')),
         body: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 720),
@@ -289,7 +290,7 @@ class _LanSyncScreenState extends State<LanSyncScreen> {
                       SwitchListTile.adaptive(
                         key: const ValueKey('lan-auto-sync'),
                         title: const Text('自动同步'),
-                        subtitle: const Text('同步追剧、观看状态和这些剧目的续播进度'),
+                        subtitle: const Text('同步作品收藏、观看状态和续播进度；作者关注仅保存在本机'),
                         value: link.autoSync,
                         onChanged: controlsEnabled
                             ? (value) => _perform(() => link.setAutoSync(value))
@@ -853,11 +854,11 @@ class _LanManualState extends State<_LanManual> {
                                       ? '将覆盖 $name 的当前用户记录；移除 ' +
                                             preview.remoteCount.removed
                                                 .toString() +
-                                            ' 部追剧。'
+                                            ' 项收藏。'
                                       : '将覆盖本机当前用户记录；移除 ' +
                                             preview.localCount.removed
                                                 .toString() +
-                                            ' 部追剧。',
+                                            ' 项收藏。',
                                 ),
                               ),
                           ],
@@ -907,8 +908,8 @@ class _LanConflicts extends StatelessWidget {
   const _LanConflicts({required this.controller});
   final LanController controller;
 
-  String _value(String field, Object? value) {
-    if (field == 'member') return value == true ? '保留追剧' : '取消追剧';
+  String _value(String field, Object? value, {required Drama drama}) {
+    if (field == 'member') return value == true ? '保留收藏' : '取消收藏';
     if (value == null) return '清空续播进度';
     final row = lanMap(value);
     if (field == 'status') {
@@ -918,10 +919,12 @@ class _LanConflicts extends StatelessWidget {
         _ => row['manual'] == true ? '已看 · 手动标记' : '已看',
       };
     }
-    return '第 ' +
-        row['episode'].toString() +
-        ' 集 · ' +
-        formatPosition((row['position'] as num).toDouble());
+    final position = formatPosition((row['position'] as num).toDouble());
+    return SourceSite.isSeries(drama.source)
+        ? '第 ${row['episode']} 集 · $position'
+        : SourceSite.libraryKindFor(drama.source) == 'live'
+        ? '直播播放至 $position'
+        : '播放至 $position';
   }
 
   @override
@@ -960,7 +963,12 @@ class _LanConflicts extends StatelessWidget {
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
                               for (final field in record.fields.entries.where(
-                                (field) => field.value.conflict,
+                                (field) =>
+                                    field.value.conflict &&
+                                    (field.key != 'status' ||
+                                        SourceSite.isSeries(
+                                          record.drama.source,
+                                        )),
                               )) ...[
                                 Padding(
                                   padding: const EdgeInsets.only(
@@ -968,7 +976,7 @@ class _LanConflicts extends StatelessWidget {
                                     bottom: 4,
                                   ),
                                   child: Text(switch (field.key) {
-                                    'member' => '追剧列表',
+                                    'member' => '作品收藏',
                                     'status' => '观看状态',
                                     _ => '续播进度',
                                   }),
@@ -979,7 +987,11 @@ class _LanConflicts extends StatelessWidget {
                                       Icons.radio_button_unchecked_rounded,
                                     ),
                                     title: Text(
-                                      _value(field.key, candidate.value),
+                                      _value(
+                                        field.key,
+                                        candidate.value,
+                                        drama: record.drama,
+                                      ),
                                     ),
                                     subtitle: const Text('使用这条记录'),
                                     onTap: () =>

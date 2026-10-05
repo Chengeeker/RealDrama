@@ -86,7 +86,14 @@ func (cache *nativeCoverCache) repair(ctx context.Context, drama nativeDrama, fo
 	return address, err
 }
 
+func (engine *nativeEngine) ensureCoverCache() {
+	engine.coverOnce.Do(func() {
+		engine.covers = newNativeCoverCache(engine.directory, engine.downloader)
+	})
+}
+
 func (engine *nativeEngine) loadCover(ctx context.Context, drama nativeDrama, force bool) (map[string]any, error) {
+	engine.ensureCoverCache()
 	engine.mu.Lock()
 	for _, cached := range engine.catalogs[drama.Source] {
 		if cached.ID == drama.ID && drama.Cover == "" && cached.Cover != "" {
@@ -143,6 +150,10 @@ func (engine *nativeEngine) prepareCover(ctx context.Context, drama nativeDrama)
 	if err != nil {
 		return nil, err
 	}
+	return engine.prepareCoverResult(result)
+}
+
+func (engine *nativeEngine) prepareCoverResult(result map[string]any) (any, error) {
 	if result["heic"] != true {
 		return result, nil
 	}

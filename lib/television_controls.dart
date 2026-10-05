@@ -485,6 +485,7 @@ class TelevisionSettingsDialog extends StatelessWidget {
     required this.quality,
     required this.qualities,
     required this.favorite,
+    required this.series,
     required this.onFavorite,
     this.autoAdvance = true,
     this.preload = true,
@@ -494,6 +495,7 @@ class TelevisionSettingsDialog extends StatelessWidget {
   final int quality;
   final List<int> qualities;
   final bool favorite;
+  final bool series;
   final VoidCallback onFavorite;
   final bool autoAdvance;
   final bool preload;
@@ -572,7 +574,13 @@ class TelevisionSettingsDialog extends StatelessWidget {
             Text(preloadStatus, style: const TextStyle(fontSize: 14)),
             const SizedBox(height: 20),
             RemoteButton(
-              label: favorite ? '取消追剧' : '加入追剧',
+              label: series
+                  ? favorite
+                        ? '取消追剧'
+                        : '加入追剧'
+                  : favorite
+                  ? '取消收藏'
+                  : '加入收藏',
               icon: favorite
                   ? Icons.bookmark_rounded
                   : Icons.bookmark_border_rounded,

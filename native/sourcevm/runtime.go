@@ -11,6 +11,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,8 +36,14 @@ type session struct {
 	iterator *goja.Object
 	next     goja.Callable
 	updated  time.Time
+	cpuUsed  time.Duration
 	mu       sync.Mutex
 }
+
+const (
+	sourceStepTimeout    = 900 * time.Millisecond
+	sourceSessionTimeout = 4 * time.Second
+)
 
 var sessions = struct {
 	sync.Mutex
@@ -52,15 +61,15 @@ func Request(raw string) (result string) {
 			if requestID != "" {
 				remove(requestID)
 			}
-			result = `{"ok":false,"error":"站源脚本执行失败"}`
+			result = failureWith("source_runtime", "站源运行环境异常，请重试")
 		}
 	}()
 	if len(raw) > 12<<20 {
-		return failure()
+		return failureWith("source_request", "站源请求数据过大")
 	}
 	var input request
 	if json.Unmarshal([]byte(raw), &input) != nil || len(input.ID) > 160 || input.ID == "" {
-		return failure()
+		return failureWith("source_request", "站源请求格式无效")
 	}
 	requestID = input.ID
 	sessions.Lock()
@@ -83,19 +92,23 @@ func Request(raw string) (result string) {
 
 		if item != nil || len(sessions.values) >= 8 || len(input.Program) > 2<<20 {
 			sessions.Unlock()
-			return failure()
+			if len(input.Program) > 2<<20 {
+				return failureWith("source_limit", "站源程序体积超出限制")
+			}
+			return failureWith("source_session", "站源运行会话已满，请稍后重试")
 		}
 		item = &session{vm: goja.New(), updated: time.Now()}
-		item.vm.SetMaxCallStackSize(96)
+		item.vm.SetMaxCallStackSize(512)
 		sessions.values[input.ID] = item
 	}
 	sessions.Unlock()
 	if item == nil {
-		return failure()
+		return failureWith("source_session", "站源运行会话已过期或已取消，请重试")
 	}
 	item.mu.Lock()
 	defer item.mu.Unlock()
-	timer := time.AfterFunc(250*time.Millisecond, func() { item.vm.Interrupt("execution limit") })
+	executionStarted := time.Now()
+	timer := time.AfterFunc(sourceStepTimeout, func() { item.vm.Interrupt("execution limit") })
 	defer timer.Stop()
 	vm := item.vm
 	var value goja.Value
@@ -141,6 +154,24 @@ func Request(raw string) (result string) {
 			data = append(data, bytes.Repeat([]byte{byte(padding)}, padding)...)
 			cipher.NewCBCEncrypter(block, iv).CryptBlocks(data, data)
 			return base64.StdEncoding.EncodeToString(data)
+		})
+		vm.Set("jsonAssignment", func(body, pattern string) string {
+			if len(body) > 8<<20 || len(pattern) > 512 {
+				panic(vm.NewTypeError("JSON assignment limit"))
+			}
+			matcher, err := regexp.Compile(pattern)
+			if err != nil {
+				panic(vm.NewTypeError("JSON assignment pattern invalid"))
+			}
+			match := matcher.FindStringIndex(body)
+			if match == nil {
+				return "null"
+			}
+			var raw json.RawMessage
+			if json.NewDecoder(strings.NewReader(body[match[1]:])).Decode(&raw) != nil {
+				panic(vm.NewTypeError("JSON assignment invalid"))
+			}
+			return string(raw)
 		})
 		vm.Set("resolveURL", func(base, reference string) string {
 			address, err := url.Parse(base)
@@ -300,12 +331,33 @@ func Request(raw string) (result string) {
 		json.Unmarshal(input.Response, &response)
 		value, err = item.next(item.iterator, vm.ToValue(response))
 	}
+	timerFired := !timer.Stop()
+	executionTime := time.Since(executionStarted)
+	item.cpuUsed += executionTime
+	if timerFired || executionTime >= sourceStepTimeout || item.cpuUsed > sourceSessionTimeout {
+		remove(input.ID)
+		return failureWith("source_timeout", "站源处理超时，请减少加载范围或更新订阅后重试")
+	}
 	if err != nil || value == nil {
 		remove(input.ID)
 		var exception *goja.Exception
 		if errors.As(err, &exception) {
 			object := exception.Value().ToObject(vm)
 			reason, statusValue := object.Get("sourceError"), object.Get("httpStatus")
+			if reason != nil {
+				messages := map[string]string{
+					"youtube_consent":    "YouTube 要求确认网页登录授权，请更新 Cookie 后重试",
+					"youtube_context":    "YouTube 首页没有提供信息流上下文，请检查账号 Cookie",
+					"youtube_feed_empty": "YouTube 首页及信息流接口未提供可识别视频，请检查账号首页状态或更新订阅",
+					"youtube_feed":       "YouTube 首页没有返回视频列表，请检查账号 Cookie 或刷新订阅",
+					"youtube_category":   "YouTube 当前账号没有此分类入口，请刷新分类",
+					"youtube_player":     "YouTube 未提供可直接播放的地址，此视频可能只提供浏览器专用流",
+					"tiktok_video":       "TikTok 视频页未返回播放地址，请更新 Cookie 或刷新此视频",
+				}
+				if message := messages[reason.String()]; message != "" {
+					return failureWith(reason.String(), message)
+				}
+			}
 			if reason != nil && reason.String() == "http" && statusValue != nil {
 				status := statusValue.ToInteger()
 				if status == 0 || status >= 400 && status <= 599 {
@@ -313,8 +365,39 @@ func Request(raw string) (result string) {
 					return string(body)
 				}
 			}
+
+			name := object.Get("name")
+			kind := "Error"
+			if name != nil {
+				switch name.String() {
+				case "SyntaxError", "TypeError", "ReferenceError", "RangeError", "Error":
+					kind = name.String()
+				}
+			}
+			line := 0
+			if match := regexp.MustCompile(`:(\d+):\d+`).FindStringSubmatch(exception.String()); len(match) == 2 {
+				line, _ = strconv.Atoi(match[1])
+			}
+			body, _ := json.Marshal(map[string]any{"ok": false, "code": "source_script", "exceptionType": kind, "scriptLine": line, "error": "站源解析失败，请更新订阅后重试"})
+			return string(body)
 		}
-		return failure()
+		var interrupted *goja.InterruptedError
+		if errors.As(err, &interrupted) {
+			reason, _ := interrupted.Value().(string)
+			switch reason {
+			case "cancelled":
+				return failureWith("source_cancelled", "站源请求已取消，请重试")
+			case "expired":
+				return failureWith("source_session", "站源运行会话已过期，请重试")
+			case "execution limit":
+				return failureWith("source_timeout", "站源处理超时，请减少加载范围或更新订阅后重试")
+			}
+		}
+		var stackOverflow *goja.StackOverflowError
+		if errors.As(err, &stackOverflow) {
+			return failureWith("source_stack", "站源数据嵌套过深，请更新订阅后重试")
+		}
+		return failureWith("source_script", "站源解析失败，请更新订阅后重试")
 	}
 	object := value.ToObject(vm)
 	done := object.Get("done").ToBoolean()
@@ -328,13 +411,14 @@ func Request(raw string) (result string) {
 	sessions.Unlock()
 	if err != nil || len(body) > 8<<20 {
 		remove(input.ID)
-		return failure()
+		return failureWith("source_result", "站源返回的数据无法处理，请更新订阅后重试")
 	}
 	return string(body)
 }
 func remove(id string) { sessions.Lock(); delete(sessions.values, id); sessions.Unlock() }
-func failure() string {
-	return `{"ok":false,"error":"站源脚本无效、超出执行限制或已取消，请更新站源后重试"}`
+func failureWith(code, message string) string {
+	body, _ := json.Marshal(map[string]any{"ok": false, "code": code, "error": message})
+	return string(body)
 }
 
 func decodeBase64(value string) ([]byte, error) {

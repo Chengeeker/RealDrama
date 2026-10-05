@@ -101,7 +101,9 @@ class SourcePackage {
     final group = value['credentialGroup'] as String? ?? value['id'] as String;
     final protectedDomains = {
       'douyin': {'www.douyin.com', 'www-hj.douyin.com', 'live.douyin.com'},
-      'bilibili': {'api.bilibili.com'},
+      'bilibili': {'api.bilibili.com', 'api.live.bilibili.com'},
+      'tiktok': {'www.tiktok.com'},
+      'youtube': {'www.youtube.com'},
     };
     if (protectedDomains.containsKey(group) &&
         ((group == 'douyin' &&
@@ -111,10 +113,17 @@ class SourcePackage {
                   'douyin-series',
                   'douyin-theater',
                 }.contains(value['id'])) ||
-            (group == 'bilibili' && value['id'] != 'bilibili')))
+            (group == 'bilibili' &&
+                !{'bilibili', 'bilibili-live'}.contains(value['id'])) ||
+            (group == 'tiktok' && value['id'] != 'tiktok') ||
+            (group == 'youtube' && value['id'] != 'youtube')))
       throw const FormatException('订阅无权读取此账号组');
-    if (protectedDomains.containsKey(group) &&
-        credentials.any((host) => !protectedDomains[group]!.contains(host)))
+    final allowedCredentialDomains =
+        group == 'bilibili' && value['id'] == 'bilibili-live'
+        ? {'api.live.bilibili.com'}
+        : protectedDomains[group];
+    if (allowedCredentialDomains != null &&
+        credentials.any((host) => !allowedCredentialDomains.contains(host)))
       throw const FormatException('账号凭据仅允许发送给对应官方域名');
     if ((value['program'] as String).length > 1500000)
       throw const FormatException('站源脚本过大');
@@ -391,15 +400,26 @@ class SourceSubscriptions extends ChangeNotifier {
 
   Future<SourceSubscriptionPreview> preview(String text) async {
     await open();
-    final uri = await _normalize(text);
-    final bytes = await _fetch(uri).timeout(const Duration(seconds: 35));
+    final origin = await _normalize(text);
+    var requestUri = origin;
+    if (origin.host == 'raw.githubusercontent.com' &&
+        origin.pathSegments.isNotEmpty &&
+        origin.pathSegments.last == 'subscription.json') {
+      requestUri = origin.replace(
+        queryParameters: {
+          ...origin.queryParameters,
+          '_rd': DateTime.now().microsecondsSinceEpoch.toString(),
+        },
+      );
+    }
+    final bytes = await _fetch(requestUri).timeout(const Duration(seconds: 35));
     final document = await decodeSubscription(bytes);
     if (document is! Map) throw const FormatException('订阅格式无效');
     if (document['engine'] != null) {
-      final origin = uri.toString();
-      final package = await parseSourcePackage(bytes, origin);
-      return SourceSubscriptionPreview(uri.toString(), package.name, [
-        {...package.document, 'url': uri.toString(), 'sha256': package.digest},
+      final originText = origin.toString();
+      final package = await parseSourcePackage(bytes, originText);
+      return SourceSubscriptionPreview(originText, package.name, [
+        {...package.document, 'url': originText, 'sha256': package.digest},
       ], direct: package);
     }
     if (document['schema'] != 1 ||
@@ -411,12 +431,12 @@ class SourceSubscriptions extends ChangeNotifier {
       final entry = Map<String, dynamic>.from(row as Map);
       final id = entry['id'] as String? ?? '';
       final hash = entry['sha256'] as String? ?? '';
-      final address = uri.resolve(entry['url'] as String? ?? '');
+      final address = origin.resolve(entry['url'] as String? ?? '');
       if (!RegExp(r'^[a-z][a-z0-9-]{0,63}$').hasMatch(id) ||
           !ids.add(id) ||
           !RegExp(r'^[a-f0-9]{64}$').hasMatch(hash) ||
           address.scheme != 'https' ||
-          address.host != uri.host ||
+          address.host != origin.host ||
           address.userInfo.isNotEmpty ||
           entry['version'] is! String ||
           entry['name'] is! String)
@@ -424,7 +444,7 @@ class SourceSubscriptions extends ChangeNotifier {
       entries.add({...entry, 'url': address.toString()});
     }
     return SourceSubscriptionPreview(
-      uri.toString(),
+      origin.toString(),
       document['name'] as String? ?? '站源订阅',
       entries,
     );

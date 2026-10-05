@@ -534,7 +534,7 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
           builder: (context) => AlertDialog(
             title: const Text('恢复备份？'),
             content: Text(
-              '包含 ${(data['profiles'] as List).length} 个用户。将替换本机的用户、追剧、观看记录和偏好设置；已下载视频保留。恢复后使用备份内的管理员密码登录。',
+              '包含 ${(data['profiles'] as List).length} 个用户。将替换本机的用户、收藏、观看记录和偏好设置；已下载视频保留。恢复后使用备份内的管理员密码登录。',
             ),
             actions: [
               TextButton(
@@ -590,7 +590,7 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
                 ListTile(
                   leading: const Icon(Icons.backup_outlined),
                   title: const Text('导出配置备份'),
-                  subtitle: const Text('包含本地用户、追剧、历史和设置，不含视频文件'),
+                  subtitle: const Text('包含本地用户、收藏、历史和设置，不含视频文件'),
                   onTap: _busy ? null : () => _backup(false),
                 ),
                 ListTile(

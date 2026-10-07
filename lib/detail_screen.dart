@@ -64,7 +64,12 @@ class _DetailScreenState extends State<DetailScreen> {
     super.initState();
     _profileEpoch = widget.store.profileEpoch;
     widget.store.addListener(_onStoreChanged);
-    if (!{'douyin', 'douyin-live'}.contains(widget.drama.source)) _load();
+    if (!{
+      'douyin',
+      'douyin-live',
+    }.contains(SourceSite.providerIdFor(widget.drama.source))) {
+      _load();
+    }
   }
 
   @override
@@ -240,7 +245,7 @@ class _DetailScreenState extends State<DetailScreen> {
         !widget.store.allowsSource(detail.drama.source)) {
       return;
     }
-    if (detail.drama.source == 'douyin-live') {
+    if (SourceSite.byId(detail.drama.source).isDouyinLive) {
       await openPlaybackDirectly(
         context,
         drama: detail.drama,
@@ -327,7 +332,10 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if ({'douyin', 'douyin-live'}.contains(widget.drama.source)) {
+    if ({
+      'douyin',
+      'douyin-live',
+    }.contains(SourceSite.providerIdFor(widget.drama.source))) {
       return DouyinCreatorScreen(
         drama: widget.drama,
         repository: widget.repository,

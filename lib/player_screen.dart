@@ -55,8 +55,12 @@ class PlayerScreen extends StatefulWidget {
     this.feedActive,
     this.feedPageActive,
     this.hideFeedOverlays = false,
+    this.feedFullscreen = false,
     this.onFeedBack,
     this.onFeedDoubleTap,
+    this.onFeedFullscreenChanged,
+    this.onFeedBoostingChanged,
+    this.onFeedAspectRatioChanged,
     this.onFeedPlaybackStarted,
     this.onFeedPlaybackFailed,
   });
@@ -75,8 +79,12 @@ class PlayerScreen extends StatefulWidget {
   final ValueListenable<bool>? feedActive;
   final ValueListenable<bool>? feedPageActive;
   final bool hideFeedOverlays;
+  final bool feedFullscreen;
   final VoidCallback? onFeedBack;
   final VoidCallback? onFeedDoubleTap;
+  final ValueChanged<bool>? onFeedFullscreenChanged;
+  final ValueChanged<bool>? onFeedBoostingChanged;
+  final ValueChanged<double>? onFeedAspectRatioChanged;
   final VoidCallback? onFeedPlaybackStarted;
   final VoidCallback? onFeedPlaybackFailed;
   @visibleForTesting
@@ -144,6 +152,7 @@ class _PlayerScreenState extends State<PlayerScreen>
   double _lastVideoHeight = 0;
   double _resumePosition = 0;
   bool _changingFullscreen = false;
+  bool _reportedFeedBoosting = false;
   bool _television = false;
   AppOrientationController? _orientationController;
   bool get _mobile =>
@@ -188,7 +197,7 @@ class _PlayerScreenState extends State<PlayerScreen>
     WidgetsBinding.instance.addObserver(this);
     VideoDanmaku.enabled.addListener(_danmakuChanged);
     _index = widget.initialIndex;
-    if ({'bilibili', 'bilibili-live'}.contains(widget.detail.drama.source)) {
+    if (SourceSite.byId(widget.detail.drama.source).isBilibili) {
       _aspectRatio = 16 / 9;
     }
     if (widget.immersiveFeed) _lastFeedCanPop = !_feedPageIsActive;
@@ -256,13 +265,15 @@ class _PlayerScreenState extends State<PlayerScreen>
       );
     }
     _enginePreferences = preferences;
-    unawaited(
-      (_playback as MediaKitPlaybackEngine).configure(preferences).catchError((
-        Object _,
-      ) {
-        if (!_closed && mounted) _notice('解码或缓存设置未能应用，请重新打开播放器');
-      }),
-    );
+    if (_playback is MediaKitPlaybackEngine) {
+      unawaited(
+        (_playback as MediaKitPlaybackEngine).configure(preferences).catchError(
+          (Object _) {
+            if (!_closed && mounted) _notice('解码或缓存设置未能应用，请重新打开播放器');
+          },
+        ),
+      );
+    }
     _interactions = PlayerInteractions(
       player: _playback,
       available: () =>
@@ -288,13 +299,12 @@ class _PlayerScreenState extends State<PlayerScreen>
         unawaited(_play(next));
         return '第 ${widget.detail.episodes[next].number} 集';
       },
-      holdSpeed:
-          SourceSite.byId(widget.detail.drama.source).kind == 'live' ||
-              widget.detail.drama.source == 'douyin-live'
+      holdSpeed: SourceSite.byId(widget.detail.drama.source).kind == 'live'
           ? 1
           : 2,
       onHoldStart: widget.immersiveFeed ? AppHaptics.light : null,
     );
+    _interactions.addListener(_feedInteractionsChanged);
     _playerFocus.addListener(() {
       if (!_playerFocus.hasPrimaryFocus && !_closed) _interactions.cancel();
     });
@@ -399,12 +409,21 @@ class _PlayerScreenState extends State<PlayerScreen>
         _lastVideoHeight = height;
         if (mounted) {
           setState(() => _aspectRatio = width / height);
+          _reportFeedAspectRatio(width, height);
           _scheduleSystemUi();
         }
       }
     }
     _syncPreload();
     _acknowledgeHandoff();
+  }
+
+  void _feedInteractionsChanged() {
+    if (!widget.immersiveFeed || _closed) return;
+    final boosting = _interactions.boosting;
+    if (boosting == _reportedFeedBoosting) return;
+    _reportedFeedBoosting = boosting;
+    widget.onFeedBoostingChanged?.call(boosting);
   }
 
   void _handlePlaybackCompleted() {
@@ -430,6 +449,10 @@ class _PlayerScreenState extends State<PlayerScreen>
   void _feedVisibilityChanged() {
     if (!widget.immersiveFeed) return;
     _syncFeedBackScope();
+    final state = _playback.state;
+    if (_feedPageIsActive && state.width > 0 && state.height > 0) {
+      _reportFeedAspectRatio(state.width, state.height);
+    }
     final feedVisible =
         (widget.feedActive?.value ?? true) &&
         (widget.feedPageActive?.value ?? true) &&
@@ -441,6 +464,12 @@ class _PlayerScreenState extends State<PlayerScreen>
     _applyLifecycleVisibility();
   }
 
+  void _reportFeedAspectRatio(double width, double height) {
+    if (widget.immersiveFeed && _feedPageIsActive && width > 0 && height > 0) {
+      widget.onFeedAspectRatioChanged?.call(width / height);
+    }
+  }
+
   void _accessChanged() {
     if (!_closed &&
         widget.store.profileEpoch == _profileEpoch &&
@@ -448,9 +477,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       final preferences = widget.store.playbackPreferences;
       final previous = _enginePreferences;
       _enginePreferences = preferences;
-      if (preferences.hardwareDecoding != previous.hardwareDecoding ||
-          preferences.hardwareDecoder != previous.hardwareDecoder ||
-          preferences.lowMemory != previous.lowMemory) {
+      if (_playback is MediaKitPlaybackEngine &&
+          (preferences.hardwareDecoding != previous.hardwareDecoding ||
+              preferences.hardwareDecoder != previous.hardwareDecoder ||
+              preferences.lowMemory != previous.lowMemory)) {
         unawaited(
           (_playback as MediaKitPlaybackEngine)
               .configure(preferences)
@@ -956,23 +986,22 @@ class _PlayerScreenState extends State<PlayerScreen>
         _plan = plan;
         installed = true;
         _acceptErrors = true;
-        await _playback
-            .open(
-              plan,
-              position: position > 0
-                  ? Duration(milliseconds: (position * 1000).round())
-                  : Duration.zero,
-              play: _foreground && _playIntent,
-            )
-            .timeout(
-              const Duration(seconds: 20),
-              onTimeout: () {
-                throw AppFailure(
-                  '播放器打开媒体超时，请重新打开播放页面',
-                  code: 'player_initialization',
-                );
-              },
+        final opening = _playback.open(
+          plan,
+          position: position > 0
+              ? Duration(milliseconds: (position * 1000).round())
+              : Duration.zero,
+          play: _foreground && _playIntent,
+        );
+        await opening.timeout(
+          const Duration(seconds: 20),
+          onTimeout: () {
+            throw AppFailure(
+              '播放器打开媒体超时，请重新打开播放页面',
+              code: 'player_initialization',
             );
+          },
+        );
         if (_closed || ticket != _generation) {
           return;
         }
@@ -1039,6 +1068,26 @@ class _PlayerScreenState extends State<PlayerScreen>
     await _retry();
   }
 
+  Widget? _secondaryErrorAction() {
+    if (_localFailure && widget.allowOnlineFallback) {
+      return TextButton.icon(
+        onPressed: _switchOnline,
+        icon: const Icon(Icons.cloud_outlined),
+        label: const Text('改为在线播放'),
+      );
+    }
+    if (!_localFailure &&
+        !widget.localOnly &&
+        widget.repository.supportsSourceManagement) {
+      return SourceDiagnosticsButton(
+        repository: widget.repository,
+        store: widget.store,
+        drama: widget.detail.drama,
+      );
+    }
+    return null;
+  }
+
   Future<void> _retry({int? quality}) async {
     final position = _currentPosition;
     if (quality != null) {
@@ -1061,6 +1110,23 @@ class _PlayerScreenState extends State<PlayerScreen>
           _aspectRatio >= 1 &&
           MediaQuery.orientationOf(context) == Orientation.landscape);
 
+  Future<void> _setPlaybackOrientation({
+    required bool fullscreen,
+    required double aspectRatio,
+  }) =>
+      _orientationController?.setPlayback(
+        this,
+        fullscreen: fullscreen,
+        aspectRatio: aspectRatio,
+      ) ??
+      SystemChrome.setPreferredOrientations(
+        AppOrientationController.orientations(
+          television: _television,
+          fullscreen: fullscreen,
+          aspectRatio: aspectRatio,
+        ),
+      );
+
   Future<void> _toggleFullscreen() async {
     if (_changingFullscreen || _television) {
       return;
@@ -1078,18 +1144,10 @@ class _PlayerScreenState extends State<PlayerScreen>
       if (Platform.isWindows) {
         await windowManager.setFullScreen(fullscreen);
       } else if (_mobile) {
-        await (_orientationController?.setPlayback(
-              this,
-              fullscreen: fullscreen,
-              aspectRatio: _aspectRatio,
-            ) ??
-            SystemChrome.setPreferredOrientations(
-              AppOrientationController.orientations(
-                television: _television,
-                fullscreen: fullscreen,
-                aspectRatio: _aspectRatio,
-              ),
-            ));
+        await _setPlaybackOrientation(
+          fullscreen: fullscreen,
+          aspectRatio: _aspectRatio,
+        );
       }
     } catch (_) {
       if (mounted && !_closed) {
@@ -1329,7 +1387,11 @@ class _PlayerScreenState extends State<PlayerScreen>
 
   void _back() {
     if (widget.immersiveFeed) {
-      widget.onFeedBack?.call();
+      if (widget.feedFullscreen) {
+        widget.onFeedFullscreenChanged?.call(false);
+      } else {
+        widget.onFeedBack?.call();
+      }
     } else if (_showFullscreen && !_television) {
       _toggleFullscreen();
     } else {
@@ -1354,6 +1416,11 @@ class _PlayerScreenState extends State<PlayerScreen>
     widget.feedEpisode?.removeListener(_feedEpisodeChanged);
     widget.feedActive?.removeListener(_feedVisibilityChanged);
     widget.feedPageActive?.removeListener(_feedVisibilityChanged);
+    _interactions.removeListener(_feedInteractionsChanged);
+    if (_reportedFeedBoosting) {
+      widget.onFeedBoostingChanged?.call(false);
+      _reportedFeedBoosting = false;
+    }
     _preloader.dispose();
     _generation++;
     WidgetsBinding.instance.removeObserver(this);
@@ -1428,7 +1495,11 @@ class _PlayerScreenState extends State<PlayerScreen>
           : _television || !fullscreen,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop && widget.immersiveFeed && _feedPageIsActive) {
-          widget.onFeedBack?.call();
+          if (widget.feedFullscreen) {
+            widget.onFeedFullscreenChanged?.call(false);
+          } else {
+            widget.onFeedBack?.call();
+          }
         } else if (!didPop && fullscreen && !_television) {
           _toggleFullscreen();
         }
@@ -1576,9 +1647,10 @@ class _PlayerScreenState extends State<PlayerScreen>
             onTogglePlayback: _togglePlayback,
             swipeEnabled: _mobile && !widget.immersiveFeed,
             immersiveFeed: widget.immersiveFeed,
-            live:
-                SourceSite.byId(widget.detail.drama.source).kind == 'live' ||
-                widget.detail.drama.source == 'douyin-live',
+            live: SourceSite.byId(widget.detail.drama.source).kind == 'live',
+            feedSeekable:
+                SourceSite.libraryKindFor(widget.detail.drama.source) ==
+                'video',
             hideFeedOverlays: widget.hideFeedOverlays,
             onFeedDoubleTap: widget.onFeedDoubleTap,
             onFullscreen: widget.immersiveFeed ? () {} : _toggleFullscreen,
@@ -1612,17 +1684,21 @@ class _PlayerScreenState extends State<PlayerScreen>
             !widget.hideFeedOverlays &&
             VideoDanmaku.enabled.value &&
             SourceSite.byId(widget.detail.drama.source).supportsDanmaku)
-          VideoDanmaku(
-            key: ValueKey(
-              'danmaku:${widget.detail.drama.id}:${widget.detail.episodes[_index].id}',
+          Visibility(
+            visible: !widget.immersiveFeed || !_interactions.boosting,
+            maintainState: true,
+            child: VideoDanmaku(
+              key: ValueKey(
+                'danmaku:${widget.detail.drama.id}:${widget.detail.episodes[_index].id}',
+              ),
+              player: _playback,
+              repository: widget.repository,
+              drama: widget.detail.drama,
+              episode: widget.detail.episodes[_index],
+              active: widget.feedActive,
+              pageActive: widget.feedPageActive,
+              lowMemory: widget.store.playbackPreferences.lowMemory,
             ),
-            player: _playback,
-            repository: widget.repository,
-            drama: widget.detail.drama,
-            episode: widget.detail.episodes[_index],
-            active: widget.feedActive,
-            pageActive: widget.feedPageActive,
-            lowMemory: widget.store.playbackPreferences.lowMemory,
           ),
         controls,
       ],
@@ -1638,9 +1714,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                 widget.videoBuilder!(layeredControls)
               else
                 _playback.buildSurface(
-                  fit: widget.immersiveFeed && widget.hideFeedOverlays
-                      ? BoxFit.cover
-                      : BoxFit.contain,
+                  fit: BoxFit.contain,
                   controls: layeredControls,
                 ),
               if (_loading)
@@ -1665,21 +1739,7 @@ class _PlayerScreenState extends State<PlayerScreen>
                     message: _error!,
                     onRetry: () => _retry(),
                     action: _localFailure ? '重试本地播放' : '重试播放',
-                    secondaryAction: _localFailure && widget.allowOnlineFallback
-                        ? TextButton.icon(
-                            onPressed: _switchOnline,
-                            icon: const Icon(Icons.cloud_outlined),
-                            label: const Text('改为在线播放'),
-                          )
-                        : !_localFailure &&
-                              !widget.localOnly &&
-                              widget.repository.supportsSourceManagement
-                        ? SourceDiagnosticsButton(
-                            repository: widget.repository,
-                            store: widget.store,
-                            drama: widget.detail.drama,
-                          )
-                        : null,
+                    secondaryAction: _secondaryErrorAction(),
                     icon: Icons.play_disabled_rounded,
                   ),
                 ),

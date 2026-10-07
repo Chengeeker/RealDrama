@@ -17,18 +17,27 @@ class DouyinComment {
   final int likes;
 }
 
+class DouyinCommentEmoji {
+  const DouyinCommentEmoji({required this.name, required this.url});
+
+  final String name;
+  final String url;
+}
+
 class DouyinCommentPage {
   const DouyinCommentPage({
     required this.items,
     required this.cursor,
     required this.hasMore,
     required this.total,
+    this.emojis = const [],
   });
 
   final List<DouyinComment> items;
   final String cursor;
   final bool hasMore;
   final int total;
+  final List<DouyinCommentEmoji> emojis;
 }
 
 class DouyinCreatorPage {

@@ -25,7 +25,7 @@ func nativePlaybackChoices(media providerMedia, quality int) nativePlaybackChoic
 		if !isProviderHTTPMediaURL(option.URL) {
 			continue
 		}
-		identity := option.URL + "\x00" + option.Referer + "\x00" + option.Playlist + "\x00" + hex.EncodeToString(option.CENCKey) + "\x00" + hex.EncodeToString(option.HLSKey)
+		identity := option.URL + "\x00" + option.AudioURL + "\x00" + option.Referer + "\x00" + option.Playlist + "\x00" + hex.EncodeToString(option.CENCKey) + "\x00" + hex.EncodeToString(option.HLSKey)
 		if seen[identity] {
 			continue
 		}
@@ -65,6 +65,9 @@ func (engine *nativeEngine) nativeOpenPlayback(ctx context.Context, choice nativ
 	if !isProviderHTTPMediaURL(media.URL) {
 		return nativePlan{}, errors.New("站源未返回有效的播放地址")
 	}
+	if media.AudioURL != "" && !isProviderHTTPMediaURL(media.AudioURL) {
+		return nativePlan{}, errors.New("站源未返回有效的音频地址")
+	}
 	tokenBytes := make([]byte, 24)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return nativePlan{}, errors.New("无法初始化播放会话")
@@ -92,6 +95,7 @@ func (engine *nativeEngine) nativeOpenPlayback(ctx context.Context, choice nativ
 			return nativePlan{}, err
 		}
 		plan.URL, choice.streamSession = stream.nativeOpen(media)
+		plan.AudioURL = stream.nativeAudioURL(choice.streamSession)
 	}
 	choice.created = time.Now()
 	engine.mu.Lock()

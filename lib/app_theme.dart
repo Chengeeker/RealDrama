@@ -3,6 +3,19 @@ import 'package:flutter/services.dart';
 
 import 'app_haptics.dart';
 
+abstract final class AppSpacing {
+  static const s = 8.0;
+  static const m = 12.0;
+  static const l = 16.0;
+  static const xxl = 32.0;
+}
+
+abstract final class AppRadii {
+  static const input = 16.0;
+  static const card = 20.0;
+  static const settingsGroup = 24.0;
+}
+
 abstract final class AppTheme {
   static final light = _theme(Brightness.light);
   static final dark = _theme(Brightness.dark);
@@ -101,16 +114,57 @@ abstract final class AppTheme {
         );
     final background = scheme.surface;
     final typography = Typography.material2021();
+    final textTheme = _adjustTextTheme(
+      dark ? typography.white : typography.black,
+      fontWeightAdjustment,
+    );
     return ThemeData(
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
       splashFactory: const AppHapticSplashFactory(),
-      textTheme: _adjustTextTheme(
-        dark ? typography.white : typography.black,
-        fontWeightAdjustment,
-      ),
+      textTheme: textTheme,
       scaffoldBackgroundColor: background,
+      cardTheme: CardThemeData(
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.card),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: scheme.surfaceContainerLow,
+        selectedColor: scheme.secondaryContainer,
+        secondarySelectedColor: scheme.secondaryContainer,
+        labelStyle: textTheme.labelLarge?.copyWith(
+          color: scheme.onSurfaceVariant,
+        ),
+        secondaryLabelStyle: textTheme.labelLarge?.copyWith(
+          color: scheme.onSecondaryContainer,
+        ),
+        showCheckmark: false,
+        side: BorderSide(color: scheme.outlineVariant.withValues(alpha: .55)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+        elevation: 0,
+        pressElevation: 0,
+      ),
+      listTileTheme: ListTileThemeData(
+        contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.l),
+        horizontalTitleGap: AppSpacing.l,
+        minLeadingWidth: 24,
+        minVerticalPadding: AppSpacing.s,
+        iconColor: scheme.onSurfaceVariant,
+        titleTextStyle: textTheme.titleMedium?.copyWith(
+          fontSize: 16,
+          color: scheme.onSurface,
+          fontWeight: FontWeight.w500,
+        ),
+        subtitleTextStyle: textTheme.bodyMedium?.copyWith(
+          color: scheme.onSurfaceVariant,
+        ),
+      ),
       appBarTheme: AppBarTheme(
         backgroundColor: background,
         foregroundColor: scheme.onSurface,
@@ -119,7 +173,11 @@ abstract final class AppTheme {
         centerTitle: false,
         systemOverlayStyle: systemBars(brightness),
       ),
-      dividerTheme: DividerThemeData(color: scheme.outlineVariant),
+      dividerTheme: DividerThemeData(
+        color: scheme.outlineVariant.withValues(alpha: .55),
+        thickness: 1,
+        space: 1,
+      ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: background,
         useIndicator: false,
@@ -135,7 +193,7 @@ abstract final class AppTheme {
         filled: true,
         fillColor: scheme.surfaceContainer,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadii.input),
           borderSide: BorderSide.none,
         ),
       ),

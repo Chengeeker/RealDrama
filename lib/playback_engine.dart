@@ -259,8 +259,12 @@ class MediaKitPlaybackEngine extends PlaybackEngine {
         httpHeaders: plan.headers,
         start: position > Duration.zero ? position : null,
       ),
-      play: play,
+      play: plan.audioUrl.isEmpty ? play : false,
     );
+    if (plan.audioUrl.isNotEmpty) {
+      await player.setAudioTrack(AudioTrack.uri(plan.audioUrl));
+      if (play) await player.play();
+    }
     resetTimeline(position);
   }
 
@@ -295,7 +299,12 @@ class MediaKitPlaybackEngine extends PlaybackEngine {
             controls,
           ],
         )
-      : Video(controller: video!, fit: fit, controls: (_) => controls);
+      : Video(
+          controller: video!,
+          fit: fit,
+          alignment: Alignment.center,
+          controls: (_) => controls,
+        );
 
   @override
   Future<void> close() async {

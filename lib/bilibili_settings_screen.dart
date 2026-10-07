@@ -125,27 +125,31 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Bilibili 账号与 Cookie')),
     body: ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       children: [
         Card(
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-            side: BorderSide(
-              color: Theme.of(context).colorScheme.outlineVariant,
-            ),
+            borderRadius: BorderRadius.circular(20),
           ),
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   '可选 Cookie 登录',
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
+                Text(
                   '普通视频的公开推荐、排行、搜索和可访问内容可匿名读取。直播推荐、分区和播放的匿名可用性尚未实测；正在关注会使用已配置 Cookie 请求。登录网页后，在开发者工具的 Network 中选中 Bilibili API 请求，从请求标头复制完整 Cookie；需要包含 SESSDATA。Cookie 按当前本机用户保存在安全存储中，只发送到 api.bilibili.com 与 api.live.bilibili.com，不写入配置备份，也不会转发给视频 CDN。直播间访问、登录权限和会员内容仍由 Bilibili 控制。',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -167,7 +171,7 @@ class _BilibiliSettingsScreenState extends State<BilibiliSettingsScreen> {
                     labelText: '粘贴请求头 Cookie 的完整值',
                     helperText: '字段名=字段值；多项用英文分号分隔。请勿手动修改字段值。',
                     helperMaxLines: 2,
-                    border: const OutlineInputBorder(),
+                    border: InputBorder.none,
                   ),
                 ),
                 const SizedBox(height: 16),

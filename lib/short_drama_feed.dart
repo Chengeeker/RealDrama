@@ -2,9 +2,12 @@ import 'video_danmaku.dart';
 import 'dart:math' as math;
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'catalog_browser.dart';
 import 'core_bridge.dart';
@@ -13,6 +16,7 @@ import 'douyin_creator_screen.dart';
 import 'douyin_comments_sheet.dart';
 import 'douyin_author_panel.dart';
 import 'app_haptics.dart';
+import 'app_orientation.dart';
 import 'feed_preferences.dart';
 import 'feed_recommendations.dart';
 import 'home_feed_preferences_screen.dart';
@@ -116,6 +120,8 @@ class ShortDramaFeedScreen extends StatefulWidget {
     required this.active,
     required this.onBack,
     required this.onCleanModeChanged,
+    required this.onFullscreenModeChanged,
+    required this.onBoostingChanged,
     required this.navigationInset,
     required this.initialBatchCursor,
     required this.onBatchCursorChanged,
@@ -126,6 +132,8 @@ class ShortDramaFeedScreen extends StatefulWidget {
   final bool active;
   final VoidCallback onBack;
   final ValueChanged<bool> onCleanModeChanged;
+  final ValueChanged<bool> onFullscreenModeChanged;
+  final ValueChanged<bool> onBoostingChanged;
   final double navigationInset;
   final int initialBatchCursor;
   final ValueChanged<int> onBatchCursorChanged;
@@ -154,6 +162,8 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   bool _loadingMore = false;
   bool _awaitingFirstPlayback = true;
   bool _hasMore = true;
+  Timer? _douyinRetryTimer;
+  DateTime? _douyinRateLimitedUntil;
   int _consecutiveUnavailable = 0;
   String? _error;
   final Set<String> _feedWarnings = {};
@@ -172,6 +182,10 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   int _exposureHistoryRevision = -1;
   _ShortDramaPageControls? _pageControls;
   bool _cleanScreen = false;
+  bool _fullscreenMode = false;
+  bool _speedBoosting = false;
+  double _videoAspectRatio = 0;
+  AppOrientationController? _orientationController;
   bool _detailOpening = false;
 
   List<SourceSite> get _feedSources => widget.store.sources.where((source) {
@@ -244,6 +258,34 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
       _loadedBatches.length < count ||
       _batchHasMore.values.any((value) => value);
 
+  bool get _shouldPrefetchMore =>
+      _hasMore &&
+      _items.isNotEmpty &&
+      !(_douyinRateLimitedUntil?.isAfter(DateTime.now()) ?? false) &&
+      _items.length - _index <= math.max(3, (_items.length / 2).ceil());
+
+  bool _isDouyinRateLimit(Object error) => RegExp(
+    r'(?:抖音接口请求较频繁|HTTP\s*(?:403|418|429)|已暂停约\s*\d+\s*秒)',
+  ).hasMatch(error.toString());
+
+  void _scheduleDouyinRetry(Object error) {
+    if (!_isDouyinRateLimit(error)) return;
+    final seconds = int.tryParse(
+      RegExp(r'已暂停约\s*(\d+)\s*秒').firstMatch(error.toString())?.group(1) ?? '',
+    );
+    final delay = Duration(seconds: (seconds ?? 60).clamp(1, 1800).toInt());
+    _douyinRetryTimer?.cancel();
+    _douyinRateLimitedUntil = DateTime.now().add(delay);
+    _douyinRetryTimer = Timer(delay, () {
+      _douyinRetryTimer = null;
+      _douyinRateLimitedUntil = null;
+      if (!mounted || !widget.active || !_hasMore) return;
+      if (_items.isEmpty || _shouldPrefetchMore) {
+        unawaited(_load(more: true, rotate: true));
+      }
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -265,16 +307,41 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _orientationController = AppOrientationScope.maybeOf(context);
+  }
+
+  @override
   void didUpdateWidget(covariant ShortDramaFeedScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.active != widget.active) {
       _feedActive.value = widget.active;
       if (!widget.active) _playbackPreloader.clear();
-      if (widget.active) _primeNearbyDetails();
+      if (widget.active) {
+        _primeNearbyDetails();
+        if (_items.isEmpty || _shouldPrefetchMore) {
+          unawaited(_load(more: true, rotate: true));
+        }
+      }
       if (!widget.active) {
         _applySystemUi(false);
-      } else if (_cleanScreen) {
-        _applySystemUi(true);
+      } else {
+        _applySystemUi(_cleanScreen || _fullscreenMode);
+      }
+      if (!widget.active) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || widget.active) return;
+          if (_cleanScreen) _setCleanScreen(false);
+          if (_fullscreenMode) {
+            unawaited(_setFullscreenMode(false));
+          } else {
+            unawaited(
+              _orientationController?.releasePlayback(this) ??
+                  Future<void>.value(),
+            );
+          }
+        });
       }
     }
   }
@@ -295,8 +362,15 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   void dispose() {
     _recordLeaving(_index);
     _generation++;
+    _douyinRetryTimer?.cancel();
     widget.store.removeListener(_storeChanged);
     _applySystemUi(false);
+    unawaited(
+      _orientationController?.releasePlayback(this) ?? Future<void>.value(),
+    );
+    if (_fullscreenMode && Platform.isWindows) {
+      unawaited(windowManager.setFullScreen(false));
+    }
     _pages.dispose();
     _feedActive.dispose();
     _playbackPreloader.dispose();
@@ -339,6 +413,8 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     _exposureHistoryRevision = widget.store.feedExposureRevision;
     _candidateSignature = candidateSignature;
     _generation++;
+    _douyinRetryTimer?.cancel();
+    _douyinRateLimitedUntil = null;
     _feedSignature = signature;
     _items = [];
     _index = 0;
@@ -455,8 +531,17 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
       );
       return;
     }
-    if (warning != null && warning.isNotEmpty) _feedWarnings.add(warning);
-    if (page.warning.isNotEmpty) _feedWarnings.add(page.warning);
+    final loadWarnings = '${warning ?? ''} ${page.warning}';
+    if (requestedCategories.keys.any(
+          (source) => SourceSite.byId(source).isDouyin,
+        ) &&
+        _isDouyinRateLimit(loadWarnings)) {
+      _scheduleDouyinRetry(loadWarnings);
+    } else {
+      if (warning != null && warning.isNotEmpty) _feedWarnings.add(warning);
+      if (page.warning.isNotEmpty) _feedWarnings.add(page.warning);
+    }
+    _feedWarnings.removeWhere(_isDouyinRateLimit);
     final known = _items.map(_identity).toSet();
     final accepted = ranked
         .where(
@@ -472,8 +557,9 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     });
     _primeNearbyDetails();
     if (accepted.isNotEmpty) _emptyBatchAttempts = 0;
-    if (_items.isNotEmpty &&
-        !_exposures.containsKey(_identity(_items[_index]))) {
+    final currentDrama = _currentDrama;
+    if (currentDrama != null &&
+        !_exposures.containsKey(_identity(currentDrama))) {
       _recordExposure(_index);
     }
   }
@@ -614,9 +700,15 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
         );
       } catch (error) {
         if (!mounted || generation != _generation) return;
-        _feedWarnings.add(error.toString());
-        _loadedBatches.add(index);
-        _batchHasMore[index] = false;
+        if (batch.any((entry) => entry.source.isDouyin) &&
+            _isDouyinRateLimit(error)) {
+          _batchHasMore[index] = true;
+          _scheduleDouyinRetry(error);
+        } else {
+          _feedWarnings.add(error.toString());
+          _loadedBatches.add(index);
+          _batchHasMore[index] = false;
+        }
       }
     }
     if (!mounted || generation != _generation) return;
@@ -641,7 +733,7 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
                 : '当前没有新的推荐内容。可在“设置 → 播放设置 → 猜你喜欢”清除首页去重记录后重新推荐。'
           : null;
     });
-    if (_items.isNotEmpty && _items.length - _index <= 3 && hasMore) {
+    if (_shouldPrefetchMore) {
       unawaited(_load(more: true));
     } else if (_items.isEmpty &&
         hasMore &&
@@ -656,6 +748,14 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   }
 
   String _identity(Drama drama) => '${drama.source}:${drama.id}';
+
+  Drama? get _currentDrama =>
+      _index >= 0 && _index < _items.length ? _items[_index] : null;
+
+  bool get _currentSupportsDanmaku {
+    final drama = _currentDrama;
+    return drama != null && SourceSite.byId(drama.source).supportsDanmaku;
+  }
 
   String _normalizeTitle(String title) => title.toLowerCase().replaceAll(
     RegExp(r'[\s·•_\-—:：，,。.!！?？()（）\[\]【】]'),
@@ -682,7 +782,8 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     _viewed.removeWhere((item) => _identity(item) == identity);
     widget.store.removeFeedSignalsForDrama(drama);
     if (failedIndex < _index) _index--;
-    if (_items.isEmpty) _index = 0;
+    _index = _items.isEmpty ? 0 : _index.clamp(0, _items.length - 1).toInt();
+    if (skippedCurrent) _pageControls = null;
     if (skippedCurrent) _pageStarted = DateTime.now();
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -696,16 +797,17 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
         setState(() {
           _error = '已跳过 20 部暂不可用内容，点击刷新继续加载。';
         });
-      } else if (_items.length - _index <= 3 && _hasMore) {
+      } else if (_shouldPrefetchMore) {
         unawaited(_load(more: true));
       }
     });
   }
 
   void _markAvailable(Drama drama) {
+    final currentDrama = _currentDrama;
     if (!mounted ||
-        _index >= _items.length ||
-        _identity(_items[_index]) != _identity(drama) ||
+        currentDrama == null ||
+        _identity(currentDrama) != _identity(drama) ||
         !_awaitingFirstPlayback && _consecutiveUnavailable == 0) {
       return;
     }
@@ -845,16 +947,19 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   }
 
   void _onPageChanged(int index) {
+    if (index < 0 || index >= _items.length) return;
     _recordLeaving(_index);
+    _videoAspectRatio = 0;
     setState(() {
       _index = index;
       _pageStarted = DateTime.now();
       _pageControls = null;
       _rerankBeyondStableQueueWindow();
     });
+    if (_fullscreenMode) unawaited(_updateFullscreenAspectRatio(0));
     _primeNearbyDetails();
     _recordExposure(index);
-    if (_items.length - index <= 3 && _hasMore) unawaited(_load(more: true));
+    if (_shouldPrefetchMore) unawaited(_load(more: true));
   }
 
   void _like(Drama drama, bool liked) {
@@ -918,6 +1023,7 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
 
   Future<void> _openDetail(Drama drama) async {
     if (!mounted || _detailOpening) return;
+    if (_fullscreenMode) await _setFullscreenMode(false);
     _detailOpening = true;
     _feedActive.value = false;
     _applySystemUi(false);
@@ -960,7 +1066,7 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
       );
     } finally {
       if (mounted) {
-        _applySystemUi(_cleanScreen);
+        _applySystemUi(_cleanScreen || _fullscreenMode);
         _feedActive.value = widget.active;
         _detailOpening = false;
       }
@@ -970,17 +1076,96 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
   void _setCleanScreen(bool enabled) {
     if (!mounted || _cleanScreen == enabled) return;
     setState(() => _cleanScreen = enabled);
-    _applySystemUi(enabled);
+    _applySystemUi(enabled || _fullscreenMode);
     widget.onCleanModeChanged(enabled);
+  }
+
+  Future<void> _setFullscreenMode(bool enabled) async {
+    if (!mounted || _fullscreenMode == enabled) return;
+    setState(() => _fullscreenMode = enabled);
+    widget.onFullscreenModeChanged(enabled);
+    _applySystemUi(enabled || _cleanScreen);
+    try {
+      if (Platform.isWindows) await windowManager.setFullScreen(enabled);
+      await (_orientationController?.setPlayback(
+            this,
+            fullscreen: enabled,
+            aspectRatio: _videoAspectRatio,
+          ) ??
+          SystemChrome.setPreferredOrientations(
+            AppOrientationController.orientations(
+              television: false,
+              fullscreen: enabled,
+              aspectRatio: _videoAspectRatio,
+            ),
+          ));
+    } catch (_) {
+      if (Platform.isWindows) {
+        try {
+          await windowManager.setFullScreen(!enabled);
+        } catch (_) {}
+      }
+      if (!mounted) return;
+      setState(() => _fullscreenMode = !enabled);
+      widget.onFullscreenModeChanged(!enabled);
+      _applySystemUi(!enabled || _cleanScreen);
+    }
+  }
+
+  void _boostingChanged(Drama drama, bool boosting) {
+    final currentDrama = _currentDrama;
+    if (!mounted ||
+        currentDrama == null ||
+        _identity(currentDrama) != _identity(drama) ||
+        _speedBoosting == boosting) {
+      return;
+    }
+    setState(() => _speedBoosting = boosting);
+    widget.onBoostingChanged(boosting);
+  }
+
+  void _videoAspectRatioChanged(Drama drama, double ratio) {
+    final currentDrama = _currentDrama;
+    if (!mounted ||
+        !ratio.isFinite ||
+        ratio <= 0 ||
+        currentDrama == null ||
+        _identity(currentDrama) != _identity(drama)) {
+      return;
+    }
+    if ((_videoAspectRatio - ratio).abs() < .01) return;
+    _videoAspectRatio = ratio;
+    if (_fullscreenMode) {
+      unawaited(_updateFullscreenAspectRatio(ratio));
+    }
+  }
+
+  Future<void> _updateFullscreenAspectRatio(double ratio) async {
+    try {
+      await (_orientationController?.setPlayback(
+            this,
+            fullscreen: true,
+            aspectRatio: ratio,
+          ) ??
+          SystemChrome.setPreferredOrientations(
+            AppOrientationController.orientations(
+              television: false,
+              fullscreen: true,
+              aspectRatio: ratio,
+            ),
+          ));
+    } catch (_) {}
   }
 
   Future<void> _refresh() async {
     final refreshGeneration = ++_refreshGeneration;
     _generation++;
-    await _browser.cancel();
-    if (!mounted || refreshGeneration != _refreshGeneration) return;
+    _douyinRetryTimer?.cancel();
+    _douyinRateLimitedUntil = null;
     _items = [];
     _index = 0;
+    _videoAspectRatio = 0;
+    if (_fullscreenMode) unawaited(_updateFullscreenAspectRatio(0));
     _awaitingFirstPlayback = true;
     _playbackPreloader.clear();
     _pageControls = null;
@@ -997,6 +1182,8 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     _seed = DateTime.now().microsecondsSinceEpoch;
     if (_pages.hasClients) _pages.jumpToPage(0);
     setState(() {});
+    await _browser.cancel();
+    if (!mounted || refreshGeneration != _refreshGeneration) return;
     await _load(force: true, rotate: true);
   }
 
@@ -1013,102 +1200,221 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final feedMaxWidth = MediaQuery.sizeOf(context).width > 560
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final feedMaxWidth =
+        !_fullscreenMode && MediaQuery.sizeOf(context).width > 560
         ? 520.0
         : double.infinity;
     return ColoredBox(
       color: Colors.black,
       child: Column(
         children: [
-          if (!_cleanScreen) _topBar(feedMaxWidth),
-          Expanded(child: _feedContent(feedMaxWidth)),
+          if (!_fullscreenMode)
+            Visibility(
+              visible: !_cleanScreen || _speedBoosting,
+              maintainAnimation: true,
+              maintainSize: true,
+              maintainState: true,
+              child: IgnorePointer(
+                ignoring: _cleanScreen || _speedBoosting,
+                child: Stack(
+                  children: [
+                    AnimatedOpacity(
+                      opacity: _speedBoosting ? 0 : 1,
+                      duration: const Duration(milliseconds: 100),
+                      child: _topBar(feedMaxWidth),
+                    ),
+                    if (_speedBoosting)
+                      Positioned(
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        height: 56,
+                        child: _speedBoostHint(),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _feedContent(feedMaxWidth),
+                if (_fullscreenMode && _speedBoosting)
+                  Positioned(
+                    top: viewPadding.top + 8,
+                    left: 0,
+                    right: 0,
+                    child: _speedBoostHint(),
+                  ),
+                if (_fullscreenMode && !_cleanScreen && !_speedBoosting)
+                  Positioned(
+                    top: viewPadding.top + 8,
+                    left: landscape ? viewPadding.left + 8 : null,
+                    right: landscape ? null : 12,
+                    child: landscape
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton.filledTonal(
+                                tooltip: '清屏',
+                                onPressed: () => _setCleanScreen(true),
+                                icon: const Icon(Icons.visibility_off_rounded),
+                              ),
+                              if (_currentSupportsDanmaku) _danmakuButton(),
+                              const SizedBox(height: 4),
+                              IconButton.filledTonal(
+                                tooltip: '退出全屏',
+                                onPressed: () => _setFullscreenMode(false),
+                                icon: const Icon(Icons.fullscreen_exit_rounded),
+                              ),
+                            ],
+                          )
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton.filledTonal(
+                                tooltip: '清屏',
+                                onPressed: () => _setCleanScreen(true),
+                                icon: const Icon(Icons.visibility_off_rounded),
+                              ),
+                              if (_currentSupportsDanmaku) _danmakuButton(),
+                              const SizedBox(width: 4),
+                              IconButton.filledTonal(
+                                tooltip: '退出全屏',
+                                onPressed: () => _setFullscreenMode(false),
+                                icon: const Icon(Icons.fullscreen_exit_rounded),
+                              ),
+                            ],
+                          ),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
+  Widget _speedBoostHint() => IgnorePointer(
+    child: Center(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: .42),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          child: Text(
+            '倍速播放中 · 松开恢复',
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   Widget _topBar(double feedMaxWidth) {
     final colors = Theme.of(context).colorScheme;
+    final topBarColor = colors.surfaceContainerLow;
+    final drama = _currentDrama;
+    final controls = _pageControls;
     return ColoredBox(
-      color: colors.surfaceContainerLow,
-      child: SafeArea(
-        bottom: false,
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: feedMaxWidth),
-            child: SizedBox(
-              height: 56,
+      color: topBarColor.withValues(alpha: .82),
+      child: SizedBox(
+        height: MediaQuery.viewPaddingOf(context).top + 56,
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: colors.outlineVariant.withValues(alpha: .24),
+                    width: .5,
+                  ),
+                ),
+              ),
               child: Padding(
-                padding: const EdgeInsets.only(left: 16, right: 8),
-                child: _cleanScreen
-                    ? const SizedBox.expand()
-                    : Row(
-                        children: [
-                          Text(
-                            '推荐',
-                            style: TextStyle(
-                              color: colors.onSurface,
-                              fontSize: 17,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          const Spacer(),
-                          if (_items.isNotEmpty &&
-                              {
-                                'douyin',
-                                'douyin-live',
-                              }.contains(_items[_index].source))
-                            const SizedBox.shrink()
-                          else if (_pageControls case final controls?)
-                            ValueListenableBuilder<int>(
-                              valueListenable: controls.episodes,
-                              builder: (context, index, _) => IconButton(
-                                tooltip:
-                                    '选集 · 第 ${controls.episodeNumbers[index.clamp(0, controls.episodeNumbers.length - 1)]} 集',
-                                onPressed: controls.onSelectEpisodes,
+                padding: EdgeInsets.only(
+                  top: MediaQuery.viewPaddingOf(context).top,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: feedMaxWidth),
+                    child: SizedBox(
+                      height: 56,
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 16, right: 8),
+                        child: Row(
+                          children: [
+                            Text(
+                              '推荐',
+                              style: TextStyle(
                                 color: colors.onSurface,
-                                icon: const Icon(Icons.grid_view_rounded),
+                                fontSize: 17,
+                                fontWeight: FontWeight.w700,
                               ),
-                            )
-                          else
-                            IconButton(
-                              tooltip: '选集',
-                              onPressed: null,
-                              icon: const Icon(Icons.grid_view_rounded),
                             ),
-                          if (_items.isNotEmpty &&
-                              SourceSite.byId(
-                                _items[_index].source,
-                              ).supportsDanmaku)
-                            ValueListenableBuilder<bool>(
-                              valueListenable: VideoDanmaku.enabled,
-                              builder: (context, enabled, _) => IconButton(
-                                tooltip: enabled ? '关闭弹幕' : '开启弹幕',
-                                onPressed: () =>
-                                    VideoDanmaku.enabled.value = !enabled,
-                                icon: Text(
-                                  enabled ? '弹' : '弹×',
-                                  style: TextStyle(
+                            const Spacer(),
+                            if (drama != null &&
+                                SourceSite.libraryKindFor(drama.source) ==
+                                    'drama')
+                              if (controls != null &&
+                                  controls.identity == _identity(drama) &&
+                                  controls.episodeNumbers.isNotEmpty)
+                                ValueListenableBuilder<int>(
+                                  valueListenable: controls.episodes,
+                                  builder: (context, index, _) => IconButton(
+                                    tooltip:
+                                        '选集 · 第 ${controls.episodeNumbers[index.clamp(0, controls.episodeNumbers.length - 1).toInt()]} 集',
+                                    onPressed: controls.onSelectEpisodes,
                                     color: colors.onSurface,
-                                    fontSize: 18,
+                                    icon: const Icon(Icons.grid_view_rounded),
                                   ),
+                                )
+                              else
+                                IconButton(
+                                  tooltip: '选集',
+                                  onPressed: null,
+                                  icon: const Icon(Icons.grid_view_rounded),
                                 ),
+                            if (_currentSupportsDanmaku) _danmakuButton(),
+                            IconButton(
+                              tooltip: '刷新推荐',
+                              onPressed: _refresh,
+                              color: colors.onSurface,
+                              icon: const Icon(Icons.refresh_rounded),
+                            ),
+                            IconButton(
+                              tooltip: _fullscreenMode ? '退出全屏' : '全屏播放',
+                              onPressed: () =>
+                                  _setFullscreenMode(!_fullscreenMode),
+                              color: colors.onSurface,
+                              icon: Icon(
+                                _fullscreenMode
+                                    ? Icons.fullscreen_exit_rounded
+                                    : Icons.fullscreen_rounded,
                               ),
                             ),
-                          IconButton(
-                            tooltip: '刷新推荐',
-                            onPressed: _refresh,
-                            color: colors.onSurface,
-                            icon: const Icon(Icons.refresh_rounded),
-                          ),
-                          IconButton(
-                            tooltip: '清屏',
-                            onPressed: () => _setCleanScreen(true),
-                            color: colors.onSurface,
-                            icon: const Icon(Icons.visibility_off_rounded),
-                          ),
-                        ],
+                            IconButton(
+                              tooltip: '清屏',
+                              onPressed: () => _setCleanScreen(true),
+                              color: colors.onSurface,
+                              icon: const Icon(Icons.visibility_off_rounded),
+                            ),
+                          ],
+                        ),
                       ),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -1117,9 +1423,25 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     );
   }
 
+  Widget _danmakuButton() => ValueListenableBuilder<bool>(
+    valueListenable: VideoDanmaku.enabled,
+    builder: (context, enabled, _) => IconButton(
+      tooltip: enabled ? '关闭弹幕' : '开启弹幕',
+      onPressed: () => VideoDanmaku.enabled.value = !enabled,
+      icon: Text(
+        enabled ? '弹' : '弹×',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.onSurface,
+          fontSize: 18,
+        ),
+      ),
+    ),
+  );
+
   void _pageControlsChanged(Drama drama, _ShortDramaPageControls? controls) {
-    if (!mounted || _index >= _items.length) return;
-    final identity = _identity(_items[_index]);
+    final currentDrama = _currentDrama;
+    if (!mounted || currentDrama == null) return;
+    final identity = _identity(currentDrama);
     if (identity != _identity(drama)) return;
     if (controls == null && _pageControls?.identity != identity) return;
     if (identical(_pageControls, controls)) return;
@@ -1212,16 +1534,19 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
                     drama: _items[index],
                     active: widget.active && index == _index,
                     keepPlayerAlive:
-                        !{
-                          'douyin',
-                          'douyin-live',
-                        }.contains(_items[index].source) &&
+                        !{'douyin', 'douyin-live'}.contains(
+                          SourceSite.providerIdFor(_items[index].source),
+                        ) &&
                         (index - _index).abs() <= _playerRadius,
                     detailFuture: _detailFutureFor(_items[index]),
                     repository: widget.repository,
                     store: widget.store,
                     playbackActive: _feedActive,
                     cleanScreen: _cleanScreen,
+                    fullscreenMode: _fullscreenMode,
+                    onFullscreenModeChanged: _setFullscreenMode,
+                    onBoostingChanged: _boostingChanged,
+                    onAspectRatioChanged: _videoAspectRatioChanged,
                     onOpenDetail: _openDetail,
                     onPageControlsChanged: _pageControlsChanged,
                     onRestoreCleanScreen: () => _setCleanScreen(false),
@@ -1268,6 +1593,10 @@ class _ShortDramaPage extends StatefulWidget {
     required this.store,
     required this.playbackActive,
     required this.cleanScreen,
+    required this.fullscreenMode,
+    required this.onFullscreenModeChanged,
+    required this.onBoostingChanged,
+    required this.onAspectRatioChanged,
     required this.onOpenDetail,
     required this.onPageControlsChanged,
     required this.onRestoreCleanScreen,
@@ -1289,6 +1618,10 @@ class _ShortDramaPage extends StatefulWidget {
   final LocalStore store;
   final ValueListenable<bool> playbackActive;
   final bool cleanScreen;
+  final bool fullscreenMode;
+  final ValueChanged<bool> onFullscreenModeChanged;
+  final void Function(Drama, bool) onBoostingChanged;
+  final void Function(Drama, double) onAspectRatioChanged;
   final ValueChanged<Drama> onOpenDetail;
   final void Function(Drama, _ShortDramaPageControls?) onPageControlsChanged;
   final VoidCallback onRestoreCleanScreen;
@@ -1317,6 +1650,7 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
   bool _startupPlanTaken = false;
   PlaybackPlan? _startupPlaybackPlan;
   bool _showLike = false;
+  bool _boosting = false;
   int _likeAnimation = 0;
   Timer? _likeTimer;
   bool _unavailabilityReported = false;
@@ -1342,7 +1676,7 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
       _pageActive.value = widget.active;
       if (widget.active) {
         _playerCreated = true;
-      } else if ({'douyin', 'douyin-live'}.contains(widget.drama.source)) {
+      } else if (SourceSite.byId(widget.drama.source).isDouyin) {
         _playerCreated = false;
       }
     }
@@ -1373,6 +1707,16 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
     _pageActive.dispose();
     _episode.dispose();
     super.dispose();
+  }
+
+  void _feedBoostingChanged(bool boosting) {
+    if (!mounted || _boosting == boosting) return;
+    setState(() => _boosting = boosting);
+    widget.onBoostingChanged(widget.drama, boosting);
+  }
+
+  void _aspectRatioChanged(double ratio) {
+    if (widget.active) widget.onAspectRatioChanged(widget.drama, ratio);
   }
 
   void _doubleTapLike() {
@@ -1503,7 +1847,7 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
             if (detail != null && detail.episodes.isNotEmpty) {
               _restoreProgress(detail);
               if (!widget.active &&
-                  ({'douyin', 'douyin-live'}.contains(widget.drama.source) ||
+                  (SourceSite.byId(widget.drama.source).isDouyin ||
                       !_playerCreated)) {
                 return _poster(
                   context,
@@ -1544,6 +1888,10 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
                     store: widget.store,
                     immersiveFeed: true,
                     hideFeedOverlays: widget.cleanScreen,
+                    feedFullscreen: widget.fullscreenMode,
+                    onFeedFullscreenChanged: widget.onFullscreenModeChanged,
+                    onFeedBoostingChanged: _feedBoostingChanged,
+                    onFeedAspectRatioChanged: _aspectRatioChanged,
                     feedEpisode: _episode,
                     feedActive: widget.playbackActive,
                     feedPageActive: _pageActive,
@@ -1580,11 +1928,13 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
             if (!widget.active || detail == null || detail.episodes.isEmpty) {
               return const SizedBox.shrink();
             }
-            if (widget.cleanScreen) return const SizedBox.shrink();
+            if (widget.cleanScreen || _boosting) {
+              return const SizedBox.shrink();
+            }
             return _overlay(context, detail);
           },
         ),
-        if (_showLike && !widget.cleanScreen)
+        if (_showLike && !widget.cleanScreen && !_boosting)
           Positioned.fill(
             child: IgnorePointer(
               child: Center(
@@ -1726,64 +2076,86 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
     }
   }
 
-  Widget _overlay(BuildContext context, DramaDetail detail) => Stack(
-    children: [
-      Positioned(
-        left: 16,
-        right: 84,
-        bottom: 27,
-        child: SourceSite.byId(widget.drama.source).supportsCreator
-            ? AnimatedBuilder(
-                animation: widget.store,
-                builder: (context, _) => DouyinAuthorPanel(
-                  drama: detail.drama,
-                  onOpen: () => widget.onOpenDetail(detail.drama),
-                  followed: widget.store.isCreatorFollowed(detail.drama),
-                  onFollow: () =>
-                      unawaited(widget.store.toggleCreatorFollow(detail.drama)),
-                ),
-              )
-            : AppHaptics.tapTarget(
-                onTap: () => widget.onOpenDetail(widget.drama),
-                label: '查看${widget.drama.title}详情',
-                child: GestureDetector(
-                  excludeFromSemantics: true,
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => widget.onOpenDetail(widget.drama),
-                  onDoubleTap: _doubleTapLike,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 6,
-                      horizontal: 4,
+  Widget _overlay(BuildContext context, DramaDetail detail) {
+    final compactActions =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final actionGap = compactActions ? 8.0 : 20.0;
+    return Stack(
+      children: [
+        Positioned(
+          left: 16,
+          right: 84,
+          bottom: 27,
+          child: SourceSite.byId(widget.drama.source).supportsCreator
+              ? AnimatedBuilder(
+                  animation: widget.store,
+                  builder: (context, _) => DouyinAuthorPanel(
+                    drama: detail.drama,
+                    onOpen: () => widget.onOpenDetail(detail.drama),
+                    followed: widget.store.isCreatorFollowed(detail.drama),
+                    onFollow: () => unawaited(
+                      widget.store.toggleCreatorFollow(detail.drama),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                widget.drama.title,
+                  ),
+                )
+              : AppHaptics.tapTarget(
+                  onTap: () => widget.onOpenDetail(widget.drama),
+                  label: '查看${widget.drama.title}详情',
+                  child: GestureDetector(
+                    excludeFromSemantics: true,
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => widget.onOpenDetail(widget.drama),
+                    onDoubleTap: _doubleTapLike,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 6,
+                        horizontal: 4,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  widget.drama.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    shadows: [
+                                      Shadow(
+                                        color: Colors.black,
+                                        blurRadius: 8,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (SourceSite.isSeries(widget.drama.source))
+                            ValueListenableBuilder<int>(
+                              valueListenable: _episode,
+                              builder: (_, index, _) => Text(
+                                '${widget.drama.category.isEmpty ? '短剧' : widget.drama.category} · 第 ${detail.episodes[index.clamp(0, detail.episodes.length - 1)].number} 集',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
                                   shadows: [
                                     Shadow(color: Colors.black, blurRadius: 8),
                                   ],
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                        if (SourceSite.isSeries(widget.drama.source))
-                          ValueListenableBuilder<int>(
-                            valueListenable: _episode,
-                            builder: (_, index, _) => Text(
-                              '${widget.drama.category.isEmpty ? '短剧' : widget.drama.category} · 第 ${detail.episodes[index.clamp(0, detail.episodes.length - 1)].number} 集',
+                            )
+                          else
+                            Text(
+                              '${SourceSite.libraryKindFor(widget.drama.source) == 'live' ? '直播' : '视频'} · ${SourceSite.byId(widget.drama.source).name}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -1794,74 +2166,74 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
                                 ],
                               ),
                             ),
-                          )
-                        else
-                          Text(
-                            '${SourceSite.libraryKindFor(widget.drama.source) == 'live' ? '直播' : '视频'} · ${SourceSite.byId(widget.drama.source).name}',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              shadows: [
-                                Shadow(color: Colors.black, blurRadius: 8),
-                              ],
-                            ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-      ),
-      Positioned(
-        right: 12,
-        bottom: 34,
-        child: AnimatedBuilder(
-          animation: widget.store,
-          builder: (context, _) => Column(
-            children: [
-              _FeedAction(
-                icon: _liked
-                    ? Icons.favorite_rounded
-                    : Icons.favorite_border_rounded,
-                label: '喜欢',
-                active: _liked,
-                onTap: () {
-                  final liked = !_liked;
-                  setState(() => _liked = liked);
-                  widget.onLike(widget.drama, liked);
-                },
-              ),
-              const SizedBox(height: 20),
-              _FeedAction(
-                icon: widget.store.isFavorite(widget.drama.id)
-                    ? Icons.bookmark_rounded
-                    : Icons.bookmark_border_rounded,
-                label: SourceSite.isSeries(widget.drama.source) ? '追剧' : '收藏',
-                active: widget.store.isFavorite(widget.drama.id),
-                onTap: () => widget.onFollow(widget.drama),
-              ),
-              const SizedBox(height: 20),
-              if ({'douyin', 'bilibili'}.contains(widget.drama.source))
+        ),
+        Positioned(
+          right: 12,
+          bottom: compactActions ? 48 : 34,
+          child: AnimatedBuilder(
+            animation: widget.store,
+            builder: (context, _) {
+              final actions = <Widget>[
                 _FeedAction(
-                  icon: Icons.chat_bubble_outline_rounded,
-                  label: '评论',
-                  onTap: () => unawaited(_openComments(detail.drama)),
+                  icon: _liked
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  label: '喜欢',
+                  active: _liked,
+                  onTap: () {
+                    final liked = !_liked;
+                    setState(() => _liked = liked);
+                    widget.onLike(widget.drama, liked);
+                  },
+                  compact: compactActions,
                 ),
-              if ({'douyin', 'bilibili'}.contains(widget.drama.source))
-                const SizedBox(height: 20),
-              _FeedAction(
-                icon: Icons.not_interested_rounded,
-                label: '不喜欢',
-                onTap: () => widget.onNotInterested(widget.drama),
-              ),
-            ],
+                _FeedAction(
+                  icon: widget.store.isFavorite(widget.drama.id)
+                      ? Icons.bookmark_rounded
+                      : Icons.bookmark_border_rounded,
+                  label: SourceSite.isSeries(widget.drama.source) ? '追剧' : '收藏',
+                  active: widget.store.isFavorite(widget.drama.id),
+                  onTap: () => widget.onFollow(widget.drama),
+                  compact: compactActions,
+                ),
+                if ({
+                  'douyin',
+                  'bilibili',
+                }.contains(SourceSite.providerIdFor(widget.drama.source))) ...[
+                  _FeedAction(
+                    icon: Icons.chat_bubble_outline_rounded,
+                    label: '评论',
+                    onTap: () => unawaited(_openComments(detail.drama)),
+                    compact: compactActions,
+                  ),
+                ],
+                _FeedAction(
+                  icon: Icons.not_interested_rounded,
+                  label: '不喜欢',
+                  onTap: () => widget.onNotInterested(widget.drama),
+                  compact: compactActions,
+                ),
+              ];
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var index = 0; index < actions.length; index++) ...[
+                    if (index > 0) SizedBox(height: actionGap),
+                    actions[index],
+                  ],
+                ],
+              );
+            },
           ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _FeedAction extends StatelessWidget {
@@ -1870,34 +2242,39 @@ class _FeedAction extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.active = false,
+    this.compact = false,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback onTap;
   final bool active;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 62,
+    width: compact ? 52 : 62,
     child: Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         IconButton.filledTonal(
           onPressed: onTap,
+          tooltip: compact ? label : null,
           icon: Icon(icon, color: active ? Colors.pinkAccent : Colors.white),
           style: IconButton.styleFrom(
             backgroundColor: Colors.black.withValues(alpha: .46),
-            fixedSize: const Size(50, 50),
+            fixedSize: Size.square(compact ? 48 : 50),
           ),
         ),
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 11,
-            shadows: [Shadow(color: Colors.black, blurRadius: 6)],
+        if (!compact)
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              shadows: [Shadow(color: Colors.black, blurRadius: 6)],
+            ),
           ),
-        ),
       ],
     ),
   );

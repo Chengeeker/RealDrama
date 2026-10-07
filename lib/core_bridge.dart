@@ -314,6 +314,14 @@ class NativeRepository extends AppRepository {
             likes: intValue(row['likes']),
           ),
       ],
+      emojis: [
+        for (final raw in data['emojis'] as List? ?? const [])
+          if (raw is Map)
+            DouyinCommentEmoji(
+              name: '${raw['name'] ?? ''}',
+              url: '${raw['url'] ?? ''}',
+            ),
+      ],
       cursor: '${data['cursor'] ?? '0'}',
       hasMore: data['hasMore'] == true,
       total: intValue(data['total']),
@@ -487,6 +495,7 @@ class NativeRepository extends AppRepository {
         'quality': quality,
         'subscription': {
           'url': plan.url,
+          'audioUrl': plan.audioUrl,
           'headers': plan.headers,
           'session': plan.session,
           'quality': plan.quality,
@@ -961,7 +970,7 @@ class NativeRepository extends AppRepository {
         force: force,
       );
     }
-    return {'bilibili', 'bilibili-live'}.contains(drama.source)
+    return SourceSite.byId(drama.source).isBilibili
         ? BilibiliSource.imageURL(drama.cover)
         : drama.cover;
   }

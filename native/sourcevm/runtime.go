@@ -344,20 +344,6 @@ func Request(raw string) (result string) {
 		if errors.As(err, &exception) {
 			object := exception.Value().ToObject(vm)
 			reason, statusValue := object.Get("sourceError"), object.Get("httpStatus")
-			if reason != nil {
-				messages := map[string]string{
-					"youtube_consent":    "YouTube 要求确认网页登录授权，请更新 Cookie 后重试",
-					"youtube_context":    "YouTube 首页没有提供信息流上下文，请检查账号 Cookie",
-					"youtube_feed_empty": "YouTube 首页及信息流接口未提供可识别视频，请检查账号首页状态或更新订阅",
-					"youtube_feed":       "YouTube 首页没有返回视频列表，请检查账号 Cookie 或刷新订阅",
-					"youtube_category":   "YouTube 当前账号没有此分类入口，请刷新分类",
-					"youtube_player":     "YouTube 未提供可直接播放的地址，此视频可能只提供浏览器专用流",
-					"tiktok_video":       "TikTok 视频页未返回播放地址，请更新 Cookie 或刷新此视频",
-				}
-				if message := messages[reason.String()]; message != "" {
-					return failureWith(reason.String(), message)
-				}
-			}
 			if reason != nil && reason.String() == "http" && statusValue != nil {
 				status := statusValue.ToInteger()
 				if status == 0 || status >= 400 && status <= 599 {

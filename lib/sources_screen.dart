@@ -1,10 +1,6 @@
 import 'douyin_settings_screen.dart';
 import 'douyin_source.dart';
 import 'bilibili_settings_screen.dart';
-import 'tiktok_settings_screen.dart';
-import 'tiktok_source.dart';
-import 'youtube_settings_screen.dart';
-import 'youtube_source.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -86,10 +82,19 @@ class _SourcesScreenState extends State<SourcesScreen> {
     }
     if (widget.initialSource != null &&
         SourceSite.byId(widget.initialSource!).isDouyin) {
-      _expandedSections.add('source-group-douyin');
+      _expandedSections.add(
+        SourceSite.byId(widget.initialSource!).isSubscriptionTest
+            ? 'source-group-douyin-test'
+            : 'source-group-douyin',
+      );
     }
-    if ({'bilibili', 'bilibili-live'}.contains(widget.initialSource)) {
-      _expandedSections.add('source-group-bilibili');
+    if (widget.initialSource != null &&
+        SourceSite.byId(widget.initialSource!).isBilibili) {
+      _expandedSections.add(
+        SourceSite.byId(widget.initialSource!).isSubscriptionTest
+            ? 'source-group-bilibili-test'
+            : 'source-group-bilibili',
+      );
     }
     unawaited(_refresh());
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -158,28 +163,44 @@ class _SourcesScreenState extends State<SourcesScreen> {
   List<SourceSite> get _douyinSources =>
       SourceSite.values.where((source) => source.isDouyin).toList();
 
-  List<SourceSite> get _bilibiliSources => SourceSite.values
-      .where((source) => {'bilibili', 'bilibili-live'}.contains(source.id))
-      .toList();
+  List<SourceSite> get _bilibiliSources =>
+      SourceSite.values.where((source) => source.isBilibili).toList();
 
   List<SourceGroup> _managementGroups(List<SourceSite> sources) {
     final groups = <SourceGroup>[];
-    var douyinAdded = false;
-    var bilibiliAdded = false;
+    final added = <String>{};
     for (final group in SourceGroup.fromSources(sources)) {
       if (group.sources.any((source) => source.isDouyin)) {
-        if (!douyinAdded) {
-          groups.add(SourceGroup('douyin-family', '抖音', _douyinSources));
-          douyinAdded = true;
-        }
-      } else if (group.sources.any(
-        (source) => {'bilibili', 'bilibili-live'}.contains(source.id),
-      )) {
-        if (!bilibiliAdded) {
+        final isTest = group.sources.every(
+          (source) => source.isSubscriptionTest,
+        );
+        final id = isTest ? 'douyin-test-family' : 'douyin-family';
+        if (added.add(id)) {
           groups.add(
-            SourceGroup('bilibili-family', 'Bilibili', _bilibiliSources),
+            SourceGroup(
+              id,
+              isTest ? '抖音（测试版）' : '抖音',
+              _douyinSources
+                  .where((source) => source.isSubscriptionTest == isTest)
+                  .toList(),
+            ),
           );
-          bilibiliAdded = true;
+        }
+      } else if (group.sources.any((source) => source.isBilibili)) {
+        final isTest = group.sources.every(
+          (source) => source.isSubscriptionTest,
+        );
+        final id = isTest ? 'bilibili-test-family' : 'bilibili-family';
+        if (added.add(id)) {
+          groups.add(
+            SourceGroup(
+              id,
+              isTest ? 'Bilibili（测试版）' : 'Bilibili',
+              _bilibiliSources
+                  .where((source) => source.isSubscriptionTest == isTest)
+                  .toList(),
+            ),
+          );
         }
       } else {
         groups.add(group);
@@ -256,10 +277,8 @@ class _SourcesScreenState extends State<SourcesScreen> {
     });
   }
 
-  ShapeBorder _sourceCardShape(ColorScheme colors) => RoundedRectangleBorder(
-    borderRadius: BorderRadius.circular(24),
-    side: BorderSide(color: colors.outlineVariant.withValues(alpha: .6)),
-  );
+  ShapeBorder _sourceCardShape() =>
+      RoundedRectangleBorder(borderRadius: BorderRadius.circular(20));
 
   Future<void> _configureDouyin() async {
     await Navigator.of(context).push(
@@ -297,34 +316,6 @@ class _SourcesScreenState extends State<SourcesScreen> {
     }
   }
 
-  Future<void> _configureTikTok() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => TikTokSettingsScreen(
-          store: widget.store,
-          repository: widget.repository,
-        ),
-      ),
-    );
-    if (mounted && widget.store.allowsSource(SourceSite.tiktok.id)) {
-      unawaited(_refreshSource(SourceSite.tiktok));
-    }
-  }
-
-  Future<void> _configureYouTube() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => YouTubeSettingsScreen(
-          store: widget.store,
-          repository: widget.repository,
-        ),
-      ),
-    );
-    if (mounted && widget.store.allowsSource(SourceSite.youtube.id)) {
-      unawaited(_refreshSource(SourceSite.youtube));
-    }
-  }
-
   Future<void> _setVisible(SourceSite source, bool visible) =>
       _setVisibility([source], visible);
 
@@ -355,48 +346,6 @@ class _SourcesScreenState extends State<SourcesScreen> {
             return;
           cookie = await DouyinSource.storage.read(
             key: DouyinSource.cookieKey(widget.store.profile.id),
-          );
-          if (cookie?.isNotEmpty != true) return;
-        }
-      }
-      if (visible &&
-          sources.any((source) => source.id == SourceSite.tiktok.id)) {
-        var cookie = await TikTokSource.storage.read(
-          key: TikTokSource.cookieKey(widget.store.profile.id),
-        );
-        if (!mounted ||
-            epoch != widget.store.profileEpoch ||
-            widget.store.locked)
-          return;
-        if (cookie?.isNotEmpty != true) {
-          await _configureTikTok();
-          if (!mounted ||
-              epoch != widget.store.profileEpoch ||
-              widget.store.locked)
-            return;
-          cookie = await TikTokSource.storage.read(
-            key: TikTokSource.cookieKey(widget.store.profile.id),
-          );
-          if (cookie?.isNotEmpty != true) return;
-        }
-      }
-      if (visible &&
-          sources.any((source) => source.id == SourceSite.youtube.id)) {
-        var cookie = await YouTubeSource.storage.read(
-          key: YouTubeSource.cookieKey(widget.store.profile.id),
-        );
-        if (!mounted ||
-            epoch != widget.store.profileEpoch ||
-            widget.store.locked)
-          return;
-        if (cookie?.isNotEmpty != true) {
-          await _configureYouTube();
-          if (!mounted ||
-              epoch != widget.store.profileEpoch ||
-              widget.store.locked)
-            return;
-          cookie = await YouTubeSource.storage.read(
-            key: YouTubeSource.cookieKey(widget.store.profile.id),
           );
           if (cookie?.isNotEmpty != true) return;
         }
@@ -443,9 +392,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
     return Card(
       key: ValueKey('visible-${group.id}'),
       margin: const EdgeInsets.only(bottom: 8),
-      color: colors.surfaceContainerLow,
+      color: colors.surfaceContainer,
       elevation: 0,
-      shape: _sourceCardShape(colors),
+      shape: _sourceCardShape(),
       child: ListTile(
         title: Text(group.name),
         subtitle: Text('已开启 $enabled/${sources.length} · 子项在下方管理'),
@@ -458,9 +407,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
                 icon: const Icon(Icons.manage_accounts_outlined),
                 onPressed: busy ? null : _configureDouyin,
               ),
-            if (sources.any(
-              (source) => {'bilibili', 'bilibili-live'}.contains(source.id),
-            ))
+            if (sources.any((source) => source.isBilibili))
               IconButton(
                 tooltip: '统一配置 Bilibili Cookie',
                 icon: const Icon(Icons.manage_accounts_outlined),
@@ -611,9 +558,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
     return Card(
       key: ValueKey('section-$section'),
       margin: EdgeInsets.zero,
-      color: colors.surfaceContainerLow,
+      color: colors.surfaceContainer,
       elevation: 0,
-      shape: _sourceCardShape(colors),
+      shape: _sourceCardShape(),
       clipBehavior: Clip.antiAlias,
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -695,9 +642,13 @@ class _SourcesScreenState extends State<SourcesScreen> {
           .where((source) => widget.store.allowsSource(source.id))
           .map(
             (source) => source.isDouyin
-                ? 'douyin-family'
-                : {'bilibili', 'bilibili-live'}.contains(source.id)
-                ? 'bilibili-family'
+                ? source.isSubscriptionTest
+                      ? 'douyin-test-family'
+                      : 'douyin-family'
+                : source.isBilibili
+                ? source.isSubscriptionTest
+                      ? 'bilibili-test-family'
+                      : 'bilibili-family'
                 : source.groupId,
           )
           .toSet()
@@ -705,9 +656,13 @@ class _SourcesScreenState extends State<SourcesScreen> {
       final totalGroups = SourceSite.values
           .map(
             (source) => source.isDouyin
-                ? 'douyin-family'
-                : {'bilibili', 'bilibili-live'}.contains(source.id)
-                ? 'bilibili-family'
+                ? source.isSubscriptionTest
+                      ? 'douyin-test-family'
+                      : 'douyin-family'
+                : source.isBilibili
+                ? source.isSubscriptionTest
+                      ? 'bilibili-test-family'
+                      : 'bilibili-family'
                 : source.groupId,
           )
           .toSet()
@@ -749,10 +704,16 @@ class _SourcesScreenState extends State<SourcesScreen> {
               child: ListView(
                 padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      '顶栏可依次更新或检测所有已开启站源，卡片也可单独操作。更新会查找新剧、继续加载一页历史内容，并分批补齐资料；“加载后续所有页”会逐页低频请求，同一时间只运行一个站源，最多连续加载 1000 页或 30 分钟。遇到限流、超时或错误会停止并保留已加载内容，也可随时手动停止。',
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    color: Theme.of(context).colorScheme.surfaceContainerLow,
+                    elevation: 0,
+                    shape: _sourceCardShape(),
+                    child: const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text(
+                        '顶栏可依次更新或检测所有已开启站源，卡片也可单独操作。更新会查找新剧、继续加载一页历史内容，并分批补齐资料；“加载后续所有页”会逐页低频请求，同一时间只运行一个站源，最多连续加载 1000 页或 30 分钟。遇到限流、超时或错误会停止并保留已加载内容，也可随时手动停止。',
+                      ),
                     ),
                   ),
                   _expandableSection(
@@ -765,7 +726,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
                         SourceSite.values,
                       ))
                         if (group.id == 'douyin-family' ||
+                            group.id == 'douyin-test-family' ||
                             group.id == 'bilibili-family' ||
+                            group.id == 'bilibili-test-family' ||
                             group.id == 'huangguo')
                           _familyVisibility(group)
                         else
@@ -774,11 +737,9 @@ class _SourcesScreenState extends State<SourcesScreen> {
                             margin: const EdgeInsets.only(bottom: 8),
                             color: Theme.of(
                               context,
-                            ).colorScheme.surfaceContainerLow,
+                            ).colorScheme.surfaceContainer,
                             elevation: 0,
-                            shape: _sourceCardShape(
-                              Theme.of(context).colorScheme,
-                            ),
+                            shape: _sourceCardShape(),
                             child: ListTile(
                               title: Text(group.name),
                               trailing: Switch(
@@ -813,6 +774,20 @@ class _SourcesScreenState extends State<SourcesScreen> {
                           ],
                         ),
                       )
+                    else if (group.id == 'douyin-test-family')
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: _expandableSection(
+                          section: 'source-group-douyin-test',
+                          icon: Icons.video_library_outlined,
+                          title: '抖音（测试版）',
+                          subtitle: '独立测试来源 · 共用原版 Cookie',
+                          children: [
+                            for (final source in group.sources)
+                              _sourceCard(source),
+                          ],
+                        ),
+                      )
                     else if (group.id == 'bilibili-family')
                       Padding(
                         padding: const EdgeInsets.only(bottom: 16),
@@ -821,6 +796,20 @@ class _SourcesScreenState extends State<SourcesScreen> {
                           icon: Icons.video_library_outlined,
                           title: 'Bilibili',
                           subtitle: '视频、直播 · 共用一个 Cookie',
+                          children: [
+                            for (final source in group.sources)
+                              _sourceCard(source),
+                          ],
+                        ),
+                      )
+                    else if (group.id == 'bilibili-test-family')
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 16),
+                        child: _expandableSection(
+                          section: 'source-group-bilibili-test',
+                          icon: Icons.video_library_outlined,
+                          title: 'Bilibili（测试版）',
+                          subtitle: '独立测试来源 · 共用原版 Cookie',
                           children: [
                             for (final source in group.sources)
                               _sourceCard(source),
@@ -854,15 +843,15 @@ class _SourcesScreenState extends State<SourcesScreen> {
   Widget _sourceCard(SourceSite source) {
     final visible = widget.store.allowsSource(source.id);
     if ((source.isDouyin ||
-            {'bilibili', 'bilibili-live'}.contains(source.id) ||
+            source.isBilibili ||
             source.groupId == 'huangguo') &&
         !visible) {
       return Card(
         key: ValueKey('source-${source.id}'),
         margin: const EdgeInsets.only(bottom: 16),
-        color: Theme.of(context).colorScheme.surfaceContainerLow,
+        color: Theme.of(context).colorScheme.surfaceContainer,
         elevation: 0,
-        shape: _sourceCardShape(Theme.of(context).colorScheme),
+        shape: _sourceCardShape(),
         child: ListTile(
           title: Text(
             source.id == SourceSite.douyin.id ? '抖音短视频' : source.name,
@@ -895,7 +884,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
       margin: const EdgeInsets.only(bottom: 16),
       color: colors.surfaceContainerLow,
       elevation: 0,
-      shape: _sourceCardShape(colors),
+      shape: _sourceCardShape(),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -903,31 +892,29 @@ class _SourcesScreenState extends State<SourcesScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.dns_outlined),
+                Icon(
+                  Icons.dns_outlined,
+                  color: colors.onSurfaceVariant,
+                  size: 24,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     source.id == SourceSite.douyin.id ? '抖音短视频' : source.name,
-                    style: Theme.of(context).textTheme.titleLarge,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: colors.onSurface,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
                 Text(
-                  '${status?.count ?? 0} ${{'douyin-live', 'bilibili-live'}.contains(source.id) ? '个直播间' : '部'}',
+                  '${status?.count ?? 0} ${source.isDouyinLive || SourceSite.providerIdFor(source.id) == 'bilibili-live' ? '个直播间' : '部'}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
                 ),
-                if (source.id == SourceSite.tiktok.id)
-                  IconButton(
-                    tooltip: 'TikTok Cookie 设置',
-                    onPressed: _configureTikTok,
-                    icon: const Icon(Icons.key_outlined),
-                  ),
-                if (source.id == SourceSite.youtube.id)
-                  IconButton(
-                    tooltip: 'YouTube Cookie 设置',
-                    onPressed: _configureYouTube,
-                    icon: const Icon(Icons.key_outlined),
-                  ),
                 if (source.isDouyin ||
-                    {'bilibili', 'bilibili-live'}.contains(source.id) ||
+                    source.isBilibili ||
                     source.groupId == 'huangguo')
                   Switch(
                     value: visible,
@@ -938,10 +925,37 @@ class _SourcesScreenState extends State<SourcesScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            Text('最近更新：${sourceTimestamp(status?.updatedAt)}'),
-            if (status != null &&
-                (status.count > 0 || status.page > 1 || status.totalPages > 0))
-              Text(sourcePageSummary(status)),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: colors.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '最近更新：${sourceTimestamp(status?.updatedAt)}',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  if (status != null &&
+                      (status.count > 0 ||
+                          status.page > 1 ||
+                          status.totalPages > 0)) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      sourcePageSummary(status),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 10,

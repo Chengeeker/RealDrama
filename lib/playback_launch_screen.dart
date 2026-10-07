@@ -17,7 +17,7 @@ Future<void> openPlaybackDirectly(
   required LocalStore store,
 }) => Navigator.of(context).push<void>(
   MaterialPageRoute<void>(
-    builder: (_) => drama.source == 'douyin-live'
+    builder: (_) => SourceSite.byId(drama.source).isDouyinLive
         ? DouyinLivePlayerScreen(
             drama: drama,
             repository: repository,

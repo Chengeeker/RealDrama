@@ -340,61 +340,28 @@ class _SavedLibraryState extends State<SavedLibrary> {
       final allCount = widget.history
           ? history.length
           : favorites.length + creators.length;
-      final resume = widget.history
-          ? history.where((entry) {
-              final kind = SourceSite.libraryKindFor(entry.drama.source);
-              if (entry.finished ||
-                  kind == 'drama' &&
-                      entry.drama.episodes > 0 &&
-                      entry.episode >= entry.drama.episodes) {
-                return false;
-              }
-              return matchesDramaQuery(entry.drama, _search.text);
-            }).firstOrNull
-          : null;
       final header = [
-        if (widget.history)
+        if (!widget.history)
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '最近观看 · $allCount',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
-                if (history.isNotEmpty)
-                  IconButton(
-                    tooltip: '清空观看记录',
-                    onPressed: _clearHistory,
-                    icon: const Icon(Icons.delete_outline_rounded),
-                  ),
-              ],
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: TextField(
+              key: const ValueKey('favorites-search'),
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: '搜索收藏',
+                prefixIcon: const Icon(Icons.search_rounded),
+                suffixIcon: _search.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: '清空搜索',
+                        onPressed: () => setState(_search.clear),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+              ),
             ),
           ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: TextField(
-            key: ValueKey(
-              widget.history ? 'history-search' : 'favorites-search',
-            ),
-            controller: _search,
-            onChanged: (_) => setState(() {}),
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: widget.history ? '搜索观看记录' : '搜索收藏',
-              prefixIcon: const Icon(Icons.search_rounded),
-              suffixIcon: _search.text.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: '清空搜索',
-                      onPressed: () => setState(_search.clear),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-            ),
-          ),
-        ),
         if (!widget.history)
           SizedBox(
             width: double.infinity,
@@ -443,31 +410,6 @@ class _SavedLibraryState extends State<SavedLibrary> {
               ],
             ),
           ),
-        if (resume != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Card(
-              margin: EdgeInsets.zero,
-              child: ListTile(
-                key: const ValueKey('continue-watching'),
-                leading: const Icon(Icons.play_circle_outline),
-                title: Text(
-                  '继续观看 · ${resume.drama.title}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(switch (SourceSite.libraryKindFor(
-                  resume.drama.source,
-                )) {
-                  'drama' =>
-                    '第 ${resume.episode} 集 · ${formatPosition(resume.position)}',
-                  'live' => '直播间 · 播放至 ${formatPosition(resume.position)}',
-                  _ => '播放至 ${formatPosition(resume.position)}',
-                }),
-                onTap: () => widget.onContinue(resume.drama),
-              ),
-            ),
-          ),
       ];
       final empty = StatusPanel(
         title: allCount == 0
@@ -485,8 +427,32 @@ class _SavedLibraryState extends State<SavedLibrary> {
       final topInset = padding.top > viewPadding.top
           ? padding.top
           : viewPadding.top;
-      return Padding(
-        padding: EdgeInsets.only(top: topInset + 8),
+      final searchBar = Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: SizedBox(
+          height: 56,
+          child: TextField(
+            key: const ValueKey('history-search'),
+            controller: _search,
+            onChanged: (_) => setState(() {}),
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: '搜索观看记录',
+              prefixIcon: const Icon(Icons.search_rounded),
+              suffixIcon: _search.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: '清空搜索',
+                      onPressed: () => setState(_search.clear),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+            ),
+          ),
+        ),
+      );
+      final historyHeaderExtent = viewPadding.top + kToolbarHeight + 68;
+      final libraryContent = Padding(
+        padding: EdgeInsets.only(top: widget.history ? 0 : topInset + 8),
         child: LayoutBuilder(
           builder: (context, constraints) {
             if (AppLayout.isTelevision(context)) {
@@ -498,6 +464,7 @@ class _SavedLibraryState extends State<SavedLibrary> {
                   (constraints.maxWidth - 36 - (columns - 1) * 14) / columns;
               return Column(
                 children: [
+                  if (widget.history) SizedBox(height: historyHeaderExtent),
                   ConstrainedBox(
                     constraints: BoxConstraints(
                       maxHeight: constraints.maxHeight * .5,
@@ -509,21 +476,28 @@ class _SavedLibraryState extends State<SavedLibrary> {
                   Expanded(
                     child: entries.isEmpty
                         ? empty
-                        : RemoteGrid(
-                            key: ValueKey(
-                              'saved-tv-${widget.history}-$activeFilter-${_search.text}',
+                        : Padding(
+                            padding: EdgeInsets.only(
+                              top: widget.history ? 8 : 0,
                             ),
-                            itemKeys: entries.map((item) => item.key).toList(),
-                            columns: columns,
-                            itemExtent:
-                                DramaTile.extentFor(context, tileWidth - 14) +
-                                14,
-                            itemBuilder: (_, index, node, onFocus) =>
-                                _entryTile(
-                                  entries[index],
-                                  focusNode: node,
-                                  onFocus: onFocus,
-                                ),
+                            child: RemoteGrid(
+                              key: ValueKey(
+                                'saved-tv-${widget.history}-$activeFilter-${_search.text}',
+                              ),
+                              itemKeys: entries
+                                  .map((item) => item.key)
+                                  .toList(),
+                              columns: columns,
+                              itemExtent:
+                                  DramaTile.extentFor(context, tileWidth - 14) +
+                                  14,
+                              itemBuilder: (_, index, node, onFocus) =>
+                                  _entryTile(
+                                    entries[index],
+                                    focusNode: node,
+                                    onFocus: onFocus,
+                                  ),
+                            ),
                           ),
                   ),
                 ],
@@ -535,6 +509,10 @@ class _SavedLibraryState extends State<SavedLibrary> {
                 'saved-${widget.history}-$activeFilter-${_search.text}',
               ),
               slivers: [
+                if (widget.history)
+                  SliverToBoxAdapter(
+                    child: SizedBox(height: historyHeaderExtent),
+                  ),
                 SliverToBoxAdapter(child: Column(children: header)),
                 if (entries.isEmpty)
                   SliverFillRemaining(hasScrollBody: false, child: empty)
@@ -542,7 +520,7 @@ class _SavedLibraryState extends State<SavedLibrary> {
                   SliverPadding(
                     padding: EdgeInsets.fromLTRB(
                       padding,
-                      0,
+                      widget.history ? 8 : 0,
                       padding,
                       widget.bottomPadding,
                     ),
@@ -561,6 +539,38 @@ class _SavedLibraryState extends State<SavedLibrary> {
             );
           },
         ),
+      );
+      if (!widget.history) return libraryContent;
+      final theme = Theme.of(context);
+      final appBarColor =
+          theme.appBarTheme.backgroundColor ?? theme.scaffoldBackgroundColor;
+      return Scaffold(
+        extendBodyBehindAppBar: true,
+        appBar: AppBar(
+          title: Text('最近观看 · $allCount'),
+          actions: [
+            if (history.isNotEmpty)
+              IconButton(
+                tooltip: '清空观看记录',
+                onPressed: _clearHistory,
+                icon: const Icon(Icons.delete_outline_rounded),
+              ),
+          ],
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(68),
+            child: searchBar,
+          ),
+          backgroundColor: appBarColor.withValues(alpha: .45),
+          surfaceTintColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          flexibleSpace: FrostedGradientSurface(
+            color: appBarColor,
+            dividerColor: theme.colorScheme.outlineVariant,
+            child: const SizedBox.expand(),
+          ),
+        ),
+        body: libraryContent,
       );
     },
   );

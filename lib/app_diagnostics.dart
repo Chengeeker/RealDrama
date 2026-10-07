@@ -22,6 +22,11 @@ class AppDiagnostics {
     'exceptionType',
     'scriptLine',
     'attempt',
+    'client',
+    'protocol',
+    'responseType',
+    'fetchMode',
+    'fetchDest',
   };
 
   static void record(String event, Map<String, Object?> fields) {

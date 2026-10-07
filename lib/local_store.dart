@@ -207,14 +207,6 @@ class LocalStore extends ChangeNotifier {
             hidden.contains(SourceSite.bilibili.id))) {
       hidden.add(SourceSite.bilibiliLive.id);
     }
-    if (!sourceWasKnown(SourceSite.tiktok.id) &&
-        (known != null || hidden.isNotEmpty)) {
-      hidden.add(SourceSite.tiktok.id);
-    }
-    if (!sourceWasKnown(SourceSite.youtube.id) &&
-        (known != null || hidden.isNotEmpty)) {
-      hidden.add(SourceSite.youtube.id);
-    }
     _hiddenSourceCache[id] = (
       encoded: encoded,
       selectedSource: selectedSource,
@@ -1872,14 +1864,6 @@ class LocalStore extends ChangeNotifier {
                   )) ||
               hiddenSources.contains(SourceSite.bilibili.id))) {
         hiddenSources.add(SourceSite.bilibiliLive.id);
-      }
-      if (!(library['knownSources'] is List &&
-          (library['knownSources'] as List).contains(SourceSite.tiktok.id))) {
-        hiddenSources.add(SourceSite.tiktok.id);
-      }
-      if (!(library['knownSources'] is List &&
-          (library['knownSources'] as List).contains(SourceSite.youtube.id))) {
-        hiddenSources.add(SourceSite.youtube.id);
       }
       values.addAll({
         if (syncRecords != null)

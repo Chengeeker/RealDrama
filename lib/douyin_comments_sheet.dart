@@ -6,6 +6,89 @@ import 'core_bridge.dart';
 import 'douyin_source.dart';
 import 'models.dart';
 
+const _douyinEmojiFallbacks = <String, String>{
+  '大笑': '😄',
+  '笑哭': '😂',
+  '笑哭了': '😂',
+  '微笑': '😊',
+  '偷笑': '🤭',
+  '捂脸': '🤦',
+  '捂嘴笑': '🤭',
+  '尬笑': '😅',
+  '奸笑': '😏',
+  '害羞': '☺️',
+  '可爱': '🥰',
+  '暗中观察': '👀',
+  '灵机一动': '💡',
+  '耶': '✌️',
+  '酷拽': '😎',
+  '泣不成声': '😭',
+  '石化': '🗿',
+  '舔屏': '😍',
+  '吐血': '🤮',
+  '憨笑': '😁',
+  '快哭了': '🥺',
+  '呲牙': '😬',
+  '流泪': '😢',
+  '泪目': '🥹',
+  '泪奔': '😭',
+  '大哭': '😭',
+  '发怒': '😡',
+  '生气': '😠',
+  '惊讶': '😮',
+  '吃惊': '😲',
+  '震惊': '😱',
+  '疑问': '❓',
+  '疑惑': '🤔',
+  '思考': '🤔',
+  '白眼': '🙄',
+  '翻白眼': '🙄',
+  '爱心': '❤️',
+  '心': '❤️',
+  '心碎': '💔',
+  '比心': '🫰',
+  '抱抱': '🤗',
+  '飞吻': '😘',
+  '玫瑰': '🌹',
+  '点赞': '👍',
+  '赞': '👍',
+  '鼓掌': '👏',
+  '加油': '💪',
+  '打call': '🙌',
+  '互粉': '🤝',
+  '碰拳': '🤜🤛',
+  '打脸': '🤦',
+  '击掌': '🙌',
+  '无辜': '🥺',
+  '菜刀': '🔪',
+  '草莓': '🍓',
+  '熊吉': '🐻',
+  '666': '🔥',
+  'ok': '👌',
+  'doge': '🐶',
+  'like': '👍',
+  'love': '❤️',
+  'cry': '😢',
+  'laugh': '😆',
+  'smile': '😊',
+  'clap': '👏',
+  'wow': '😮',
+  '狗头': '🐶',
+  '旺柴': '🐕',
+  '吃瓜': '🍉',
+  '太阳': '☀️',
+  '月亮': '🌙',
+  '咖啡': '☕',
+  '啤酒': '🍺',
+  '困': '😴',
+};
+
+String _douyinEmojiText(String shortcode) {
+  final name = shortcode.substring(1, shortcode.length - 1).trim();
+  final key = name.toLowerCase().replaceAll(RegExp(r'[\s_\-]'), '');
+  return _douyinEmojiFallbacks[key] ?? name;
+}
+
 Future<void> showDouyinComments(
   BuildContext context,
   AppRepository repository,
@@ -115,6 +198,31 @@ class _DouyinCommentsState extends State<_DouyinComments> {
     );
   }
 
+  Widget _commentText(String value) {
+    final matches = RegExp(r'\[[^\[\]\r\n]{1,24}\]').allMatches(value);
+    if (matches.isEmpty) {
+      return Text(value, style: Theme.of(context).textTheme.bodyMedium);
+    }
+    final spans = <InlineSpan>[];
+    var offset = 0;
+    for (final match in matches) {
+      if (match.start > offset) {
+        spans.add(TextSpan(text: value.substring(offset, match.start)));
+      }
+      spans.add(TextSpan(text: _douyinEmojiText(match.group(0)!)));
+      offset = match.end;
+    }
+    if (offset == 0) {
+      return Text(value, style: Theme.of(context).textTheme.bodyMedium);
+    }
+    if (offset < value.length)
+      spans.add(TextSpan(text: value.substring(offset)));
+    return Text.rich(
+      TextSpan(children: spans),
+      style: Theme.of(context).textTheme.bodyMedium,
+    );
+  }
+
   Widget _footer() {
     if (_loading) {
       return const Padding(
@@ -220,7 +328,7 @@ class _DouyinCommentsState extends State<_DouyinComments> {
                           ],
                         ),
                         const SizedBox(height: 6),
-                        Text(item.text, style: theme.textTheme.bodyMedium),
+                        _commentText(item.text),
                       ],
                     ),
                   );

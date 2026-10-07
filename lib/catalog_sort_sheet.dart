@@ -15,16 +15,16 @@ Future<CatalogView?> chooseCatalogView(
     return StatefulBuilder(
       builder: (context, update) => SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
-          20,
+          16,
           0,
-          20,
+          16,
           20 + MediaQuery.viewInsetsOf(context).bottom,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('排序与筛选', style: Theme.of(context).textTheme.titleLarge),
+            Text('排序与筛选', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 16),
             Wrap(
               spacing: 8,
@@ -64,7 +64,9 @@ Future<CatalogView?> chooseCatalogView(
             const SizedBox(height: 16),
             Text(
               '排序和筛选作用于已加载的剧集；缺少排序资料的条目排在最后。',
-              style: Theme.of(context).textTheme.bodySmall,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 20),
             SizedBox(

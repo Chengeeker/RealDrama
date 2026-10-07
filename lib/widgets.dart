@@ -1,14 +1,67 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_layout.dart';
+import 'app_haptics.dart';
 import 'core_bridge.dart';
 import 'app_diagnostics.dart';
 import 'models.dart';
 import 'remote_widgets.dart';
+
+/// Frosted app-bar material with a controlled vertical opacity gradient.
+/// The tint sits above a 45% AppBar Material color: an opaque status-bar edge
+/// composites to 100%, while 27.3% at the divider composites to 60%.
+/// Keep this as a surface effect so page content can scroll behind it.
+class FrostedGradientSurface extends StatelessWidget {
+  const FrostedGradientSurface({
+    super.key,
+    required this.color,
+    required this.child,
+    this.topOpacity = 1,
+    this.bottomOpacity = .2727272727272727,
+    this.blurSigma = 20,
+    this.dividerColor,
+  });
+
+  final Color color;
+  final Widget child;
+  final double topOpacity;
+  final double bottomOpacity;
+  final double blurSigma;
+  final Color? dividerColor;
+
+  @override
+  Widget build(BuildContext context) => ClipRect(
+    child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: blurSigma, sigmaY: blurSigma),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              color.withValues(alpha: topOpacity),
+              color.withValues(alpha: bottomOpacity),
+            ],
+          ),
+          border: Border(
+            bottom: BorderSide(
+              color:
+                  (dividerColor ?? Theme.of(context).colorScheme.outlineVariant)
+                      .withValues(alpha: .24),
+              width: .5,
+            ),
+          ),
+        ),
+        child: child,
+      ),
+    ),
+  );
+}
 
 Future<void> saveUserChange(
   BuildContext context,
@@ -313,7 +366,9 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
   bool _retryQueued = false;
   String? _failedPath;
 
-  Map<String, String>? get _imageHeaders => switch (widget.drama.source) {
+  Map<String, String>? get _imageHeaders => switch (SourceSite.providerIdFor(
+    widget.drama.source,
+  )) {
     'crj91' => const {
       'Referer': 'https://91crdj.com/',
       'User-Agent':
@@ -640,17 +695,21 @@ class DramaTile extends StatelessWidget {
         ),
       );
     }
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: semanticLabel,
-      child: InkWell(
-        enableFeedback: !hapticOnTap,
-        onTap: onTap,
-        onLongPress: onLongPress ?? onMore,
-        onSecondaryTap: onMore,
-        borderRadius: BorderRadius.circular(14),
-        child: content,
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: hapticOnTap ? (_) => AppHaptics.light() : null,
+      child: Semantics(
+        button: true,
+        selected: selected,
+        label: semanticLabel,
+        child: InkWell(
+          enableFeedback: !hapticOnTap,
+          onTap: onTap,
+          onLongPress: onLongPress ?? onMore,
+          onSecondaryTap: onMore,
+          borderRadius: BorderRadius.circular(14),
+          child: content,
+        ),
       ),
     );
   }

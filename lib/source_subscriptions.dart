@@ -102,8 +102,6 @@ class SourcePackage {
     final protectedDomains = {
       'douyin': {'www.douyin.com', 'www-hj.douyin.com', 'live.douyin.com'},
       'bilibili': {'api.bilibili.com', 'api.live.bilibili.com'},
-      'tiktok': {'www.tiktok.com'},
-      'youtube': {'www.youtube.com'},
     };
     if (protectedDomains.containsKey(group) &&
         ((group == 'douyin' &&
@@ -112,14 +110,22 @@ class SourcePackage {
                   'douyin-live',
                   'douyin-series',
                   'douyin-theater',
+                  'douyin-test',
+                  'douyin-live-test',
+                  'douyin-series-test',
+                  'douyin-theater-test',
                 }.contains(value['id'])) ||
             (group == 'bilibili' &&
-                !{'bilibili', 'bilibili-live'}.contains(value['id'])) ||
-            (group == 'tiktok' && value['id'] != 'tiktok') ||
-            (group == 'youtube' && value['id'] != 'youtube')))
+                !{
+                  'bilibili',
+                  'bilibili-live',
+                  'bilibili-test',
+                  'bilibili-live-test',
+                }.contains(value['id']))))
       throw const FormatException('订阅无权读取此账号组');
     final allowedCredentialDomains =
-        group == 'bilibili' && value['id'] == 'bilibili-live'
+        group == 'bilibili' &&
+            {'bilibili-live', 'bilibili-live-test'}.contains(value['id'])
         ? {'api.live.bilibili.com'}
         : protectedDomains[group];
     if (allowedCredentialDomains != null &&

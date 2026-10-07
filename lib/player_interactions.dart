@@ -127,7 +127,7 @@ class PlayerInteractions extends ChangeNotifier {
     _boosting = false;
     if (boosted) {
       unawaited(_setRate(baseSpeed()));
-      if (!silent) hint('恢复 ${baseSpeed()} 倍速', speed: true);
+      if (!silent) hint('');
     } else if (tap && wasKeyboard) {
       seek(5);
     }
@@ -175,7 +175,10 @@ class PlayerInteractions extends ChangeNotifier {
     final delta = event.localPosition - _origin!;
     if (delta.distance > 12) {
       _moved = true;
-      _endHold();
+      // Before the hold activates, movement means this pointer is a swipe.
+      // Once boosted, keep the speed until pointerUp so small finger drift
+      // does not cancel the user's hold gesture.
+      if (!_boosting) _endHold();
       if (_swipeEnabled &&
           delta.dy.abs() > delta.dx.abs() * 1.2 &&
           delta.dy.abs() >= 12) {

@@ -10,30 +10,58 @@ class PersonalizationScreen extends StatelessWidget {
   final LocalStore store;
 
   Widget _section(BuildContext context, String title, List<Widget> children) {
-    final colors = Theme.of(context).colorScheme;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      color: colors.surfaceContainerLow,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: colors.outlineVariant.withValues(alpha: .6)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
-              child: Text(
-                title,
-                style: Theme.of(context).textTheme.titleMedium,
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.l),
+            child: Text(
+              title,
+              style: theme.textTheme.labelLarge?.copyWith(
+                color: colors.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            ...children,
-          ],
-        ),
+          ),
+          const SizedBox(height: AppSpacing.m),
+          Card(
+            margin: EdgeInsets.zero,
+            color: colors.surfaceContainer,
+            elevation: 0,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadii.settingsGroup),
+            ),
+            child: ListTileTheme(
+              data: theme.listTileTheme.copyWith(
+                titleTextStyle: theme.textTheme.titleMedium?.copyWith(
+                  color: colors.onSurface,
+                  fontWeight: FontWeight.w500,
+                ),
+                subtitleTextStyle: theme.textTheme.bodyMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+              child: Column(
+                children: [
+                  for (var index = 0; index < children.length; index++) ...[
+                    if (index > 0)
+                      Divider(
+                        height: 1,
+                        endIndent: AppSpacing.l,
+                        color: colors.outlineVariant.withValues(alpha: .55),
+                      ),
+                    children[index],
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -51,28 +79,55 @@ class PersonalizationScreen extends StatelessWidget {
             children: [
               _section(context, '启动界面', [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: DropdownButtonFormField<String>(
-                    initialValue: store.startupDestination,
-                    decoration: const InputDecoration(labelText: '应用启动时打开'),
-                    items: const [
-                      DropdownMenuItem(value: 'home', child: Text('首页')),
-                      DropdownMenuItem(value: 'discover', child: Text('发现')),
-                      DropdownMenuItem(value: 'following', child: Text('收藏')),
-                      DropdownMenuItem(value: 'settings', child: Text('设置')),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '应用启动时打开',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<String>(
+                        initialValue: store.startupDestination,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'home', child: Text('首页')),
+                          DropdownMenuItem(
+                            value: 'discover',
+                            child: Text('发现'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'following',
+                            child: Text('收藏'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'settings',
+                            child: Text('设置'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value != null) {
+                            saveUserChange(
+                              context,
+                              () => store.setStartupDestination(value),
+                            );
+                          }
+                        },
+                      ),
                     ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        saveUserChange(
-                          context,
-                          () => store.setStartupDestination(value),
-                        );
-                      }
-                    },
                   ),
                 ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                   child: Text('下次打开应用时进入所选界面。'),
                 ),
               ]),
@@ -99,7 +154,7 @@ class PersonalizationScreen extends StatelessWidget {
               _section(context, '色彩方案', [
                 SwitchListTile(
                   title: const Text('Material You 动态取色'),
-                  subtitle: const Text('安卓 12+ 从壁纸取色；不支持时使用下方预设色'),
+
                   value: store.dynamicColor,
                   onChanged: (value) => saveUserChange(
                     context,
@@ -132,7 +187,7 @@ class PersonalizationScreen extends StatelessWidget {
               _section(context, '交互与排版', [
                 SwitchListTile(
                   title: const Text('震动反馈'),
-                  subtitle: const Text('开启后，应用内 Material 触控会提供轻触反馈'),
+
                   value: store.hapticFeedback,
                   onChanged: (value) => saveUserChange(
                     context,
@@ -141,7 +196,7 @@ class PersonalizationScreen extends StatelessWidget {
                 ),
                 const ListTile(
                   title: Text('字体粗细'),
-                  subtitle: Text('调整应用的 Material 字阶'),
+
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),

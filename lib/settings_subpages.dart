@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_layout.dart';
+import 'app_theme.dart';
 import 'background_downloads.dart';
 import 'core_bridge.dart';
 import 'downloads_screen.dart';
@@ -31,38 +32,57 @@ class SettingsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      color: colors.surfaceContainerLow,
-      elevation: 0,
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: colors.outlineVariant.withValues(alpha: .6)),
+    final theme = Theme.of(context);
+    final settingsListTheme = theme.listTileTheme.copyWith(
+      titleTextStyle: theme.textTheme.titleMedium?.copyWith(
+        color: colors.onSurface,
+        fontWeight: FontWeight.w500,
       ),
+      subtitleTextStyle: theme.textTheme.bodyMedium?.copyWith(
+        color: colors.onSurfaceVariant,
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.xxl),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.l),
             child: Text(
               title,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              style: theme.textTheme.labelLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: colors.onSurfaceVariant,
+              ),
             ),
           ),
-          for (var index = 0; index < children.length; index++) ...[
-            if (index > 0)
-              Divider(
-                height: 1,
-                indent: 20,
-                endIndent: 20,
-                color: colors.outlineVariant.withValues(alpha: .45),
+          const SizedBox(height: AppSpacing.m),
+          Card(
+            margin: EdgeInsets.zero,
+            color: colors.surfaceContainer,
+            elevation: 0,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadii.settingsGroup),
+            ),
+            child: ListTileTheme(
+              data: settingsListTheme,
+              child: Column(
+                children: [
+                  for (var index = 0; index < children.length; index++) ...[
+                    if (index > 0)
+                      Divider(
+                        height: 1,
+                        endIndent: AppSpacing.l,
+                        color: colors.outlineVariant.withValues(alpha: .55),
+                      ),
+                    children[index],
+                  ],
+                ],
               ),
-            children[index],
-          ],
-          const SizedBox(height: 8),
+            ),
+          ),
         ],
       ),
     );
@@ -141,9 +161,6 @@ class _PlaybackPerformanceSettingsState
             key: const ValueKey('playback-hardware-decoding'),
             secondary: const Icon(Icons.memory_rounded),
             title: const Text('硬件解码'),
-            subtitle: Text(
-              supported ? '使用设备视频解码能力；不支持的格式自动回退软件解码' : '当前平台保持兼容解码模式',
-            ),
             value: preferences.hardwareDecoding && supported,
             onChanged: _saving || !supported
                 ? null
@@ -154,7 +171,6 @@ class _PlaybackPerformanceSettingsState
           PlaybackSelectorTile<HardwareDecoder>(
             icon: Icons.developer_board_outlined,
             title: '硬件解码器',
-            subtitle: '通常保留自动（安全）；复制模式可改善部分设备的硬件解码兼容性',
             value: decoders.contains(preferences.hardwareDecoder)
                 ? preferences.hardwareDecoder
                 : HardwareDecoder.automatic,
@@ -165,21 +181,19 @@ class _PlaybackPerformanceSettingsState
             onChanged: _saving || !supported || !preferences.hardwareDecoding
                 ? null
                 : (value) {
-                    if (value != null)
+                    if (value != null) {
                       unawaited(
                         _save(
                           (current) => current.copyWith(hardwareDecoder: value),
                         ),
                       );
+                    }
                   },
           ),
           SwitchListTile.adaptive(
             key: const ValueKey('playback-low-memory'),
             secondary: const Icon(Icons.savings_outlined),
             title: const Text('低内存模式'),
-            subtitle: const Text(
-              '缓存从 32 MiB 降至 2 MiB，并减少首页和下一集预取；返回已离开的剧集时可能重新加载',
-            ),
             value: preferences.lowMemory,
             onChanged: _saving
                 ? null
@@ -197,7 +211,6 @@ class PlaybackSelectorTile<T> extends StatelessWidget {
     super.key,
     required this.icon,
     required this.title,
-    required this.subtitle,
     required this.value,
     required this.items,
     required this.onChanged,
@@ -206,7 +219,6 @@ class PlaybackSelectorTile<T> extends StatelessWidget {
 
   final IconData icon;
   final String title;
-  final String subtitle;
   final T? value;
   final List<DropdownMenuItem<T>> items;
   final ValueChanged<T?>? onChanged;
@@ -233,13 +245,6 @@ class PlaybackSelectorTile<T> extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title, style: theme.textTheme.titleMedium),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
                 const SizedBox(height: 8),
                 DropdownButton<T>(
                   value: value,
@@ -359,7 +364,6 @@ class _DownloadSettingsScreenState extends State<DownloadSettingsScreen> {
                     key: const ValueKey('download-collection'),
                     leading: const Icon(Icons.download_rounded),
                     title: const Text('下载合集'),
-                    subtitle: const Text('查看、继续与管理下载任务'),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.push(
                       context,
@@ -389,7 +393,6 @@ class _DownloadSettingsScreenState extends State<DownloadSettingsScreen> {
                   ListTile(
                     leading: const Icon(Icons.folder_outlined),
                     title: const Text('下载目录与空间'),
-                    subtitle: const Text('查看存储用量、迁移已下载文件'),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.push(
                       context,
@@ -420,7 +423,6 @@ class _DownloadSettingsScreenState extends State<DownloadSettingsScreen> {
                       SwitchListTile(
                         value: _resourceSettings!.downloadBySource,
                         title: const Text('按站源分类保存'),
-                        subtitle: const Text('新下载任务放入各站源的子目录，已有下载继续使用原位置。'),
                         onChanged: _resourceSaving
                             ? null
                             : _setDownloadBySource,
@@ -456,15 +458,11 @@ class _DownloadSettingsScreenState extends State<DownloadSettingsScreen> {
                     SwitchListTile(
                       value: widget.store.autoExport,
                       title: const Text('下载完成后自动导出 Emby'),
-                      subtitle: const Text(
-                        '在下载目录的 exports 中生成视频和海报 URL 元数据，可将该目录加入 Emby 媒体库。',
-                      ),
                       onChanged: _busy ? null : _setAutoExport,
                     ),
                     SwitchListTile(
                       value: widget.store.exportPosters,
                       title: const Text('同时导出海报文件'),
-                      subtitle: const Text('默认只写海报 URL。源站海报需要解密或外部读取失败时可开启。'),
                       onChanged: _busy
                           ? null
                           : (value) => saveUserChange(
@@ -575,7 +573,6 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
                   key: const ValueKey('webdav-backup'),
                   leading: const Icon(Icons.cloud_sync_outlined),
                   title: const Text('WebDAV 备份'),
-                  subtitle: const Text('上传或恢复 WebDAV 上的配置备份'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: _busy
                       ? null
@@ -590,13 +587,11 @@ class _BackupSettingsScreenState extends State<BackupSettingsScreen> {
                 ListTile(
                   leading: const Icon(Icons.backup_outlined),
                   title: const Text('导出配置备份'),
-                  subtitle: const Text('包含本地用户、收藏、历史和设置，不含视频文件'),
                   onTap: _busy ? null : () => _backup(false),
                 ),
                 ListTile(
                   leading: const Icon(Icons.restore),
                   title: const Text('恢复配置备份'),
-                  subtitle: const Text('从 JSON 文件恢复本地配置'),
                   onTap: _busy ? null : () => _backup(true),
                 ),
               ],

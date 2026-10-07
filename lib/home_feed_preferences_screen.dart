@@ -240,10 +240,7 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
       value.toLowerCase().replaceAll(RegExp(r'\s+'), '');
 
   bool _isAggregate(CatalogCategory category, String source) {
-    if (SourceSite.byId(source).isDouyin ||
-        source == SourceSite.bilibili.id ||
-        source == SourceSite.tiktok.id ||
-        source == SourceSite.youtube.id)
+    if (SourceSite.byId(source).isDouyin || SourceSite.byId(source).isBilibili)
       return category.id.isEmpty;
     final id = category.id.trim().toLowerCase();
     final name = category.name.trim();
@@ -422,113 +419,130 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
     return Container(
       height: 480,
       decoration: BoxDecoration(
-        color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: .65)),
+        color: colors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(18),
       ),
-      child: Scrollbar(
-        controller: controller,
-        thumbVisibility: true,
-        child: ListView.builder(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Scrollbar(
           controller: controller,
-          primary: false,
-          padding: EdgeInsets.zero,
-          itemCount: grouped ? groups.length : categories.length,
-          itemBuilder: (context, groupIndex) {
-            if (!grouped) {
-              final category = categories[groupIndex];
-              return CheckboxListTile(
-                value: preference?.categories.containsKey(category.id) == true,
-                title: Text(category.name),
-                dense: true,
-                onChanged: (enabled) =>
-                    _toggleCategory(source, category, enabled == true),
+          thumbVisibility: true,
+          child: ListView.builder(
+            controller: controller,
+            primary: false,
+            padding: const EdgeInsets.all(8),
+            itemCount: grouped ? groups.length : categories.length,
+            itemBuilder: (context, groupIndex) {
+              if (!grouped) {
+                final category = categories[groupIndex];
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 4),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerLow,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: CheckboxListTile(
+                    value:
+                        preference?.categories.containsKey(category.id) == true,
+                    title: Text(category.name),
+                    dense: true,
+                    onChanged: (enabled) =>
+                        _toggleCategory(source, category, enabled == true),
+                  ),
+                );
+              }
+              final entry = groups[groupIndex];
+              final groupKey = '${source.id}:${entry.group.id}';
+              final expanded = _expandedCategoryGroups.contains(groupKey);
+              final groupSelected = _selectedCount(
+                preference?.categories,
+                entry.categories,
               );
-            }
-            final entry = groups[groupIndex];
-            final groupKey = '${source.id}:${entry.group.id}';
-            final expanded = _expandedCategoryGroups.contains(groupKey);
-            final groupSelected = _selectedCount(
-              preference?.categories,
-              entry.categories,
-            );
-            final groupAll = groupSelected == entry.categories.length;
-            return Column(
-              children: [
-                SizedBox(
-                  height: 56,
-                  child: Row(
-                    children: [
-                      Checkbox(
-                        tristate: true,
-                        value: groupAll
-                            ? true
-                            : groupSelected == 0
-                            ? false
-                            : null,
-                        onChanged: (_) => _toggleCategorySet(
-                          source,
-                          entry.categories,
-                          enabled: !groupAll,
-                          available: categories,
-                        ),
-                      ),
-                      Expanded(
-                        child: InkWell(
-                          onTap: () => setState(() {
-                            if (expanded) {
-                              _expandedCategoryGroups.remove(groupKey);
-                            } else {
-                              _expandedCategoryGroups.add(groupKey);
-                            }
-                          }),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  entry.group.label,
-                                  style: Theme.of(context).textTheme.titleSmall,
-                                ),
-                              ),
-                              Text(
-                                '$groupSelected/${entry.categories.length}',
-                                style: Theme.of(context).textTheme.labelMedium
-                                    ?.copyWith(color: colors.onSurfaceVariant),
-                              ),
-                              Icon(
-                                expanded
-                                    ? Icons.expand_less_rounded
-                                    : Icons.expand_more_rounded,
-                                color: colors.onSurfaceVariant,
-                              ),
-                              const SizedBox(width: 12),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+              final groupAll = groupSelected == entry.categories.length;
+              return Container(
+                margin: const EdgeInsets.only(bottom: 6),
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(14),
                 ),
-                if (expanded)
-                  for (final topic in entry.group.topics)
-                    if (entry.categoriesByTopic[topic.id]?.isNotEmpty == true)
-                      _topicSelectionRow(
-                        source,
-                        topic,
-                        entry.categoriesByTopic[topic.id]!,
-                        categories,
-                        preference?.categories,
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: 56,
+                      child: Row(
+                        children: [
+                          Checkbox(
+                            tristate: true,
+                            value: groupAll
+                                ? true
+                                : groupSelected == 0
+                                ? false
+                                : null,
+                            onChanged: (_) => _toggleCategorySet(
+                              source,
+                              entry.categories,
+                              enabled: !groupAll,
+                              available: categories,
+                            ),
+                          ),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => setState(() {
+                                if (expanded) {
+                                  _expandedCategoryGroups.remove(groupKey);
+                                } else {
+                                  _expandedCategoryGroups.add(groupKey);
+                                }
+                              }),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      entry.group.label,
+                                      style: Theme.of(
+                                        context,
+                                      ).textTheme.titleSmall,
+                                    ),
+                                  ),
+                                  Text(
+                                    '$groupSelected/${entry.categories.length}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(
+                                          color: colors.onSurfaceVariant,
+                                        ),
+                                  ),
+                                  Icon(
+                                    expanded
+                                        ? Icons.expand_less_rounded
+                                        : Icons.expand_more_rounded,
+                                    color: colors.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 12),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                if (groupIndex != groups.length - 1)
-                  Divider(
-                    height: 1,
-                    indent: 16,
-                    endIndent: 16,
-                    color: colors.outlineVariant.withValues(alpha: .45),
-                  ),
-              ],
-            );
-          },
+                    ),
+                    if (expanded)
+                      for (final topic in entry.group.topics)
+                        if (entry.categoriesByTopic[topic.id]?.isNotEmpty ==
+                            true)
+                          _topicSelectionRow(
+                            source,
+                            topic,
+                            entry.categoriesByTopic[topic.id]!,
+                            categories,
+                            preference?.categories,
+                          ),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -544,54 +558,61 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
     final count = _selectedCount(selected, categories);
     final all = count == categories.length;
     final colors = Theme.of(context).colorScheme;
-    return SizedBox(
-      height: 48,
-      child: Row(
-        children: [
-          const SizedBox(width: 20),
-          Checkbox(
-            tristate: true,
-            value: all
-                ? true
-                : count == 0
-                ? false
-                : null,
-            onChanged: (_) => _toggleCategorySet(
-              source,
-              categories,
-              enabled: !all,
-              available: available,
-            ),
-          ),
-          Expanded(
-            child: InkWell(
-              onTap: () => _toggleCategorySet(
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 3, 12, 5),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: SizedBox(
+        height: 48,
+        child: Row(
+          children: [
+            const SizedBox(width: 20),
+            Checkbox(
+              tristate: true,
+              value: all
+                  ? true
+                  : count == 0
+                  ? false
+                  : null,
+              onChanged: (_) => _toggleCategorySet(
                 source,
                 categories,
                 enabled: !all,
                 available: available,
               ),
-              child: Row(
-                children: [
-                  Expanded(child: Text(topic.label)),
-                  Text(
-                    '$count/${categories.length}',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: colors.onSurfaceVariant,
+            ),
+            Expanded(
+              child: InkWell(
+                onTap: () => _toggleCategorySet(
+                  source,
+                  categories,
+                  enabled: !all,
+                  available: available,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(topic.label)),
+                    Text(
+                      '$count/${categories.length}',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          IconButton(
-            tooltip: '查看具体分类',
-            visualDensity: VisualDensity.compact,
-            onPressed: () => _showTopicCategories(source, topic, categories),
-            icon: const Icon(Icons.tune_rounded, size: 20),
-          ),
-          const SizedBox(width: 8),
-        ],
+            IconButton(
+              tooltip: '查看具体分类',
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _showTopicCategories(source, topic, categories),
+              icon: const Icon(Icons.tune_rounded, size: 20),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ),
       ),
     );
   }
@@ -640,24 +661,26 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
     return Card(
       key: ValueKey('home-feed-source-card-${source.id}'),
       margin: const EdgeInsets.only(bottom: 12),
-      color: colors.surfaceContainerLow,
+      color: colors.surfaceContainer,
       elevation: 0,
       clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(24),
-        side: BorderSide(color: colors.outlineVariant.withValues(alpha: .6)),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Column(
         children: [
           ListTile(
             key: ValueKey('home-feed-source-${source.id}'),
             contentPadding: const EdgeInsets.fromLTRB(18, 8, 16, 8),
-            leading: Icon(Icons.dns_outlined, color: colors.primary, size: 28),
+            leading: Icon(
+              Icons.dns_outlined,
+              color: colors.onSurfaceVariant,
+              size: 24,
+            ),
             title: Text(
               source.name,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: colors.onSurface,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             subtitle: Text(
               liveSource
@@ -797,73 +820,79 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
                         Container(
                           height: math.min(480.0, categories.length * 48.0),
                           decoration: BoxDecoration(
-                            color: colors.surfaceContainerLow,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: colors.outlineVariant.withValues(
-                                alpha: .65,
-                              ),
-                            ),
+                            color: colors.surfaceContainerHigh,
+                            borderRadius: BorderRadius.circular(18),
                           ),
-                          child: Scrollbar(
-                            controller: categoryScrollController,
-                            thumbVisibility: categories.length > 10,
-                            child: ListView.builder(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(18),
+                            child: Scrollbar(
                               controller: categoryScrollController,
-                              primary: false,
-                              padding: EdgeInsets.zero,
-                              itemExtent: 48,
-                              itemCount: categories.length,
-                              itemBuilder: (context, index) {
-                                final category = categories[index];
-                                final selected =
-                                    preference?.categories.containsKey(
-                                      category.id,
-                                    ) ??
-                                    false;
-                                return Semantics(
-                                  key: ValueKey(
-                                    'home-feed-category-${source.id}-${category.id}',
-                                  ),
-                                  button: true,
-                                  checked: selected,
-                                  label: category.name,
-                                  child: InkWell(
-                                    onTap: () => _toggleCategory(
-                                      source,
-                                      category,
-                                      !selected,
+                              thumbVisibility: categories.length > 10,
+                              child: ListView.builder(
+                                controller: categoryScrollController,
+                                primary: false,
+                                padding: const EdgeInsets.all(8),
+                                itemExtent: 48,
+                                itemCount: categories.length,
+                                itemBuilder: (context, index) {
+                                  final category = categories[index];
+                                  final selected =
+                                      preference?.categories.containsKey(
+                                        category.id,
+                                      ) ??
+                                      false;
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 4),
+                                    decoration: BoxDecoration(
+                                      color: colors.surfaceContainerLow,
+                                      borderRadius: BorderRadius.circular(12),
                                     ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 12,
+                                    child: Semantics(
+                                      key: ValueKey(
+                                        'home-feed-category-${source.id}-${category.id}',
                                       ),
-                                      child: Row(
-                                        children: [
-                                          Icon(
-                                            selected
-                                                ? Icons.check_box_rounded
-                                                : Icons
-                                                      .check_box_outline_blank_rounded,
-                                            size: 22,
-                                            color: selected
-                                                ? colors.primary
-                                                : colors.onSurfaceVariant,
+                                      button: true,
+                                      checked: selected,
+                                      label: category.name,
+                                      child: InkWell(
+                                        onTap: () => _toggleCategory(
+                                          source,
+                                          category,
+                                          !selected,
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
                                           ),
-                                          const SizedBox(width: 12),
-                                          Expanded(
-                                            child: Text(
-                                              category.name,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
+                                          child: Row(
+                                            children: [
+                                              Icon(
+                                                selected
+                                                    ? Icons.check_box_rounded
+                                                    : Icons
+                                                          .check_box_outline_blank_rounded,
+                                                size: 22,
+                                                color: selected
+                                                    ? colors.primary
+                                                    : colors.onSurfaceVariant,
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Expanded(
+                                                child: Text(
+                                                  category.name,
+                                                  maxLines: 1,
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                        ],
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              },
+                                  );
+                                },
+                              ),
                             ),
                           ),
                         ),
@@ -894,12 +923,21 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
               MediaQuery.viewPaddingOf(context).bottom + 24,
             ),
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(4, 0, 4, 16),
-                child: Text(
-                  '站源默认关闭。首次开启站源时默认全选分类，你可以按需取消或用“反选”快速调整；剧目命中任一关闭分类时，即使同时命中已开启分类，也不会进入首页。红果细分类只在已开启的真人剧、漫剧或AI剧中生效。',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+              Card(
+                margin: const EdgeInsets.only(bottom: 16),
+                color: Theme.of(context).colorScheme.surfaceContainer,
+                elevation: 0,
+                clipBehavior: Clip.antiAlias,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    '站源默认关闭。首次开启站源时默认全选分类，你可以按需取消或用“反选”快速调整；剧目命中任一关闭分类时，即使同时命中已开启分类，也不会进入首页。红果细分类只在已开启的真人剧、漫剧或AI剧中生效。',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ),
@@ -907,7 +945,6 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
                 ListTile(
                   leading: const Icon(Icons.add_link),
                   title: const Text('先导入站源订阅'),
-                  subtitle: const Text('导入后可设置首页来源和分类'),
                   onTap: () => Navigator.push<void>(
                     context,
                     MaterialPageRoute<void>(

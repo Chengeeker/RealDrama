@@ -37,7 +37,7 @@ if options.platform == 'android':
         target = output / f'RealDrama-{version}-{abi}.apk'
         shutil.copy2(source, target)
         artifacts.append(target)
-    for previous in output.glob('RealDrama-*-arm64-v8a.apk'):
+    for previous in output.glob('RealDrama-*.apk'):
         if previous not in artifacts:
             previous.unlink()
 else:

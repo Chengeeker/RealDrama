@@ -272,7 +272,9 @@ class _RankingsScreenState extends State<RankingsScreen> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const AppLoadingIndicator(),
-                          if (_board?.source == 'hongguo') ...[
+                          if (_board != null &&
+                              SourceSite.providerIdFor(_board!.source) ==
+                                  'hongguo') ...[
                             const SizedBox(height: 16),
                             const Text('正在获取榜单，数据未完整返回时会自动重试'),
                           ],

@@ -135,27 +135,31 @@ class _DouyinSettingsScreenState extends State<DouyinSettingsScreen> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('抖音账号与 Cookie')),
     body: ListView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       children: [
         Card(
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-            side: BorderSide(
-              color: Theme.of(context).colorScheme.outlineVariant,
-            ),
+            borderRadius: BorderRadius.circular(20),
           ),
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Cookie 登录',
-                  style: Theme.of(context).textTheme.titleLarge,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 12),
-                const Text(
+                Text(
                   '登录抖音网页版，打开开发者工具 → 网络（Network），刷新页面并选中 www.douyin.com 或 live.douyin.com 的接口请求，在请求标头（Request Headers）中复制 Cookie 的整段值。不要复制 Cookie 表格、单个字段值或响应里的 Set-Cookie。短视频、直播、短剧与放映厅共用这份 Cookie；仅保存在本机安全存储，不进入配置备份。登录过期或需要验证时，在网页处理后重新复制。',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 TextField(
@@ -177,7 +181,7 @@ class _DouyinSettingsScreenState extends State<DouyinSettingsScreen> {
                     labelText: '粘贴请求头 Cookie 的完整值',
                     helperText: '字段名=字段值；多项用英文分号分隔。不要手动解码或修改字段值。',
                     helperMaxLines: 3,
-                    border: OutlineInputBorder(),
+                    border: InputBorder.none,
                   ),
                 ),
                 const SizedBox(height: 16),

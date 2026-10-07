@@ -249,6 +249,7 @@ func (transport *huangguoBrowserTransport) RoundTrip(request *http.Request) (*ht
 		transport.record(diagnosticEvent{Event: "network.browser_request", Level: level, Source: subscriptionBrowserSource(request.Context(), transport.source),
 			Host: request.URL.Hostname(), HTTPStatus: result.StatusCode, Client: huangguoBrowserProfile,
 			Protocol: result.Proto, CFRay: truncate(result.Header.Get("Cf-Ray"), 128),
+			FetchMode: request.Header.Get("Sec-Fetch-Mode"), FetchDest: request.Header.Get("Sec-Fetch-Dest"),
 			ResponseType: truncate(result.Header.Get("Content-Type"), 128), Message: "浏览器指纹请求完成"})
 	}
 	return result, nil

@@ -61,6 +61,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   static const _recommendationCategory = 'app:recommendations';
+  static const _compactDiscoveryToolbarHeight = 44.0;
   final _search = TextEditingController();
   final _scroll = ScrollController();
   final _catalogShuffleRandom = math.Random();
@@ -113,6 +114,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _refreshingUpdatedCache = false;
   bool _selectionMode = false;
   bool _feedCleanMode = false;
+  bool _feedFullscreenMode = false;
+  bool _feedBoostingMode = false;
   bool _showRecommendations = false;
   String _sourceSignature = '';
   bool _catalogLoadScheduled = false;
@@ -200,21 +203,22 @@ class _HomeScreenState extends State<HomeScreen> {
     if (taxonomyGroups.isNotEmpty) {
       return [
         CatalogCategory.all,
-        const CatalogCategory(_recommendationCategory, '推荐'),
+        if (_group.id == 'hongguo')
+          const CatalogCategory(_recommendationCategory, '推荐'),
         for (final entry in taxonomyGroups)
           if (entry.group.id != 'format') entry.filter,
       ];
     }
     return [
-      _group.id == 'douyin'
+      SourceSite.providerIdFor(_group.id) == 'douyin'
           ? const CatalogCategory('', '推荐')
-          : _group.id == 'bilibili-live'
+          : SourceSite.providerIdFor(_group.id) == 'bilibili-live'
           ? const CatalogCategory('', '推荐')
-          : _group.id == 'douyin-live'
+          : SourceSite.providerIdFor(_group.id) == 'douyin-live'
           ? const CatalogCategory('', '精选')
-          : _group.id == 'douyin-series'
+          : SourceSite.providerIdFor(_group.id) == 'douyin-series'
           ? const CatalogCategory('', '推荐')
-          : _group.id == 'douyin-theater'
+          : SourceSite.providerIdFor(_group.id) == 'douyin-theater'
           ? const CatalogCategory('', '综艺')
           : CatalogCategory.all,
       ..._categories.where((entry) => entry.id.isNotEmpty),
@@ -893,6 +897,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _selectionMode = false;
       _selectedDramas.clear();
       _feedCleanMode = false;
+      _feedFullscreenMode = false;
+      _feedBoostingMode = false;
     });
     if (tab == 1) {
       if (_catalogSourcesDirty) {
@@ -942,6 +948,16 @@ class _HomeScreenState extends State<HomeScreen> {
   void _setFeedCleanMode(bool enabled) {
     if (!mounted || _feedCleanMode == enabled) return;
     setState(() => _feedCleanMode = enabled);
+  }
+
+  void _setFeedFullscreenMode(bool enabled) {
+    if (!mounted || _feedFullscreenMode == enabled) return;
+    setState(() => _feedFullscreenMode = enabled);
+  }
+
+  void _setFeedBoostingMode(bool enabled) {
+    if (!mounted || _feedBoostingMode == enabled) return;
+    setState(() => _feedBoostingMode = enabled);
   }
 
   void _onNavSelected(int tab) => _changeTab(tab);
@@ -1099,13 +1115,50 @@ class _HomeScreenState extends State<HomeScreen> {
         final television = AppLayout.isTelevision(context);
         final desktop = constraints.maxWidth >= 840;
         final compactNavigation = !desktop && !television && !_selectionMode;
+        final immersiveFeed =
+            _tab == 0 && (_feedFullscreenMode || _feedBoostingMode);
+        final cleanFeedOnly = _tab == 0 && _feedCleanMode && !immersiveFeed;
+        final discoveryFrostedHeader =
+            _tab == 1 && compactNavigation && !_selectionMode;
+        final discoveryAppBarColor =
+            Theme.of(context).appBarTheme.backgroundColor ??
+            Theme.of(context).scaffoldBackgroundColor;
         final scaffold = Scaffold(
           backgroundColor: _tab == 0 ? Colors.black : null,
           extendBody: compactNavigation && _tab != 0,
-          appBar: _tab == 0 && !_selectionMode
+          extendBodyBehindAppBar: discoveryFrostedHeader,
+          appBar: (_tab == 0 || _tab == 3) && !_selectionMode
               ? null
               : AppBar(
-                  toolbarHeight: television ? 64 : null,
+                  toolbarHeight: television
+                      ? 64
+                      : discoveryFrostedHeader
+                      ? _compactDiscoveryToolbarHeight
+                      : null,
+                  backgroundColor: discoveryFrostedHeader
+                      ? discoveryAppBarColor.withValues(alpha: .45)
+                      : _tab == 1
+                      ? (Theme.of(context).appBarTheme.backgroundColor ??
+                                Theme.of(context).scaffoldBackgroundColor)
+                            .withValues(alpha: .82)
+                      : null,
+                  surfaceTintColor: Colors.transparent,
+                  elevation: 0,
+                  scrolledUnderElevation: 0,
+                  flexibleSpace: discoveryFrostedHeader
+                      ? FrostedGradientSurface(
+                          color: discoveryAppBarColor,
+                          child: const SizedBox.expand(),
+                        )
+                      : null,
+                  bottom: discoveryFrostedHeader
+                      ? PreferredSize(
+                          preferredSize: Size.fromHeight(
+                            _catalogFiltersHeight(context),
+                          ),
+                          child: _catalogFilters(),
+                        )
+                      : null,
                   titleSpacing: 12,
                   title: _selectionMode
                       ? const Text(
@@ -1253,70 +1306,98 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
           body: SafeArea(
-            top: false,
+            top: _tab == 3,
             bottom: !compactNavigation && _tab != 0,
             child: Row(
               children: [
-                if (television && !(_tab == 0 && _feedCleanMode)) ...[
-                  SizedBox(
-                    width: 164,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 24, 8, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (final entry in [
-                            (Icons.play_arrow_rounded, '首页'),
-                            (Icons.explore_rounded, '发现'),
-                            (Icons.bookmark_rounded, '收藏'),
-                            (Icons.settings_rounded, '设置'),
-                          ].indexed)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 14),
-                              child: RemoteButton(
-                                key: ValueKey('tv-nav-${entry.$1}'),
-                                label: entry.$2.$2,
-                                icon: entry.$2.$1,
-                                selected: _tab == entry.$1,
-                                autofocus: entry.$1 == 0,
-                                onPressed: () => _onNavSelected(entry.$1),
+                if (television && !(_tab == 0 && _feedFullscreenMode)) ...[
+                  Visibility(
+                    visible:
+                        !cleanFeedOnly && !(_tab == 0 && _feedBoostingMode),
+                    maintainAnimation: true,
+                    maintainSize: true,
+                    maintainState: true,
+                    child: SizedBox(
+                      width: 164,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 24, 8, 12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final entry in [
+                              (Icons.play_arrow_rounded, '首页'),
+                              (Icons.explore_rounded, '发现'),
+                              (Icons.bookmark_rounded, '收藏'),
+                              (Icons.settings_rounded, '设置'),
+                            ].indexed)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 14),
+                                child: RemoteButton(
+                                  key: ValueKey('tv-nav-${entry.$1}'),
+                                  label: entry.$2.$2,
+                                  icon: entry.$2.$1,
+                                  selected: _tab == entry.$1,
+                                  autofocus: entry.$1 == 0,
+                                  onPressed: () => _onNavSelected(entry.$1),
+                                ),
                               ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                  const VerticalDivider(width: 1),
-                ] else if (desktop && !(_tab == 0 && _feedCleanMode)) ...[
-                  NavigationRail(
-                    selectedIndex: _tab,
-                    onDestinationSelected: _onNavSelected,
-                    labelType: NavigationRailLabelType.all,
-                    groupAlignment: -.8,
-                    destinations: [
-                      NavigationRailDestination(
-                        icon: Icon(Icons.play_arrow_rounded),
-                        selectedIcon: Icon(Icons.play_arrow_rounded),
-                        label: Text('首页'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.explore_outlined),
-                        selectedIcon: Icon(Icons.explore),
-                        label: Text('发现'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.bookmark_border_rounded),
-                        selectedIcon: Icon(Icons.bookmark_rounded),
-                        label: Text('收藏'),
-                      ),
-                      NavigationRailDestination(
-                        icon: Icon(Icons.settings_outlined),
-                        selectedIcon: Icon(Icons.settings_rounded),
-                        label: Text('设置'),
-                      ),
-                    ],
+                  Visibility(
+                    visible:
+                        !cleanFeedOnly && !(_tab == 0 && _feedBoostingMode),
+                    maintainAnimation: true,
+                    maintainSize: true,
+                    maintainState: true,
+                    child: const VerticalDivider(width: 1),
                   ),
-                  const VerticalDivider(width: 1, thickness: 1),
+                ] else if (desktop && !(_tab == 0 && _feedFullscreenMode)) ...[
+                  Visibility(
+                    visible:
+                        !cleanFeedOnly && !(_tab == 0 && _feedBoostingMode),
+                    maintainAnimation: true,
+                    maintainSize: true,
+                    maintainState: true,
+                    child: NavigationRail(
+                      selectedIndex: _tab,
+                      onDestinationSelected: _onNavSelected,
+                      labelType: NavigationRailLabelType.all,
+                      groupAlignment: -.8,
+                      destinations: [
+                        NavigationRailDestination(
+                          icon: Icon(Icons.play_arrow_rounded),
+                          selectedIcon: Icon(Icons.play_arrow_rounded),
+                          label: Text('首页'),
+                        ),
+                        NavigationRailDestination(
+                          icon: Icon(Icons.explore_outlined),
+                          selectedIcon: Icon(Icons.explore),
+                          label: Text('发现'),
+                        ),
+                        NavigationRailDestination(
+                          icon: Icon(Icons.bookmark_border_rounded),
+                          selectedIcon: Icon(Icons.bookmark_rounded),
+                          label: Text('收藏'),
+                        ),
+                        NavigationRailDestination(
+                          icon: Icon(Icons.settings_outlined),
+                          selectedIcon: Icon(Icons.settings_rounded),
+                          label: Text('设置'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Visibility(
+                    visible:
+                        !cleanFeedOnly && !(_tab == 0 && _feedBoostingMode),
+                    maintainAnimation: true,
+                    maintainSize: true,
+                    maintainState: true,
+                    child: const VerticalDivider(width: 1, thickness: 1),
+                  ),
                 ],
                 Expanded(
                   child: Stack(
@@ -1335,6 +1416,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                 active: feedActive,
                                 onBack: () => _onNavSelected(1),
                                 onCleanModeChanged: _setFeedCleanMode,
+                                onFullscreenModeChanged: _setFeedFullscreenMode,
+                                onBoostingChanged: _setFeedBoostingMode,
                                 navigationInset: compactNavigation ? 56 : 16,
                                 initialBatchCursor: _feedBatchCursor,
                                 onBatchCursorChanged: (cursor) =>
@@ -1369,6 +1452,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               : _catalog(
                                   selectionInBody: desktop || television,
                                   bottomPadding: compactNavigation ? 72 : 16,
+                                  filtersInAppBar: discoveryFrostedHeader,
                                 )
                         else if (_tab == 3)
                           SettingsScreen(
@@ -1400,8 +1484,16 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           bottomNavigationBar:
-              desktop || television || _tab == 0 && _feedCleanMode
+              desktop || television || (_tab == 0 && _feedFullscreenMode)
               ? null
+              : cleanFeedOnly
+              ? SizedBox(height: 48 + MediaQuery.viewPaddingOf(context).bottom)
+              : _tab == 0 && _feedBoostingMode
+              ? SafeArea(
+                  top: false,
+                  minimum: const EdgeInsets.only(bottom: 4),
+                  child: const SizedBox(height: 48),
+                )
               : _selectionMode
               ? _selectionBar()
               : AppBottomNavigation(
@@ -1436,11 +1528,20 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _catalog({
     required bool selectionInBody,
     required double bottomPadding,
+    required bool filtersInAppBar,
   }) {
     final items = _visible;
     final television = AppLayout.isTelevision(context);
+    final catalogHeaderExtent = filtersInAppBar
+        ? MediaQuery.viewPaddingOf(context).top +
+              _compactDiscoveryToolbarHeight +
+              _catalogFiltersHeight(context)
+        : 0.0;
     return Column(
       children: [
+        if (filtersInAppBar &&
+            (_searchVisible || _showRecommendations || items.isEmpty))
+          SizedBox(height: catalogHeaderExtent),
         if (_searchVisible && !television)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
@@ -1494,33 +1595,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
           ),
-        CatalogFilters(
-          key: ValueKey('filters-${_group.id}'),
-          categories: _displayCategories,
-          category: _category,
-          primaryCategory: _displayCategory,
-          contentFormat: _selectedContentFormat,
-          taxonomyGroups: _taxonomyGroups.isEmpty ? null : _taxonomyGroups,
-          onTaxonomyGroup: _changeTaxonomyGroup,
-          onContentFormat: _changeContentFormat,
-          error: _categoriesError,
-          onCategory: _changeCategory,
-          onRetry: () => _loadCategories(force: true),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_supportsVipFilter)
-                IconButton(
-                  tooltip: widget.store.hideVip ? 'VIP：隐藏' : 'VIP：显示',
-                  onPressed: () => saveUserChange(
-                    context,
-                    () => widget.store.setHideVip(!widget.store.hideVip),
-                  ),
-                  icon: VipIcon(hidden: widget.store.hideVip),
-                ),
-            ],
-          ),
-        ),
+        if (!filtersInAppBar) _catalogFilters(),
         if (_group.id == 'hongguo' && _displayCategory.isEmpty)
           const SizedBox(height: 8),
         if (_showRecommendations)
@@ -1537,7 +1612,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           )
         else ...[
-          if (_loading && _items.isNotEmpty)
+          if (_loading && _items.isNotEmpty && !filtersInAppBar)
             const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: GestureDetector(
@@ -1616,15 +1691,31 @@ class _HomeScreenState extends State<HomeScreen> {
                             ? 16.0
                             : 24.0;
                         return RefreshIndicator(
+                          edgeOffset: filtersInAppBar ? catalogHeaderExtent : 0,
+                          displacement: filtersInAppBar ? 24 : 40,
+                          color: Theme.of(context).colorScheme.primary,
+                          backgroundColor: Theme.of(
+                            context,
+                          ).colorScheme.surface,
                           onRefresh: _refreshLoadedCatalog,
                           child: CustomScrollView(
                             controller: _scroll,
                             physics: const AlwaysScrollableScrollPhysics(),
                             slivers: [
+                              if (filtersInAppBar)
+                                SliverToBoxAdapter(
+                                  child: SizedBox(height: catalogHeaderExtent),
+                                ),
+                              if (_loading &&
+                                  _items.isNotEmpty &&
+                                  filtersInAppBar)
+                                const SliverToBoxAdapter(
+                                  child: LinearProgressIndicator(minHeight: 2),
+                                ),
                               SliverPadding(
                                 padding: EdgeInsets.fromLTRB(
                                   padding,
-                                  0,
+                                  8,
                                   padding,
                                   16,
                                 ),
@@ -1679,6 +1770,54 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ],
     );
+  }
+
+  Widget _catalogFilters() => CatalogFilters(
+    key: ValueKey('filters-${_group.id}'),
+    categories: _displayCategories,
+    category: _category,
+    primaryCategory: _displayCategory,
+    contentFormat: _selectedContentFormat,
+    taxonomyGroups: _taxonomyGroups.isEmpty ? null : _taxonomyGroups,
+    onTaxonomyGroup: _changeTaxonomyGroup,
+    onContentFormat: _changeContentFormat,
+    error: _categoriesError,
+    onCategory: _changeCategory,
+    onRetry: () => _loadCategories(force: true),
+    trailing: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_supportsVipFilter)
+          IconButton(
+            tooltip: widget.store.hideVip ? 'VIP：隐藏' : 'VIP：显示',
+            onPressed: () => saveUserChange(
+              context,
+              () => widget.store.setHideVip(!widget.store.hideVip),
+            ),
+            icon: VipIcon(hidden: widget.store.hideVip),
+          ),
+      ],
+    ),
+  );
+
+  double _catalogFiltersHeight(BuildContext context) {
+    final groups = _taxonomyGroups;
+    if (groups.isEmpty) {
+      return math.max(52, MediaQuery.textScalerOf(context).scale(14) + 28);
+    }
+    final primaryCategory = _displayCategory;
+    final formatGroup = groups.where((entry) => entry.group.id == 'format');
+    final primaryGroups = groups
+        .where((entry) => entry.group.id != 'format')
+        .toList(growable: false);
+    final activeGroup = primaryGroups.where((entry) {
+      return entry.filter.id == primaryCategory ||
+          entry.categories.any((category) => category.id == primaryCategory);
+    }).firstOrNull;
+    final showFormatFilters =
+        (primaryCategory.isEmpty || primaryCategory == 'app:recommendations') &&
+        formatGroup.any((entry) => entry.categories.isNotEmpty);
+    return activeGroup != null || showFormatFilters ? 100 : 50;
   }
 
   Widget _selectionBar({bool safeBottom = true}) {

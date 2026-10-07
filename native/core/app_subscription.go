@@ -95,23 +95,14 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 				return nil, errors.New("请求头过大")
 			}
 			request.Header.Set(key, value)
-		case "x-origin", "x-goog-visitor-id", "x-youtube-client-name", "x-youtube-client-version":
-			if address.Hostname() != "www.youtube.com" || address.Path != "/youtubei/v1/browse" {
-				return nil, errors.New("YouTube 请求头仅允许用于信息流")
-			}
-			if len(value) > 16384 {
-				return nil, errors.New("请求头过大")
-			}
-			request.Header.Set(key, value)
 		default:
 			return nil, errors.New("请求头不受支持")
 		}
 	}
 	if command.Cookie != "" {
 		allowedReadPost := command.Method == "POST" &&
-			((address.Hostname() == "www.douyin.com" && address.Path == "/aweme/v2/web/module/feed/" && command.Body == "") ||
-				(address.Hostname() == "www.tiktok.com" && address.Path == "/api/recommend/item_list/" && command.Body == "") ||
-				(address.Hostname() == "www.youtube.com" && address.Path == "/youtubei/v1/browse"))
+			address.Hostname() == "www.douyin.com" &&
+			address.Path == "/aweme/v2/web/module/feed/" && command.Body == ""
 		if command.Method != "GET" && !allowedReadPost {
 			return nil, errors.New("账号订阅仅支持读取请求")
 		}
@@ -258,7 +249,12 @@ func subscriptionProvider(parent context.Context, raw []byte) (providerMedia, na
 			return providerMedia{}, nativePlan{}, errors.New("媒体请求头无效")
 		}
 	}
-	media := providerMedia{URL: value.URL, Referer: value.Headers["Referer"], Playlist: value.Manifest, PlaylistType: value.ManifestType, Quality: value.Quality}
+	media := providerMedia{URL: value.URL, AudioURL: value.AudioURL, Referer: value.Headers["Referer"], Playlist: value.Manifest, PlaylistType: value.ManifestType, Quality: value.Quality}
+	if value.AudioURL != "" {
+		if _, err := subscriptionURL(ctx, value.AudioURL); err != nil {
+			return providerMedia{}, nativePlan{}, err
+		}
+	}
 	for _, cookie := range value.MediaCookies {
 		if len(cookie) > 16384 || !strings.HasPrefix(cookie, "CloudFront-") || strings.ContainsAny(cookie, "\r\n; ") {
 			return providerMedia{}, nativePlan{}, errors.New("媒体凭据格式无效")

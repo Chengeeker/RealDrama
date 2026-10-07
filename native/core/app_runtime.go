@@ -142,6 +142,7 @@ type nativePlan struct {
 	PrefetchedBytes int64             `json:"prefetchedBytes,omitempty"`
 	Local           bool              `json:"local"`
 	URL             string            `json:"url"`
+	AudioURL        string            `json:"audioUrl,omitempty"`
 	Headers         map[string]string `json:"headers"`
 	Key             string            `json:"decryptionKey,omitempty"`
 	Quality         int               `json:"quality"`

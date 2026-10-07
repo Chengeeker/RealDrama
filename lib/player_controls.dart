@@ -31,6 +31,7 @@ class PlayerControls extends StatefulWidget {
     this.panelOpen = false,
     this.immersiveFeed = false,
     this.hideFeedOverlays = false,
+    this.feedSeekable = false,
     this.live = false,
     this.danmakuOn = false,
     this.onDanmaku,
@@ -59,6 +60,7 @@ class PlayerControls extends StatefulWidget {
   final bool panelOpen;
   final bool immersiveFeed;
   final bool hideFeedOverlays;
+  final bool feedSeekable;
   final bool live;
   final bool danmakuOn;
   final VoidCallback? onDanmaku;
@@ -79,6 +81,7 @@ class _PlayerControlsState extends State<PlayerControls> {
   bool _suppressAutoPlaybackStart = false;
   bool _lastPlaying = false;
   double? _seekValue;
+  double? _feedSeekValue;
   Offset? _doubleTapPosition;
 
   @override
@@ -371,18 +374,98 @@ class _PlayerControlsState extends State<PlayerControls> {
                 ),
               ),
             ),
-            if (widget.immersiveFeed && !widget.live && duration > 0)
+            if (widget.immersiveFeed &&
+                !widget.live &&
+                !widget.interactions.boosting &&
+                duration > 0)
               Positioned(
                 left: 16,
                 right: 16,
-                bottom: 12,
+                bottom: widget.feedSeekable ? 0 : 12,
+                child: widget.feedSeekable
+                    ? SizedBox(
+                        height: 30,
+                        child: SliderTheme(
+                          data: SliderTheme.of(context).copyWith(
+                            trackHeight: 2,
+                            activeTrackColor: Colors.white,
+                            inactiveTrackColor: Colors.white38,
+                            thumbColor: Colors.white,
+                            overlayColor: Colors.white24,
+                            thumbShape: const RoundSliderThumbShape(
+                              enabledThumbRadius: 5,
+                            ),
+                            overlayShape: const RoundSliderOverlayShape(
+                              overlayRadius: 12,
+                            ),
+                          ),
+                          child: Slider(
+                            value: (_feedSeekValue ?? position)
+                                .clamp(0, duration)
+                                .toDouble(),
+                            min: 0,
+                            max: duration,
+                            onChangeStart: (_) {
+                              widget.interactions.cancel();
+                              setState(() => _feedSeekValue = position);
+                            },
+                            onChanged: (value) =>
+                                setState(() => _feedSeekValue = value),
+                            onChangeEnd: (value) {
+                              setState(() => _feedSeekValue = null);
+                              unawaited(
+                                (widget.onSeek ?? widget.player.seek)(
+                                  Duration(
+                                    milliseconds: (value * 1000).round(),
+                                  ),
+                                ),
+                              );
+                              _show();
+                            },
+                          ),
+                        ),
+                      )
+                    : IgnorePointer(
+                        child: SizedBox(
+                          height: 2,
+                          child: LinearProgressIndicator(
+                            value: (position / duration).clamp(0, 1).toDouble(),
+                            backgroundColor: Colors.white38,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+              ),
+            if (widget.immersiveFeed &&
+                !widget.live &&
+                !widget.interactions.boosting &&
+                _feedSeekValue != null &&
+                duration > 0)
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 32,
                 child: IgnorePointer(
-                  child: SizedBox(
-                    height: 2,
-                    child: LinearProgressIndicator(
-                      value: (position / duration).clamp(0, 1).toDouble(),
-                      backgroundColor: Colors.white38,
-                      color: Colors.white,
+                  child: Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: .72),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        child: Text(
+                          '${formatPosition(_feedSeekValue!.clamp(0, duration).toDouble())} / ${formatPosition(duration)}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -982,7 +1065,10 @@ class _PlayerControlsState extends State<PlayerControls> {
     animation: widget.interactions,
     builder: (context, _) {
       final feedback = widget.interactions.feedback;
-      if (feedback.isEmpty) return const SizedBox.shrink();
+      if (feedback.isEmpty ||
+          widget.immersiveFeed && widget.interactions.speedFeedback) {
+        return const SizedBox.shrink();
+      }
       return IgnorePointer(
         child: Align(
           alignment: const Alignment(0, -.5),

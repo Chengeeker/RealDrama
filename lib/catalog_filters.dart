@@ -98,6 +98,7 @@ class _CatalogFiltersState extends State<CatalogFilters> {
                               label: Text(entry.name),
                               selected: entry.id == widget.category,
                               showCheckmark: false,
+                              visualDensity: VisualDensity.compact,
                               onSelected: (_) => widget.onCategory(entry.id),
                             ),
                     ),
@@ -155,6 +156,7 @@ class _CatalogFiltersState extends State<CatalogFilters> {
         label: Text(label),
         selected: selected,
         showCheckmark: false,
+        visualDensity: VisualDensity.compact,
         onSelected: (_) => onPressed(),
       ),
     );

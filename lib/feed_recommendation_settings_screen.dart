@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'feed_preferences.dart';
 import 'feed_recommendations.dart';
 import 'local_store.dart';
+import 'models.dart';
 
 class FeedRecommendationSettingsScreen extends StatefulWidget {
   const FeedRecommendationSettingsScreen({super.key, required this.store});
@@ -34,9 +35,15 @@ class _FeedRecommendationSettingsScreenState
     );
     _randomMode = preferences.randomMode;
     _profile = FeedRecommendations.hierarchicalInterestProfile(
-      history: store.history,
-      favorites: store.favorites,
-      session: store.feedSessionSignals,
+      history: store.history.where(
+        (entry) => entry.drama.source == SourceSite.hongguo.id,
+      ),
+      favorites: store.favorites.where(
+        (drama) => drama.source == SourceSite.hongguo.id,
+      ),
+      session: store.feedSessionSignals.where(
+        (signal) => signal.drama.source == SourceSite.hongguo.id,
+      ),
     );
   }
 
@@ -188,9 +195,8 @@ class _FeedRecommendationSettingsScreenState
                 width: double.infinity,
                 padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
                 decoration: BoxDecoration(
-                  color: colors.surfaceContainerLow,
+                  color: colors.surfaceContainer,
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: colors.outlineVariant),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -203,8 +209,10 @@ class _FeedRecommendationSettingsScreenState
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '已收敛为 5 个大类和 25 个二级题材。默认按兴趣排序：兴趣匹配占 65%，热度与播放量合计占 10%。调整大类会影响该组题材；展开后可单独微调。权重会即时影响后续首页候选，百分比不是播放概率。首页单独保存最近 30 部的去重记录，清空最近观看不会清除它。',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      '仅用于红果源。客户端根据分类、标签、标题和简介，将剧目归并为 5 个大类和 25 个二级题材；缺少标签时识别可能不完整。调整影响后续候选，热度与播放量合计占 10%，百分比不是播放概率。全随机作用于整个首页信息流；首页去重记录独立于最近观看。',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 8),
                     Wrap(
@@ -253,12 +261,12 @@ class _FeedRecommendationSettingsScreenState
                   filled: true,
                   fillColor: colors.surfaceContainerLow,
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    borderSide: BorderSide(color: colors.outlineVariant),
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    borderSide: BorderSide(color: colors.outlineVariant),
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
                   ),
                 ),
               ),
@@ -315,13 +323,10 @@ class _FeedRecommendationSettingsScreenState
     final current = _manualWeights[key] ?? automatic;
     return Card(
       margin: EdgeInsets.zero,
-      color: colors.surfaceContainerLow,
+      color: colors.surfaceContainer,
       elevation: 0,
       clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: colors.outlineVariant),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -333,7 +338,7 @@ class _FeedRecommendationSettingsScreenState
                   child: Text(
                     group.label,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -376,7 +381,6 @@ class _FeedRecommendationSettingsScreenState
             tilePadding: const EdgeInsets.symmetric(horizontal: 16),
             childrenPadding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
             title: const Text('展开二级题材'),
-            subtitle: const Text('单项设置优先于大类权重'),
             children: [
               for (final topic in topics) _topicRow(context, group, topic),
             ],
@@ -399,8 +403,13 @@ class _FeedRecommendationSettingsScreenState
     final inherited = _manualWeights[groupKey];
     final current = _manualWeights[key] ?? inherited ?? automatic;
     final followsGroup = !_manualWeights.containsKey(key) && inherited != null;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 10, 8, 8),
+    return Container(
+      margin: const EdgeInsets.fromLTRB(8, 8, 8, 2),
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

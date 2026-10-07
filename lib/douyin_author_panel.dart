@@ -115,7 +115,7 @@ class DouyinAuthorPanel extends StatelessWidget {
                     ),
                     if (drama.creatorId.isNotEmpty)
                       Text(
-                        '${drama.source == 'bilibili' ? 'UID' : '抖音号'}：${drama.creatorId}',
+                        '${SourceSite.providerIdFor(drama.source) == 'bilibili' ? 'UID' : '抖音号'}：${drama.creatorId}',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(

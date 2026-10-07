@@ -352,8 +352,15 @@ class FeedRecommendations {
         continue;
       }
       final features = _features(drama);
-      final longMatch = _match(features, longTerm, manualWeights);
-      final sessionMatch = _match(features, sessionWeights, manualWeights);
+      final sourceManualWeights = drama.source == SourceSite.hongguo.id
+          ? manualWeights
+          : const <String, int>{};
+      final longMatch = _match(features, longTerm, sourceManualWeights);
+      final sessionMatch = _match(
+        features,
+        sessionWeights,
+        sourceManualWeights,
+      );
       final heat = _heat(drama.heat, drama.views);
       final freshness = _freshness(drama.onlineDate);
       final featureNovelty = features.isEmpty

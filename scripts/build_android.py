@@ -13,9 +13,14 @@ root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument('--abi', action='append', choices=['arm64-v8a', 'armeabi-v7a', 'x86_64'])
 parser.add_argument('--cn-mirrors', action='store_true', help='使用 Flutter 中国镜像和阿里云 Maven 镜像')
+parser.add_argument('--allow-debug-signing', action='store_true', help='仅用于明确接受不可覆盖安装的 CI 预览包')
 add_variant_argument(parser)
 options = parser.parse_args()
 variant = BuildVariant(options.all_sources)
+release_key = root / 'android' / 'key.properties'
+ci_preview = os.environ.get('GITHUB_ACTIONS', '').lower() == 'true'
+if not release_key.is_file() and not (options.allow_debug_signing or ci_preview):
+    raise SystemExit('拒绝本机构建 debug 签名 APK：请先配置发布签名，再执行构建。')
 environment = os.environ.copy()
 if platform.system() == 'Darwin':
     environment['LANG'] = 'en_US.UTF-8'

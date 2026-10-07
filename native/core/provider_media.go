@@ -11,6 +11,7 @@ import (
 type providerMedia struct {
 	credentials     *providerMediaCredentials
 	URL             string
+	AudioURL        string
 	Referer         string
 	Duration        time.Duration
 	Playlist        string

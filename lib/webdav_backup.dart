@@ -198,13 +198,10 @@ class _WebDavBackupScreenState extends State<WebDavBackupScreen> {
                 color: colors.surfaceContainerLow,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  side: BorderSide(
-                    color: colors.outlineVariant.withValues(alpha: .6),
-                  ),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -225,7 +222,7 @@ class _WebDavBackupScreenState extends State<WebDavBackupScreen> {
                               'https://dav.example.com/remote.php/dav/files/user/RealDrama.json',
                           helperText: '填写完整文件地址；上传会覆盖该文件。仅支持 HTTPS。',
                           helperMaxLines: 2,
-                          border: OutlineInputBorder(),
+                          border: InputBorder.none,
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -235,7 +232,7 @@ class _WebDavBackupScreenState extends State<WebDavBackupScreen> {
                         autocorrect: false,
                         decoration: const InputDecoration(
                           labelText: '用户名（可选）',
-                          border: OutlineInputBorder(),
+                          border: InputBorder.none,
                         ),
                       ),
                       const SizedBox(height: 14),
@@ -249,7 +246,7 @@ class _WebDavBackupScreenState extends State<WebDavBackupScreen> {
                           labelText: '密码或应用专用密码（可选）',
                           helperText: '密码保存在设备安全存储中，不会写入配置备份。',
                           helperMaxLines: 2,
-                          border: const OutlineInputBorder(),
+                          border: InputBorder.none,
                           suffixIcon: IconButton(
                             tooltip: _showPassword ? '隐藏密码' : '显示密码',
                             onPressed: () =>
@@ -282,13 +279,10 @@ class _WebDavBackupScreenState extends State<WebDavBackupScreen> {
                 color: colors.surfaceContainerLow,
                 elevation: 0,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(24),
-                  side: BorderSide(
-                    color: colors.outlineVariant.withValues(alpha: .6),
-                  ),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: Padding(
-                  padding: const EdgeInsets.all(20),
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [

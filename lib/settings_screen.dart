@@ -194,7 +194,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 720),
       child: ListView(
-        padding: EdgeInsets.fromLTRB(16, 16, 16, widget.bottomNavPadding),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          widget.embedded ? 28 : 16,
+          16,
+          widget.bottomNavPadding,
+        ),
         children: [
           SettingsSection(
             title: '最近观看',
@@ -234,7 +239,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 key: const ValueKey('source-management-settings'),
                 leading: const Icon(Icons.dns_outlined),
                 title: const Text('站源与首页信息流'),
-                subtitle: const Text('站源订阅、当前站源、首页偏好、画质与猜你喜欢'),
+
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.push<void>(
                   context,
@@ -255,7 +260,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 key: const ValueKey('playback-settings'),
                 leading: const Icon(Icons.play_circle_outline_rounded),
                 title: const Text('播放设置'),
-                subtitle: const Text('硬件解码方式与内存占用'),
+
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.push(
                   context,
@@ -273,7 +278,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 key: const ValueKey('personalization-setting'),
                 leading: const Icon(Icons.palette_outlined),
                 title: const Text('个性化'),
-                subtitle: const Text('明暗、色彩、触感、字重与底栏'),
+
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.push(
                   context,
@@ -292,7 +297,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   key: const ValueKey('settings-downloads'),
                   leading: const Icon(Icons.download_rounded),
                   title: const Text('下载设置'),
-                  subtitle: const Text('下载合集、画质偏好、目录空间与完成后导出'),
+
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => Navigator.push(
                     context,
@@ -313,7 +318,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ListTile(
                   leading: const Icon(Icons.settings_ethernet_rounded),
                   title: const Text('网络与资源'),
-                  subtitle: const Text('代理、目录请求间隔、下载并发与站源目录'),
+
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => Navigator.push(
                     context,
@@ -335,7 +340,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   key: const ValueKey('backup-settings'),
                   leading: const Icon(Icons.backup_outlined),
                   title: const Text('备份设置'),
-                  subtitle: const Text('导出或恢复本地用户、收藏、历史和设置'),
+
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => Navigator.push(
                     context,
@@ -358,7 +363,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 key: const ValueKey('export-diagnostic-logs'),
                 leading: const Icon(Icons.bug_report_outlined),
                 title: const Text('导出日志'),
-                subtitle: const Text('复现问题后导出；不包含 Cookie、视频链接和请求正文'),
+
                 trailing: _exportingLogs
                     ? const SizedBox(
                         width: 20,
@@ -376,7 +381,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 leading: const Icon(Icons.info_outline_rounded),
                 title: const Text('关于应用'),
-                subtitle: const Text('版本与本地数据说明'),
+
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: _showAbout,
               ),
@@ -422,21 +427,16 @@ class SourceManagementSettingsScreen extends StatelessWidget {
                     key: const ValueKey('source-subscriptions-settings'),
                     leading: const Icon(Icons.extension_outlined),
                     title: const Text('站源订阅'),
-                    subtitle: const Text('导入站源程序，检测和更新订阅'),
+
                     trailing: const Icon(Icons.chevron_right_rounded),
-                    onTap: () => _open(
-                      context,
-                      SourceSubscriptionsScreen(
-                        store: store,
-                        repository: repository,
-                      ),
-                    ),
+                    onTap: () =>
+                        _open(context, SourceSubscriptionsScreen(store: store)),
                   ),
                   ListTile(
                     key: const ValueKey('current-sources-settings'),
                     leading: const Icon(Icons.dns_outlined),
                     title: const Text('当前站源'),
-                    subtitle: const Text('管理当前启用的站源、目录更新与连接检测'),
+
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => _open(
                       context,
@@ -452,7 +452,7 @@ class SourceManagementSettingsScreen extends StatelessWidget {
                   key: const ValueKey('home-feed-preferences'),
                   leading: const Icon(Icons.tune_rounded),
                   title: const Text('首页偏好'),
-                  subtitle: const Text('选择首页推送的站源和分类'),
+
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => _open(
                     context,
@@ -467,7 +467,7 @@ class SourceManagementSettingsScreen extends StatelessWidget {
                   key: const ValueKey('playback-feed-recommendations'),
                   leading: const Icon(Icons.auto_awesome_rounded),
                   title: const Text('猜你喜欢'),
-                  subtitle: const Text('查看兴趣标签，调整首页推荐权重'),
+
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => _open(
                     context,
@@ -512,8 +512,6 @@ class _HomePlaybackQualityTile extends StatelessWidget {
         key: const ValueKey('home-playback-quality'),
         icon: Icons.high_quality_rounded,
         title: '首页画质',
-        subtitle:
-            '当前：${preferences.homeQuality == 0 ? '自动（最高）' : '${preferences.homeQuality}P'} · 仅用于首页信息流；以源站实际提供的画质为准',
         value: preferences.homeQuality,
         items: [
           for (final quality in qualities)
@@ -651,31 +649,79 @@ class _StorageScreenState extends State<StorageScreen> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 720),
           child: ListView(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16),
             children: [
-              if (_info != null) ...[
-                Text(
-                  '已使用 ${storageSize((_info!['bytes'] as num?)?.toInt() ?? 0)}',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '剩余 ${storageSize((_info!['free'] as num?)?.toInt() ?? -1)} · ${_info!['files'] ?? 0} 个文件',
-                ),
-                const SizedBox(height: 24),
-                const Text('当前下载目录'),
-                const SizedBox(height: 8),
-                SelectableText(_info!['directory'] as String? ?? ''),
-                TextButton.icon(
-                  onPressed: () => Clipboard.setData(
-                    ClipboardData(text: _info!['directory'] as String? ?? ''),
+              if (_info != null)
+                Card(
+                  margin: EdgeInsets.zero,
+                  color: Theme.of(context).colorScheme.surfaceContainer,
+                  elevation: 0,
+                  clipBehavior: Clip.antiAlias,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(24),
                   ),
-                  icon: const Icon(Icons.copy),
-                  label: const Text('复制路径'),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '已使用 ${storageSize((_info!['bytes'] as num?)?.toInt() ?? 0)}',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '剩余 ${storageSize((_info!['free'] as num?)?.toInt() ?? -1)} · ${_info!['files'] ?? 0} 个文件',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                        const SizedBox(height: 16),
+                        Divider(
+                          height: 1,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.outlineVariant.withValues(alpha: .55),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          '当前下载目录',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        SelectableText(
+                          _info!['directory'] as String? ?? '',
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: () => Clipboard.setData(
+                              ClipboardData(
+                                text: _info!['directory'] as String? ?? '',
+                              ),
+                            ),
+                            icon: const Icon(Icons.copy),
+                            label: const Text('复制路径'),
+                          ),
+                        ),
+                        Text(
+                          '在下载页删除不需要的分集，在本地媒体页删除合并成品或 Emby 导出，可释放空间。',
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 20),
-                const Text('在下载页删除不需要的分集，在本地媒体页删除合并成品或 Emby 导出，可释放空间。'),
-              ],
               if (_busy || (_info == null && _error == null))
                 const Padding(
                   padding: EdgeInsets.symmetric(vertical: 20),

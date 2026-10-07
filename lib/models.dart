@@ -16,6 +16,21 @@ class SourceSite {
   final String id;
   final String name;
   final String description;
+  static const _testSourceAliases = {
+    'douyin-test': 'douyin',
+    'douyin-live-test': 'douyin-live',
+    'douyin-series-test': 'douyin-series',
+    'douyin-theater-test': 'douyin-theater',
+    'bilibili-test': 'bilibili',
+    'bilibili-live-test': 'bilibili-live',
+    'hongguo-test': 'hongguo',
+  };
+  static String providerIdFor(String source) =>
+      _testSourceAliases[source] ?? source;
+  bool get isSubscriptionTest => _testSourceAliases.containsKey(id);
+  bool get isBilibili =>
+      {'bilibili', 'bilibili-live'}.contains(providerIdFor(id));
+  bool get isDouyinLive => isDouyin && providerIdFor(id) == 'douyin-live';
   bool get onlineSearch =>
       capabilities?.contains('search') ?? (id == 'hongguo' || pagedSearch);
   bool get supportsDownloads =>
@@ -35,10 +50,8 @@ class SourceSite {
   bool get supportsCatalogTools =>
       capabilities?.contains('catalogTools') ?? (id == 'hongguo');
   bool get supportsCreator =>
-      capabilities?.contains('creator') ??
-      {'douyin', 'douyin-live', 'bilibili'}.contains(id);
-  bool get supportsDanmaku =>
-      id == 'bilibili' && capabilities?.contains('danmaku') == true;
+      capabilities?.contains('creator') ?? (isDouyin || isBilibili);
+  bool get supportsDanmaku => capabilities?.contains('danmaku') == true;
   String get groupId => family.isNotEmpty && family != 'douyin'
       ? family
       : switch (id) {
@@ -67,19 +80,6 @@ class SourceSite {
     capabilities: {'catalog', 'categories', 'detail', 'resolve', 'live'},
     kind: 'live',
   );
-  static const tiktok = SourceSite(
-    'tiktok',
-    'TikTok',
-    '推荐 · 关注 · Cookie 登录',
-    kind: 'video',
-  );
-  static const youtube = SourceSite(
-    'youtube',
-    'YouTube',
-    '全部 · 游戏 · 直播 · 音乐 · 播客',
-    capabilities: {'catalog', 'categories', 'detail', 'resolve', 'live'},
-    kind: 'video',
-  );
   static const douyin = SourceSite(
     'douyin',
     '抖音',
@@ -102,7 +102,7 @@ class SourceSite {
     '抖音放映厅',
     '电影 · 电视剧 · 综艺 · 共用抖音 Cookie',
   );
-  bool get isDouyinVideo => isDouyin && id != douyinLive.id;
+  bool get isDouyinVideo => isDouyin && !isDouyinLive;
   static const dsd = SourceSite('dsd', '帝果', '分类视频 · 在线搜索');
   static const sorani = SourceSite('sorani', '青空', '番剧 · 剧场动画 · 特摄');
   static const guipian = SourceSite('guipian', '鬼片', '鬼片 · 电视剧 · 动漫');
@@ -121,11 +121,18 @@ class SourceSite {
   static const featuredValues = [hongguo, hanxiaoquan, guipian, sorani];
 
   static const douyinValues = [douyin, douyinLive, douyinSeries, douyinTheater];
-  bool get isDouyin => douyinValues.any((source) => source.id == id);
+  bool get isDouyin =>
+      family == 'douyin' ||
+      {
+        'douyin',
+        'douyin-live',
+        'douyin-series',
+        'douyin-theater',
+      }.contains(providerIdFor(id));
   String get libraryKind => switch (kind) {
     'video' || 'live' => kind,
-    _ => switch (id) {
-      'bilibili' || 'douyin' || 'tiktok' || 'youtube' => 'video',
+    _ => switch (providerIdFor(id)) {
+      'bilibili' || 'douyin' => 'video',
       'bilibili-live' || 'douyin-live' => 'live',
       _ => 'drama',
     },
@@ -147,8 +154,6 @@ class SourceSite {
   static const otherValuesWithoutDouyin = [
     SourceSite('huangju', '剧果', '热门 · 最新 · 分类短剧'),
     dsd,
-    tiktok,
-    youtube,
     crj91,
     stripchat,
     SourceSite('huangguo-video', '黄果视频', '视频剧集'),
@@ -517,6 +522,8 @@ class CatalogPage {
 class PlaybackPlan {
   const PlaybackPlan({
     required this.url,
+    this.source = '',
+    this.audioUrl = '',
     this.headers = const {},
     this.decryptionKey = '',
     this.quality = 0,
@@ -529,6 +536,8 @@ class PlaybackPlan {
     this.local = false,
   });
   final String url;
+  final String source;
+  final String audioUrl;
   final Map<String, String> headers;
   final String decryptionKey;
   final int quality;
@@ -542,6 +551,8 @@ class PlaybackPlan {
   bool get hasAlternative => session.isNotEmpty && routeIndex + 1 < routeCount;
   factory PlaybackPlan.fromJson(Map<String, dynamic> json) => PlaybackPlan(
     url: json['url'] as String? ?? '',
+    source: json['source'] as String? ?? '',
+    audioUrl: json['audioUrl'] as String? ?? '',
     local: json['local'] == true,
     headers: (json['headers'] as Map? ?? {}).map(
       (key, value) => MapEntry(key.toString(), value.toString()),

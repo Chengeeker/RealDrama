@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'app_theme.dart';
 import 'core_bridge.dart';
 import 'download_preferences.dart';
 import 'local_store.dart';
@@ -26,46 +27,69 @@ class DownloadPreferencesScreen extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
-                ListTile(
-                  title: const Text('默认画质'),
-                  subtitle: const Text('指定画质不可用时，使用源站提供的可用版本。'),
-                ),
-                DropdownButtonFormField<int>(
-                  initialValue: preferences.quality,
-                  decoration: const InputDecoration(labelText: '下载画质'),
-                  items: [
-                    for (final value in DownloadPreferences.qualities)
-                      DropdownMenuItem(
-                        value: value,
-                        child: Text(value == 0 ? '自动 · 优先高清' : '${value}P'),
+                Card(
+                  margin: EdgeInsets.zero,
+                  color: Theme.of(context).colorScheme.surfaceContainer,
+                  elevation: 0,
+                  clipBehavior: Clip.antiAlias,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.settingsGroup),
+                  ),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        title: const Text('默认画质'),
                       ),
-                  ],
-                  onChanged: !store.canDownload
-                      ? null
-                      : (value) {
-                          if (value != null) {
-                            saveUserChange(
-                              context,
-                              () => store.setDownloadPreferences(
-                                preferences.copyWith(quality: value),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        child: DropdownButtonFormField<int>(
+                          initialValue: preferences.quality,
+                          decoration: const InputDecoration(labelText: '下载画质'),
+                          items: [
+                            for (final value in DownloadPreferences.qualities)
+                              DropdownMenuItem(
+                                value: value,
+                                child: Text(
+                                  value == 0 ? '自动 · 优先高清' : '${value}P',
+                                ),
                               ),
-                            );
-                          }
-                        },
-                ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  value: preferences.includeVip,
-                  title: const Text('默认包含 VIP 集'),
-                  subtitle: const Text('VIP 集可能仅提供试看内容；下载前仍可调整选择。'),
-                  onChanged: !store.canDownload
-                      ? null
-                      : (value) => saveUserChange(
-                          context,
-                          () => store.setDownloadPreferences(
-                            preferences.copyWith(includeVip: value),
-                          ),
+                          ],
+                          onChanged: !store.canDownload
+                              ? null
+                              : (value) {
+                                  if (value != null) {
+                                    saveUserChange(
+                                      context,
+                                      () => store.setDownloadPreferences(
+                                        preferences.copyWith(quality: value),
+                                      ),
+                                    );
+                                  }
+                                },
                         ),
+                      ),
+                      Divider(
+                        height: 1,
+                        indent: 16,
+                        endIndent: 16,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.outlineVariant.withValues(alpha: .55),
+                      ),
+                      SwitchListTile(
+                        value: preferences.includeVip,
+                        title: const Text('默认包含 VIP 集'),
+                        onChanged: !store.canDownload
+                            ? null
+                            : (value) => saveUserChange(
+                                context,
+                                () => store.setDownloadPreferences(
+                                  preferences.copyWith(includeVip: value),
+                                ),
+                              ),
+                      ),
+                    ],
+                  ),
                 ),
                 const Padding(
                   padding: EdgeInsets.all(16),
@@ -184,9 +208,11 @@ class _NetworkDiagnosticsScreenState extends State<NetworkDiagnosticsScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
               child: ListView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 children: [
                   Card(
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    elevation: 0,
                     child: Padding(
                       padding: const EdgeInsets.all(16),
                       child: Text(
@@ -429,14 +455,13 @@ class _ResourceSettingsScreenState extends State<ResourceSettingsScreen> {
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
               child: ListView(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(16),
                 children: [
                   if (_busy) const LinearProgressIndicator(),
                   Card(
                     child: ListTile(
                       leading: const Icon(Icons.network_check_rounded),
                       title: const Text('网络诊断'),
-                      subtitle: const Text('检查站源目录、分集、播放地址和媒体连接'),
                       trailing: const Icon(Icons.chevron_right_rounded),
                       onTap: () => Navigator.push<void>(
                         context,
@@ -455,80 +480,145 @@ class _ResourceSettingsScreenState extends State<ResourceSettingsScreen> {
                       padding: const EdgeInsets.only(bottom: 16),
                       child: Text(_settings!.warning),
                     ),
-                  InputDecorator(
-                    decoration: const InputDecoration(labelText: '连接方式'),
-                    isEmpty: false,
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: _mode,
-                        isExpanded: true,
-                        menuWidth: 180,
-                        items: const [
-                          DropdownMenuItem(value: 'auto', child: Text('自动')),
-                          DropdownMenuItem(value: 'direct', child: Text('直连')),
-                          DropdownMenuItem(
-                            value: 'manual',
-                            child: Text('手动代理'),
-                          ),
-                        ],
-                        onChanged: _busy
-                            ? null
-                            : (value) =>
-                                  setState(() => _mode = value ?? 'auto'),
+                  Card(
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(
+                        AppRadii.settingsGroup,
                       ),
                     ),
-                  ),
-                  if (_mode == 'auto')
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      child: Text(
-                        _settings!.systemProxyStatus.isEmpty
-                            ? '使用系统静态代理；未配置时使用环境变量或直连。'
-                            : _settings!.systemProxyStatus,
-                      ),
-                    ),
-                  if (_mode == 'manual')
-                    Padding(
-                      padding: const EdgeInsets.only(top: 16),
-                      child: TextField(
-                        controller: _proxy,
-                        obscureText: !_showProxy,
-                        enableSuggestions: false,
-                        autocorrect: false,
-                        decoration: InputDecoration(
-                          labelText: '代理地址',
-                          hintText: 'http://127.0.0.1:7890',
-                          helperText: '支持 HTTP、HTTPS、SOCKS5；仅保存在本机，不进入配置备份。',
-                          helperMaxLines: 3,
-                          suffixIcon: IconButton(
-                            tooltip: _showProxy ? '隐藏代理地址' : '显示代理地址',
-                            onPressed: () =>
-                                setState(() => _showProxy = !_showProxy),
-                            icon: Icon(
-                              _showProxy
-                                  ? Icons.visibility_off_outlined
-                                  : Icons.visibility_outlined,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          InputDecorator(
+                            decoration: const InputDecoration(
+                              labelText: '连接方式',
+                            ),
+                            isEmpty: false,
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<String>(
+                                value: _mode,
+                                isExpanded: true,
+                                menuWidth: 180,
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: 'auto',
+                                    child: Text('自动'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'direct',
+                                    child: Text('直连'),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: 'manual',
+                                    child: Text('手动代理'),
+                                  ),
+                                ],
+                                onChanged: _busy
+                                    ? null
+                                    : (value) => setState(
+                                        () => _mode = value ?? 'auto',
+                                      ),
+                              ),
                             ),
                           ),
-                        ),
+                          if (_mode == 'auto')
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  _settings!.systemProxyStatus.isEmpty
+                                      ? '使用系统静态代理；未配置时使用环境变量或直连。'
+                                      : _settings!.systemProxyStatus,
+                                  style: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                      ),
+                                ),
+                              ),
+                            ),
+                          if (_mode == 'manual') ...[
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _proxy,
+                              obscureText: !_showProxy,
+                              enableSuggestions: false,
+                              autocorrect: false,
+                              decoration: InputDecoration(
+                                labelText: '代理地址',
+                                hintText: 'http://127.0.0.1:7890',
+                                helperText:
+                                    '支持 HTTP、HTTPS、SOCKS5；仅保存在本机，不进入配置备份。',
+                                helperMaxLines: 3,
+                                suffixIcon: IconButton(
+                                  tooltip: _showProxy ? '隐藏代理地址' : '显示代理地址',
+                                  onPressed: () =>
+                                      setState(() => _showProxy = !_showProxy),
+                                  icon: Icon(
+                                    _showProxy
+                                        ? Icons.visibility_off_outlined
+                                        : Icons.visibility_outlined,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ),
-                  const SizedBox(height: 28),
-                  _count('目录请求并发', _catalog, (value) => _catalog = value),
-                  const SizedBox(height: 16),
-                  Text('目录请求间隔 · $_interval 毫秒'),
-                  Slider(
-                    value: _interval.toDouble(),
-                    min: 0,
-                    max: 5000,
-                    divisions: 100,
-                    label: '$_interval 毫秒',
-                    onChanged: _busy
-                        ? null
-                        : (value) => setState(() => _interval = value.round()),
                   ),
                   const SizedBox(height: 16),
-                  _count('同时下载数量', _downloads, (value) => _downloads = value),
+                  Card(
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(
+                        AppRadii.settingsGroup,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          _count(
+                            '目录请求并发',
+                            _catalog,
+                            (value) => _catalog = value,
+                          ),
+                          const SizedBox(height: 16),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              '目录请求间隔 · $_interval 毫秒',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ),
+                          Slider(
+                            value: _interval.toDouble(),
+                            min: 0,
+                            max: 5000,
+                            divisions: 100,
+                            label: '$_interval 毫秒',
+                            onChanged: _busy
+                                ? null
+                                : (value) =>
+                                      setState(() => _interval = value.round()),
+                          ),
+                          const SizedBox(height: 8),
+                          _count(
+                            '同时下载数量',
+                            _downloads,
+                            (value) => _downloads = value,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 12),

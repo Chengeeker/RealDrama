@@ -217,9 +217,7 @@ class CatalogBrowser {
 
   List<_CatalogChoice> _choices(SourceGroup group) {
     if (group.sources.length == 1 &&
-        (group.sources.single.isDouyin ||
-            group.sources.single.id == 'bilibili' ||
-            group.sources.single.id == 'bilibili-live')) {
+        (group.sources.single.isDouyin || group.sources.single.isBilibili)) {
       final source = group.sources.single;
       return [
         for (final category in _menus[source.id] ?? const <CatalogCategory>[])
@@ -232,7 +230,8 @@ class CatalogBrowser {
             _CatalogChoice(category)..requests[source.id] = category.id,
       ];
     }
-    if (group.id == 'hongguo' && group.sources.length == 1) {
+    if (SourceSite.providerIdFor(group.id) == 'hongguo' &&
+        group.sources.length == 1) {
       final source = group.sources.single;
       final menu = _menus[source.id] ?? const <CatalogCategory>[];
       final choices = <_CatalogChoice>[];
@@ -310,7 +309,10 @@ class CatalogBrowser {
   }
 
   List<CatalogTaxonomyGroup> taxonomyGroups(SourceGroup group) {
-    if (group.id != 'hongguo' || group.sources.length != 1) return const [];
+    if (SourceSite.providerIdFor(group.id) != 'hongguo' ||
+        group.sources.length != 1) {
+      return const [];
+    }
     return _taxonomyGroupCache.putIfAbsent(group.id, () {
       final choices = _choices(group);
       return [
@@ -332,22 +334,23 @@ class CatalogBrowser {
     });
   }
 
-  List<CatalogCategory> categories(SourceGroup group) => [
-    group.id == 'bilibili'
-        ? const CatalogCategory('', '个性推荐')
-        : group.id == 'bilibili-live'
-        ? const CatalogCategory('', '推荐')
-        : group.id == 'douyin'
-        ? const CatalogCategory('', '推荐')
-        : group.id == 'douyin-live'
-        ? const CatalogCategory('', '精选')
-        : group.id == 'douyin-series'
-        ? const CatalogCategory('', '推荐')
-        : group.id == 'douyin-theater'
-        ? const CatalogCategory('', '综艺')
-        : CatalogCategory.all,
-    for (final choice in _choices(group)) choice.category,
-  ];
+  List<CatalogCategory> categories(SourceGroup group) {
+    final source = SourceSite.providerIdFor(
+      group.sources.length == 1 ? group.sources.single.id : group.id,
+    );
+    return [
+      switch (source) {
+        'bilibili' => const CatalogCategory('', '个性推荐'),
+        'bilibili-live' => const CatalogCategory('', '推荐'),
+        'douyin' => const CatalogCategory('', '推荐'),
+        'douyin-live' => const CatalogCategory('', '精选'),
+        'douyin-series' => const CatalogCategory('', '推荐'),
+        'douyin-theater' => const CatalogCategory('', '综艺'),
+        _ => CatalogCategory.all,
+      },
+      for (final choice in _choices(group)) choice.category,
+    ];
+  }
 
   _CatalogChoice? _choice(SourceGroup group, String category) => _choices(
     group,

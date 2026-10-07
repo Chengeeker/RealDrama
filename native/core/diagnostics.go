@@ -22,6 +22,8 @@ type diagnosticEvent struct {
 	Protocol           string    `json:"protocol,omitempty"`
 	CFRay              string    `json:"cfRay,omitempty"`
 	ResponseType       string    `json:"responseType,omitempty"`
+	FetchMode          string    `json:"fetchMode,omitempty"`
+	FetchDest          string    `json:"fetchDest,omitempty"`
 	RequestedQuality   int       `json:"requestedQuality,omitempty"`
 	Time               time.Time `json:"time"`
 	Level              string    `json:"level"`

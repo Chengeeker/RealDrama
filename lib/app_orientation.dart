@@ -21,15 +21,15 @@ class AppOrientationController {
   static List<DeviceOrientation> orientations({
     required bool television,
     bool fullscreen = false,
-    double aspectRatio = 1,
+    double aspectRatio = 0,
   }) {
-    if (television || fullscreen && aspectRatio >= 1) {
+    if (television || fullscreen && aspectRatio > 1) {
       return const [
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ];
     }
-    if (fullscreen) {
+    if (fullscreen && aspectRatio > 0 && aspectRatio <= 1) {
       return const [
         DeviceOrientation.portraitUp,
         DeviceOrientation.portraitDown,

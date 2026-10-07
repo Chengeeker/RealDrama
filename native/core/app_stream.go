@@ -32,6 +32,7 @@ type nativeStreamSession struct {
 	credentials     *providerMediaCredentials
 	mu              sync.Mutex
 	assets          map[string]nativeStreamAsset
+	audioURL        string
 	referer         string
 	key             []byte
 	ctx             context.Context
@@ -142,7 +143,23 @@ func (stream *nativeStreamServer) nativeOpen(media providerMedia) (string, strin
 			entry.contentType = "application/vnd.apple.mpegurl"
 		}
 	}
-	return stream.nativeAsset(token, session, entry), token
+	videoURL := stream.nativeAsset(token, session, entry)
+	if media.AudioURL != "" {
+		session.audioURL = stream.nativeAsset(token, session, nativeStreamAsset{address: media.AudioURL, contentType: "audio/mp4"})
+	}
+	return videoURL, token
+}
+
+func (stream *nativeStreamServer) nativeAudioURL(token string) string {
+	stream.mu.Lock()
+	session := stream.sessions[token]
+	stream.mu.Unlock()
+	if session == nil {
+		return ""
+	}
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	return session.audioURL
 }
 
 func (stream *nativeStreamServer) nativeRelease(token string) {
@@ -159,7 +176,7 @@ func (stream *nativeStreamServer) nativeAsset(token string, session *nativeStrea
 	extension := ".ts"
 	if parsed, err := url.Parse(asset.address); err == nil {
 		switch candidate := strings.ToLower(path.Ext(parsed.Path)); candidate {
-		case ".m3u8", ".ts", ".m4s", ".mp4", ".aac", ".m4a", ".mp3", ".vtt", ".webvtt", ".key":
+		case ".m3u8", ".ts", ".m4s", ".mp4", ".webm", ".aac", ".m4a", ".mp3", ".opus", ".ogg", ".vtt", ".webvtt", ".key":
 			extension = candidate
 		}
 	}
@@ -170,6 +187,8 @@ func (stream *nativeStreamServer) nativeAsset(token string, session *nativeStrea
 		extension = ".key"
 	case "video/mp4":
 		extension = ".mp4"
+	case "audio/mp4":
+		extension = ".m4a"
 	case "application/dash+xml":
 		extension = ".mpd"
 	}

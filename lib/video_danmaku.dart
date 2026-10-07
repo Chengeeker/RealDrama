@@ -40,7 +40,9 @@ class _VideoDanmakuState extends State<VideoDanmaku>
   int? _samplePosition;
   double _base = 0, _rate = 1, _correction = 0;
   double _width = 0;
-  int get _window => widget.drama.source == 'bilibili' ? 360000 : 32000;
+  int get _window => SourceSite.providerIdFor(widget.drama.source) == 'bilibili'
+      ? 360000
+      : 32000;
   bool get _active =>
       VideoDanmaku.enabled.value &&
       widget.active?.value != false &&

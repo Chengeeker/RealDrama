@@ -184,7 +184,7 @@ class SubscriptionRuntime {
   String _identity(String source) => '${store()?.profile.id}:$source';
   String _lane(String source, String action) => action == 'danmaku'
       ? ':danmaku'
-      : source == 'bilibili' &&
+      : SourceSite.providerIdFor(source) == 'bilibili' &&
             const {'detail', 'metadata', 'resolve'}.contains(action)
       ? ':playback'
       : '';
@@ -277,7 +277,9 @@ class SubscriptionRuntime {
         'source': source,
         if (action == 'creator' && package.credentialGroup == 'douyin')
           'videoSource':
-              ['douyin', 'douyin-theater']
+              (SourceSite.providerIdFor(source) != source
+                      ? ['douyin-test', 'douyin-theater-test']
+                      : ['douyin', 'douyin-theater'])
                   .where(
                     (id) =>
                         SourceSite.isAvailable(id) && access.allowsSource(id),
@@ -429,49 +431,34 @@ class SubscriptionRuntime {
       cookie = await const FlutterSecureStorage().read(key: key);
       if ((cookie == null || cookie.isEmpty) &&
           package.document['credentialRequired'] == true)
-        throw FormatException(
-          group == 'youtube'
-              ? '请在 YouTube 源设置中配置 Cookie'
-              : '请在站源管理中配置账号 Cookie',
-        );
+        throw const FormatException('请在站源管理中配置账号 Cookie');
     }
     if (command['sign'] == true) {
-      if (package.credentialGroup == 'youtube') {
-        if (cookie?.isNotEmpty != true ||
-            !package.credentialDomains.contains(uri.host)) {
-          throw const FormatException('YouTube 授权参数不可用');
-        }
-        requestHeaders['Authorization'] = _youtubeAuthorization(
-          cookie!,
-          uri.origin,
-        );
-      } else {
-        if (package.credentialGroup != 'douyin' ||
-            !Platform.isAndroid ||
-            !package.credentialDomains.contains(uri.host))
-          throw const FormatException('抖音签名目前仅支持 Android');
-        final token = (cookie ?? '')
-            .split(';')
-            .map((item) => item.trim())
-            .where((item) => item.startsWith('msToken='))
-            .firstOrNull;
-        final parameters = {
-          ...uri.queryParameters,
-          if (token != null) 'msToken': token.substring('msToken='.length),
-        };
-        uri = uri.replace(queryParameters: parameters);
-        final signature = await const MethodChannel('realdrama/douyin')
-            .invokeMethod<String>('sign', {
-              'query': uri.query,
-              'userAgent': (command['headers'] as Map?)?['User-Agent'] ?? '',
-            })
-            .timeout(const Duration(seconds: 6));
-        if (signature == null || signature.isEmpty)
-          throw const FormatException('抖音签名暂不可用');
-        uri = uri.replace(
-          query: '${uri.query}&a_bogus=${Uri.encodeComponent(signature)}',
-        );
-      }
+      if (package.credentialGroup != 'douyin' ||
+          !Platform.isAndroid ||
+          !package.credentialDomains.contains(uri.host))
+        throw const FormatException('抖音签名目前仅支持 Android');
+      final token = (cookie ?? '')
+          .split(';')
+          .map((item) => item.trim())
+          .where((item) => item.startsWith('msToken='))
+          .firstOrNull;
+      final parameters = {
+        ...uri.queryParameters,
+        if (token != null) 'msToken': token.substring('msToken='.length),
+      };
+      uri = uri.replace(queryParameters: parameters);
+      final signature = await const MethodChannel('realdrama/douyin')
+          .invokeMethod<String>('sign', {
+            'query': uri.query,
+            'userAgent': (command['headers'] as Map?)?['User-Agent'] ?? '',
+          })
+          .timeout(const Duration(seconds: 6));
+      if (signature == null || signature.isEmpty)
+        throw const FormatException('抖音签名暂不可用');
+      uri = uri.replace(
+        query: '${uri.query}&a_bogus=${Uri.encodeComponent(signature)}',
+      );
     }
     final body = command['body'];
     final read = {
@@ -568,7 +555,7 @@ class SubscriptionRuntime {
       if (DateTime.now().isAfter(deadline))
         throw const FormatException('抖音请求排队超时，请稍后重试');
       _douyinNextRequestAt[key] = DateTime.now().add(
-        const Duration(milliseconds: 850),
+        const Duration(milliseconds: 1200),
       );
       final response = await send();
       final status = response['status'];
@@ -997,19 +984,4 @@ class SubscriptionRuntime {
       }
     }
   }
-}
-
-String _youtubeAuthorization(String cookie, String origin) {
-  final sapisid = cookie
-      .split(';')
-      .map((item) => item.trim())
-      .where((item) => item.startsWith('SAPISID='))
-      .map((item) => item.substring('SAPISID='.length))
-      .firstOrNull;
-  if (sapisid == null || sapisid.isEmpty) {
-    throw const FormatException('YouTube Cookie 缺少 SAPISID 授权字段');
-  }
-  final timestamp = (DateTime.now().millisecondsSinceEpoch ~/ 1000).toString();
-  final digest = sha1.convert(utf8.encode('$timestamp $sapisid $origin'));
-  return 'SAPISIDHASH ${timestamp}_${digest.toString()}';
 }

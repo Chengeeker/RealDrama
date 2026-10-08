@@ -3,6 +3,29 @@ import 'package:flutter/services.dart';
 
 import 'app_haptics.dart';
 
+class _OverlayPageTransitionsBuilder extends PageTransitionsBuilder {
+  const _OverlayPageTransitionsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    if (MediaQuery.disableAnimationsOf(context)) return child;
+    final startX = Directionality.of(context) == TextDirection.ltr ? 1.0 : -1.0;
+    return SlideTransition(
+      position: Tween<Offset>(
+        begin: Offset(startX, 0),
+        end: Offset.zero,
+      ).animate(animation.drive(CurveTween(curve: Curves.easeOutCubic))),
+      child: child,
+    );
+  }
+}
+
 abstract final class AppSpacing {
   static const s = 8.0;
   static const m = 12.0;
@@ -122,6 +145,16 @@ abstract final class AppTheme {
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: _OverlayPageTransitionsBuilder(),
+          TargetPlatform.fuchsia: _OverlayPageTransitionsBuilder(),
+          TargetPlatform.iOS: _OverlayPageTransitionsBuilder(),
+          TargetPlatform.linux: _OverlayPageTransitionsBuilder(),
+          TargetPlatform.macOS: _OverlayPageTransitionsBuilder(),
+          TargetPlatform.windows: _OverlayPageTransitionsBuilder(),
+        },
+      ),
       splashFactory: const AppHapticSplashFactory(),
       textTheme: textTheme,
       scaffoldBackgroundColor: background,

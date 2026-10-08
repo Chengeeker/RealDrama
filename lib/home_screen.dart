@@ -59,7 +59,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   static const _recommendationCategory = 'app:recommendations';
   static const _compactDiscoveryToolbarHeight = 44.0;
   final _search = TextEditingController();
@@ -110,6 +111,14 @@ class _HomeScreenState extends State<HomeScreen> {
   late final LibraryUpdater _updater;
   final _changedSources = <String>{};
   final _selectedDramas = <String, Drama>{};
+  int _previousTab = 0;
+  double _tabTransitionDirection = 1;
+  bool _tabTransitioning = false;
+  late final AnimationController _tabTransitionController;
+  late final CurvedAnimation _tabTransitionCurve;
+  Animation<Offset> _feedTabTransition = const AlwaysStoppedAnimation(
+    Offset.zero,
+  );
   Timer? _cacheRefreshTimer;
   bool _refreshingUpdatedCache = false;
   bool _selectionMode = false;
@@ -613,6 +622,20 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    _tabTransitionController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+      value: 1,
+    );
+    _tabTransitionCurve = CurvedAnimation(
+      parent: _tabTransitionController,
+      curve: Curves.easeOutCubic,
+    );
+    _tabTransitionController.addStatusListener((status) {
+      if (status == AnimationStatus.completed && _tabTransitioning && mounted) {
+        setState(() => _tabTransitioning = false);
+      }
+    });
     _tab = switch (widget.store.startupDestination) {
       'discover' => 1,
       'following' => 2,
@@ -656,6 +679,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _search.dispose();
     _scroll.removeListener(_onCatalogScroll);
     _scroll.dispose();
+    _tabTransitionCurve.dispose();
+    _tabTransitionController.dispose();
     super.dispose();
   }
 
@@ -891,6 +916,38 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _changeTab(int tab) {
+    final fromTab = _tab;
+    final animate =
+        tab != fromTab &&
+        !AppLayout.isTelevision(context) &&
+        MediaQuery.sizeOf(context).width < 840 &&
+        !_selectionMode &&
+        !MediaQuery.disableAnimationsOf(context);
+    if (tab != fromTab) {
+      var direction = tab > fromTab ? 1.0 : -1.0;
+      if (Directionality.of(context) == TextDirection.rtl) direction *= -1;
+      final feedWasVisible =
+          fromTab == 0 || (_tabTransitioning && _previousTab == 0);
+      final feedOffset = feedWasVisible
+          ? _feedTabTransition.value
+          : Offset.zero;
+      _previousTab = fromTab;
+      _tabTransitionDirection = direction;
+      _tabTransitioning = animate;
+      if (animate && tab == 0) {
+        _feedTabTransition = Tween<Offset>(
+          begin: fromTab == 0 ? feedOffset : Offset(direction, 0),
+          end: Offset.zero,
+        ).animate(_tabTransitionCurve);
+      } else if (animate && fromTab == 0) {
+        _feedTabTransition = Tween<Offset>(
+          begin: feedOffset,
+          end: Offset(-direction, 0),
+        ).animate(_tabTransitionCurve);
+      } else {
+        _feedTabTransition = const AlwaysStoppedAnimation(Offset.zero);
+      }
+    }
     setState(() {
       _tab = tab;
       if (tab == 0) _feedMounted = true;
@@ -900,6 +957,14 @@ class _HomeScreenState extends State<HomeScreen> {
       _feedFullscreenMode = false;
       _feedBoostingMode = false;
     });
+    if (tab != fromTab) {
+      if (animate) {
+        _tabTransitionController.forward(from: 0);
+      } else {
+        _tabTransitionController.stop();
+        _tabTransitionController.value = 1;
+      }
+    }
     if (tab == 1) {
       if (_catalogSourcesDirty) {
         _catalogSourcesDirty = false;
@@ -927,6 +992,60 @@ class _HomeScreenState extends State<HomeScreen> {
         }
       }
     }
+  }
+
+  Widget _buildTabContent(
+    int tab, {
+    required bool compactNavigation,
+    required bool desktop,
+    required bool television,
+  }) {
+    if (tab == 1) {
+      if (widget.store.sources.isEmpty) {
+        return StatusPanel(
+          title: SourceSubscriptions.instance.installed.isEmpty
+              ? '尚未导入站源'
+              : '暂无已开启的站源',
+          message: '在站源管理中导入订阅并开启需要使用的来源。',
+          action: '站源管理',
+          onRetry: () => Navigator.push<void>(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => SourcesScreen(
+                repository: widget.repository,
+                store: widget.store,
+              ),
+            ),
+          ),
+        );
+      }
+      return _catalog(
+        selectionInBody: desktop || television,
+        bottomPadding: compactNavigation ? 72 : 16,
+        filtersInAppBar: compactNavigation && !_selectionMode,
+      );
+    }
+    if (tab == 3) {
+      return SettingsScreen(
+        repository: widget.repository,
+        store: widget.store,
+        embedded: true,
+        bottomNavPadding: compactNavigation ? 72 : 16,
+      );
+    }
+    return SavedLibrary(
+      key: ValueKey('saved-tab-$tab'),
+      repository: widget.repository,
+      store: widget.store,
+      history: false,
+      onOpen: _openDrama,
+      onContinue: (drama) => _openDrama(drama, resume: true),
+      bottomPadding: compactNavigation ? 72 : 16,
+      onDownload:
+          widget.repository.supportsDownloads && widget.store.canDownload
+          ? (drama) => _openDrama(drama, download: true)
+          : null,
+    );
   }
 
   Future<void> _loadInitialDiscovery() async {
@@ -1110,8 +1229,8 @@ class _HomeScreenState extends State<HomeScreen> {
     animation: widget.store.viewChanges,
     builder: (context, _) => LayoutBuilder(
       builder: (context, constraints) {
-        final feedActive =
-            _tab == 0 && (ModalRoute.of(context)?.isCurrent ?? true);
+        final routeIsCurrent = ModalRoute.of(context)?.isCurrent ?? true;
+        final feedActive = _tab == 0 && routeIsCurrent;
         final television = AppLayout.isTelevision(context);
         final desktop = constraints.maxWidth >= 840;
         final compactNavigation = !desktop && !television && !_selectionMode;
@@ -1123,6 +1242,89 @@ class _HomeScreenState extends State<HomeScreen> {
         final discoveryAppBarColor =
             Theme.of(context).appBarTheme.backgroundColor ??
             Theme.of(context).scaffoldBackgroundColor;
+        final tabTransitionDuration = MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 260);
+
+        Widget buildFeedLayer() {
+          final feedVisible =
+              routeIsCurrent &&
+              (_tab == 0 || (_tabTransitioning && _previousTab == 0));
+          return Positioned.fill(
+            child: Offstage(
+              offstage: !feedVisible,
+              child: TickerMode(
+                enabled: feedVisible,
+                child: SlideTransition(
+                  position: _feedTabTransition,
+                  child: ExcludeFocus(
+                    excluding: !feedActive,
+                    child: IgnorePointer(
+                      ignoring: !feedActive,
+                      child: ShortDramaFeedScreen(
+                        repository: widget.repository,
+                        store: widget.store,
+                        active: feedActive,
+                        onBack: () => _onNavSelected(1),
+                        onCleanModeChanged: _setFeedCleanMode,
+                        onFullscreenModeChanged: _setFeedFullscreenMode,
+                        onBoostingChanged: _setFeedBoostingMode,
+                        navigationInset: compactNavigation ? 56 : 16,
+                        initialBatchCursor: _feedBatchCursor,
+                        onBatchCursorChanged: (cursor) =>
+                            _feedBatchCursor = cursor,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        Widget buildAnimatedTabLayer() => AnimatedSwitcher(
+          duration: tabTransitionDuration,
+          reverseDuration: tabTransitionDuration,
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          layoutBuilder: (currentChild, previousChildren) => Stack(
+            fit: StackFit.expand,
+            children: [...previousChildren, ?currentChild],
+          ),
+          transitionBuilder: (child, animation) {
+            final incoming = child.key == ValueKey<int>(_tab);
+            final direction = incoming
+                ? _tabTransitionDirection
+                : -_tabTransitionDirection;
+            return SlideTransition(
+              position: Tween<Offset>(
+                begin: Offset(direction, 0),
+                end: Offset.zero,
+              ).animate(animation),
+              child: TickerMode(
+                enabled: incoming,
+                child: ExcludeFocus(
+                  excluding: !incoming,
+                  child: IgnorePointer(ignoring: !incoming, child: child),
+                ),
+              ),
+            );
+          },
+          child: _tab == 0
+              ? null
+              : KeyedSubtree(
+                  key: ValueKey<int>(_tab),
+                  child: ColoredBox(
+                    color: Theme.of(context).scaffoldBackgroundColor,
+                    child: _buildTabContent(
+                      _tab,
+                      compactNavigation: compactNavigation,
+                      desktop: desktop,
+                      television: television,
+                    ),
+                  ),
+                ),
+        );
         final scaffold = Scaffold(
           backgroundColor: _tab == 0 ? Colors.black : null,
           extendBody: compactNavigation && _tab != 0,
@@ -1403,80 +1605,22 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      if (_feedMounted)
-                        ExcludeFocus(
-                          excluding: !feedActive,
-                          child: Offstage(
-                            offstage: !feedActive,
-                            child: TickerMode(
-                              enabled: feedActive,
-                              child: ShortDramaFeedScreen(
-                                repository: widget.repository,
-                                store: widget.store,
-                                active: feedActive,
-                                onBack: () => _onNavSelected(1),
-                                onCleanModeChanged: _setFeedCleanMode,
-                                onFullscreenModeChanged: _setFeedFullscreenMode,
-                                onBoostingChanged: _setFeedBoostingMode,
-                                navigationInset: compactNavigation ? 56 : 16,
-                                initialBatchCursor: _feedBatchCursor,
-                                onBatchCursorChanged: (cursor) =>
-                                    _feedBatchCursor = cursor,
-                              ),
+                      if (_tab != 0 && _feedMounted) buildFeedLayer(),
+                      if (compactNavigation)
+                        buildAnimatedTabLayer()
+                      else if (_tab != 0)
+                        Positioned.fill(
+                          child: ColoredBox(
+                            color: Theme.of(context).scaffoldBackgroundColor,
+                            child: _buildTabContent(
+                              _tab,
+                              compactNavigation: compactNavigation,
+                              desktop: desktop,
+                              television: television,
                             ),
                           ),
                         ),
-                      if (_tab != 0)
-                        if (_tab == 1)
-                          widget.store.sources.isEmpty
-                              ? StatusPanel(
-                                  title:
-                                      SourceSubscriptions
-                                          .instance
-                                          .installed
-                                          .isEmpty
-                                      ? '尚未导入站源'
-                                      : '暂无已开启的站源',
-                                  message: '在站源管理中导入订阅并开启需要使用的来源。',
-                                  action: '站源管理',
-                                  onRetry: () => Navigator.push<void>(
-                                    context,
-                                    MaterialPageRoute<void>(
-                                      builder: (_) => SourcesScreen(
-                                        repository: widget.repository,
-                                        store: widget.store,
-                                      ),
-                                    ),
-                                  ),
-                                )
-                              : _catalog(
-                                  selectionInBody: desktop || television,
-                                  bottomPadding: compactNavigation ? 72 : 16,
-                                  filtersInAppBar: discoveryFrostedHeader,
-                                )
-                        else if (_tab == 3)
-                          SettingsScreen(
-                            repository: widget.repository,
-                            store: widget.store,
-                            embedded: true,
-                            bottomNavPadding: compactNavigation ? 72 : 16,
-                          )
-                        else
-                          SavedLibrary(
-                            key: ValueKey('saved-tab-$_tab'),
-                            repository: widget.repository,
-                            store: widget.store,
-                            history: false,
-                            onOpen: _openDrama,
-                            onContinue: (drama) =>
-                                _openDrama(drama, resume: true),
-                            bottomPadding: compactNavigation ? 72 : 16,
-                            onDownload:
-                                widget.repository.supportsDownloads &&
-                                    widget.store.canDownload
-                                ? (drama) => _openDrama(drama, download: true)
-                                : null,
-                          ),
+                      if (_tab == 0 && _feedMounted) buildFeedLayer(),
                     ],
                   ),
                 ),

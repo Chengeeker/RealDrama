@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui' show ImageFilter;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
@@ -1326,92 +1325,85 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     final drama = _currentDrama;
     final controls = _pageControls;
     return ColoredBox(
-      color: topBarColor.withValues(alpha: .82),
+      color: topBarColor,
       child: SizedBox(
         height: MediaQuery.viewPaddingOf(context).top + 56,
-        child: ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: colors.outlineVariant.withValues(alpha: .24),
-                    width: .5,
-                  ),
-                ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              bottom: BorderSide(
+                color: colors.outlineVariant.withValues(alpha: .24),
+                width: .5,
               ),
-              child: Padding(
-                padding: EdgeInsets.only(
-                  top: MediaQuery.viewPaddingOf(context).top,
-                ),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: feedMaxWidth),
-                    child: SizedBox(
-                      height: 56,
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 16, right: 8),
-                        child: Row(
-                          children: [
-                            Text(
-                              '推荐',
-                              style: TextStyle(
-                                color: colors.onSurface,
-                                fontSize: 17,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const Spacer(),
-                            if (drama != null &&
-                                SourceSite.libraryKindFor(drama.source) ==
-                                    'drama')
-                              if (controls != null &&
-                                  controls.identity == _identity(drama) &&
-                                  controls.episodeNumbers.isNotEmpty)
-                                ValueListenableBuilder<int>(
-                                  valueListenable: controls.episodes,
-                                  builder: (context, index, _) => IconButton(
-                                    tooltip:
-                                        '选集 · 第 ${controls.episodeNumbers[index.clamp(0, controls.episodeNumbers.length - 1).toInt()]} 集',
-                                    onPressed: controls.onSelectEpisodes,
-                                    color: colors.onSurface,
-                                    icon: const Icon(Icons.grid_view_rounded),
-                                  ),
-                                )
-                              else
-                                IconButton(
-                                  tooltip: '选集',
-                                  onPressed: null,
-                                  icon: const Icon(Icons.grid_view_rounded),
-                                ),
-                            if (_currentSupportsDanmaku) _danmakuButton(),
-                            IconButton(
-                              tooltip: '刷新推荐',
-                              onPressed: _refresh,
-                              color: colors.onSurface,
-                              icon: const Icon(Icons.refresh_rounded),
-                            ),
-                            IconButton(
-                              tooltip: _fullscreenMode ? '退出全屏' : '全屏播放',
-                              onPressed: () =>
-                                  _setFullscreenMode(!_fullscreenMode),
-                              color: colors.onSurface,
-                              icon: Icon(
-                                _fullscreenMode
-                                    ? Icons.fullscreen_exit_rounded
-                                    : Icons.fullscreen_rounded,
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: '清屏',
-                              onPressed: () => _setCleanScreen(true),
-                              color: colors.onSurface,
-                              icon: const Icon(Icons.visibility_off_rounded),
-                            ),
-                          ],
+            ),
+          ),
+          child: Padding(
+            padding: EdgeInsets.only(
+              top: MediaQuery.viewPaddingOf(context).top,
+            ),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: feedMaxWidth),
+                child: SizedBox(
+                  height: 56,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 16, right: 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          '推荐',
+                          style: TextStyle(
+                            color: colors.onSurface,
+                            fontSize: 17,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
-                      ),
+                        const Spacer(),
+                        if (drama != null &&
+                            SourceSite.libraryKindFor(drama.source) == 'drama')
+                          if (controls != null &&
+                              controls.identity == _identity(drama) &&
+                              controls.episodeNumbers.isNotEmpty)
+                            ValueListenableBuilder<int>(
+                              valueListenable: controls.episodes,
+                              builder: (context, index, _) => IconButton(
+                                tooltip:
+                                    '选集 · 第 ${controls.episodeNumbers[index.clamp(0, controls.episodeNumbers.length - 1).toInt()]} 集',
+                                onPressed: controls.onSelectEpisodes,
+                                color: colors.onSurface,
+                                icon: const Icon(Icons.grid_view_rounded),
+                              ),
+                            )
+                          else
+                            IconButton(
+                              tooltip: '选集',
+                              onPressed: null,
+                              icon: const Icon(Icons.grid_view_rounded),
+                            ),
+                        if (_currentSupportsDanmaku) _danmakuButton(),
+                        IconButton(
+                          tooltip: '刷新推荐',
+                          onPressed: _refresh,
+                          color: colors.onSurface,
+                          icon: const Icon(Icons.refresh_rounded),
+                        ),
+                        IconButton(
+                          tooltip: _fullscreenMode ? '退出全屏' : '全屏播放',
+                          onPressed: () => _setFullscreenMode(!_fullscreenMode),
+                          color: colors.onSurface,
+                          icon: Icon(
+                            _fullscreenMode
+                                ? Icons.fullscreen_exit_rounded
+                                : Icons.fullscreen_rounded,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '清屏',
+                          onPressed: () => _setCleanScreen(true),
+                          color: colors.onSurface,
+                          icon: const Icon(Icons.visibility_off_rounded),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -1847,6 +1839,7 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
             if (detail != null && detail.episodes.isNotEmpty) {
               _restoreProgress(detail);
               if (!widget.active &&
+                  !_commentsOpen &&
                   (SourceSite.byId(widget.drama.source).isDouyin ||
                       !_playerCreated)) {
                 return _poster(
@@ -2068,11 +2061,15 @@ class _ShortDramaPageState extends State<_ShortDramaPage>
 
   Future<void> _openComments(Drama drama) async {
     if (_commentsOpen) return;
-    _commentsOpen = true;
+    setState(() => _commentsOpen = true);
     try {
       await showDouyinComments(context, widget.repository, drama);
     } finally {
-      _commentsOpen = false;
+      if (mounted) {
+        setState(() => _commentsOpen = false);
+      } else {
+        _commentsOpen = false;
+      }
     }
   }
 

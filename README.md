@@ -11,8 +11,8 @@ RealDrama 是一个 Flutter 视频客户端，源码仓库为 [Chengeeker/RealDr
 | 应用名称 | RealDrama |
 | Android 包名 | `com.real.drama` |
 | 应用图标 | 由 `assets/icon12-source.png` 统一生成应用内、Android、iOS、Windows 与电视横幅资源 |
-| 当前源码版本 | `1.0.0+2219` |
-| 最新 Android 安装包 | `RealDrama-1.0.0+2219-arm64-v8a.apk` |
+| 当前源码版本 | `1.1.3+2223` |
+| 最新已核验 Android 安装包 | `RealDrama-1.1.3+2223-arm64-v8a.apk` |
 | Android ABI | `arm64-v8a` |
 | 主要技术 | Flutter、Dart、Go 原生核心、MediaKit / libmpv |
 
@@ -212,3 +212,11 @@ ARM64 Release APK 已构建于项目根目录，包名与版本信息、V2 签�
 
 
 源码 `1.0.0+2219` 更新应用版本名和构建号，并精简一级及二级设置页中重复的功能解释，保留当前计数、选择状态与错误信息。ARM64 Release APK `RealDrama-1.0.0+2219-arm64-v8a.apk` 为 34,637,277 字节；包名 `com.real.drama`、versionName `1.0.0`、versionCode `4219`。V2 签名与指定 BKS 一致，必需 ARM64 原生库和 16 KiB ZIP 对齐检查通过；根目录只保留此 APK。未连接设备，未进行真机 UI 验收。
+
+源码 `1.1.0+2220` 将普通页面路由改为新页横向滑入并覆盖旧页；手机底栏页签使用双向横向平移，保留首页播放器实例。桌面与电视导航保持即时切换，系统减少动态效果时关闭动画。ARM64 Release APK `RealDrama-1.1.0+2220-arm64-v8a.apk` 为 34,651,193 字节；包名 `com.real.drama`、versionName `1.1.0`、versionCode `4220`，V2 签名与上一版回退包一致，16 KiB ZIP 对齐检查通过。未连接设备，未做转场视觉验收。
+
+源码 `1.1.1+2221` 修复首页评论弹层关闭后抖音播放器被重建并自动播放的问题。ARM64 Release APK 为 34,651,033 字节；包名 `com.real.drama`、versionName `1.1.1`、versionCode `4221`，V2 签名、必要原生库和 16 KiB 对齐检查通过。该版随后采用的顶栏叠放方式改变了视频视口，已在 `1.1.2+2222` 回退；评论暂停修复保留，动态磨砂仍需另找不改变视口的实现。
+
+源码 `1.1.2+2222` 恢复首页原视频视口尺寸并保留评论暂停修复；首页推荐顶栏动态磨砂仍待用不改变视口的方案实现。ARM64 Release APK `RealDrama-1.1.2+2222-arm64-v8a.apk` 为 34,654,317 字节；包名 `com.real.drama`、versionName `1.1.2`、versionCode `4222`。V2 签名与 BKS 及上一版一致，必要 ARM64 原生库和 16 KiB 对齐检查通过；上一版保存在 `build/rollback`。未连接设备，未做真机视觉验收。
+
+源码 `1.1.3+2223` 将首页推荐顶栏改为不透明的主题色普通顶栏，移除背景模糊；保留顶栏尺寸、按钮和分隔线，不改变首页视频视口。ARM64 Release APK `RealDrama-1.1.3+2223-arm64-v8a.apk` 为 34,654,093 字节；包名 `com.real.drama`、versionName `1.1.3`、versionCode `4223`。V2 签名与回退包证书一致，17 个 ARM64 原生库齐全，16 KiB ZIP 对齐检查通过；`1.1.2+2222` 回退包保存在 `build/rollback`。Windows 临时签名配置中的 `storeFile` 使用正斜杠，避免 Java properties 将反斜杠解释为转义。签名临时文件已清理；未连接设备，未做真机视觉验收。

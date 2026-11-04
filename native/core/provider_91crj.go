@@ -12,9 +12,9 @@ import (
 	"strings"
 )
 
-// 91CRDJ（91crdj.com）原生站源：成人短剧 / 漫剧 / 真人剧 / 视频，MacCMS 风格 HTML。
+// 91CRDJ（91crdjai.com）原生站源：成人短剧 / 漫剧 / 真人剧 / 视频，MacCMS 风格 HTML。
 //
-// 上游页面（实测 2026-09）：
+// 上游页面（91crdjai.com，实测 2026-10）：
 //   GET /                      首页
 //   GET /{cat}/                分类第 1 页（duanju / manju / zhenrenju / shipin）
 //   GET /{cat}/page/{n}/       分类翻页
@@ -26,7 +26,7 @@ import (
 // 站点经 Cloudflare；列表卡片 <a class="card" href data-track-item-name>，封面为带签名直链。
 
 const (
-	crjSiteBaseURL = "https://91crdj.com"
+	crjSiteBaseURL = "https://91crdjai.com"
 	crjUserAgent   = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
 )
 
@@ -95,6 +95,9 @@ func crjFixURL(raw string) string {
 	} else if strings.HasPrefix(raw, "/") {
 		raw = crjSiteBaseURL + raw
 	}
+	if canonical := crjCanonicalURL(raw); canonical != "" {
+		raw = canonical
+	}
 	parsed, err := url.Parse(raw)
 	if err != nil || !validNativeCoverURL(parsed) {
 		return ""
@@ -118,9 +121,14 @@ func (d *Downloader) fetchCrjCategories() []nativeCategory {
 }
 
 func (d *Downloader) crjGet(ctx context.Context, path string) (string, error) {
-	site := d.providerBaseURL(source91crj)
+	site := crjSiteBaseURL
 	address := path
-	if !strings.HasPrefix(address, "http") {
+	if strings.HasPrefix(strings.ToLower(address), "http://") || strings.HasPrefix(strings.ToLower(address), "https://") {
+		address = crjCanonicalURL(address)
+		if address == "" {
+			return "", errors.New("91CRDJ 请求地址无效")
+		}
+	} else {
 		address = site + path
 	}
 	pageContext := context.WithValue(ctx, providerTextUserAgentKey{}, crjUserAgent)
@@ -181,21 +189,33 @@ func crjDetailURL(href string) string {
 	if href == "" {
 		return ""
 	}
-	if !strings.HasPrefix(href, "http") {
+	if !strings.HasPrefix(strings.ToLower(href), "http://") && !strings.HasPrefix(strings.ToLower(href), "https://") {
 		href = crjSiteBaseURL + "/" + strings.TrimPrefix(href, "/")
 	}
+	href = crjCanonicalURL(href)
 	parsed, err := url.Parse(href)
-	if err != nil || parsed.User != nil {
-		return ""
-	}
-	host := strings.ToLower(parsed.Hostname())
-	if host != "91crdj.com" && host != "www.91crdj.com" {
+	if href == "" || err != nil {
 		return ""
 	}
 	if !strings.HasSuffix(parsed.Path, "/") {
 		parsed.Path += "/"
 	}
 	return parsed.String()
+}
+
+func crjCanonicalURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return ""
+	}
+	switch strings.ToLower(parsed.Hostname()) {
+	case "91crdj.com", "www.91crdj.com", "91crdjai.com", "www.91crdjai.com":
+		parsed.Scheme = "https"
+		parsed.Host = "91crdjai.com"
+		return parsed.String()
+	default:
+		return ""
+	}
 }
 
 // crjSourceID 从详情 URL 提取稳定 ID（"{cat}/{num}-{slug}"）。
@@ -390,7 +410,8 @@ func (d *Downloader) resolveCrjMedia(ctx context.Context, task Task) (providerMe
 	if pageURL == "" {
 		pageURL = task.Chapter.PageURL
 	}
-	if crjDetailURL(pageURL) == "" {
+	pageURL = crjDetailURL(pageURL)
+	if pageURL == "" {
 		return providerMedia{}, errors.New("91CRDJ 播放页地址无效")
 	}
 	// 优先调用 playback JSON 接口，失败回退解析播放页内嵌 JSON。

@@ -184,6 +184,8 @@ class SubscriptionRuntime {
   String _identity(String source) => '${store()?.profile.id}:$source';
   String _lane(String source, String action) => action == 'danmaku'
       ? ':danmaku'
+      : action == 'creator'
+      ? ':creator'
       : SourceSite.providerIdFor(source) == 'bilibili' &&
             const {'detail', 'metadata', 'resolve'}.contains(action)
       ? ':playback'
@@ -200,7 +202,57 @@ class SubscriptionRuntime {
       throw const FormatException('站源已关闭、更新或用户已切换');
   }
 
+  final _creatorRequests = <String, (DateTime, Future<Map<String, dynamic>>)>{};
+
   Future<Map<String, dynamic>> execute(
+    String source,
+    String action,
+    Map<String, dynamic> payload, {
+    bool configure = false,
+  }) {
+    if (action != 'creator' ||
+        configure ||
+        SourceSubscriptions.instance.package(source)?.credentialGroup !=
+            'douyin') {
+      return _enqueue(source, action, payload, configure: configure);
+    }
+    _watch();
+    final package = SourceSubscriptions.instance.package(source);
+    if (package == null) {
+      return Future.error(const FormatException('请先导入此站源的订阅包'));
+    }
+    _authorize(source, store()?.profileEpoch, package.digest);
+    final now = DateTime.now();
+    _creatorRequests.removeWhere((_, value) => value.$1.isBefore(now));
+    final drama = payload['drama'] as Map? ?? const {};
+    final creator = drama['creatorSecUid']?.toString() ?? '';
+    final identityPayload = creator.isEmpty
+        ? payload
+        : {'creator': creator, 'cursor': payload['cursor']};
+    final scope = _identity(source);
+    final key =
+        '$scope:${store()?.profileEpoch}:${_generation[scope]}:${_actionGeneration['$scope:creator']}:${package.digest}:${jsonEncode(identityPayload)}';
+    final cached = _creatorRequests[key];
+    if (cached != null) return cached.$2;
+    if (_creatorRequests.length >= 32) {
+      _creatorRequests.remove(_creatorRequests.keys.first);
+    }
+    final request = _enqueue(source, action, payload);
+    _creatorRequests[key] = (now.add(const Duration(minutes: 2)), request);
+    unawaited(
+      request.then<void>(
+        (_) {},
+        onError: (Object error, StackTrace stack) {
+          if (identical(_creatorRequests[key]?.$2, request)) {
+            _creatorRequests.remove(key);
+          }
+        },
+      ),
+    );
+    return request;
+  }
+
+  Future<Map<String, dynamic>> _enqueue(
     String source,
     String action,
     Map<String, dynamic> payload, {
@@ -285,11 +337,15 @@ class SubscriptionRuntime {
                         SourceSite.isAvailable(id) && access.allowsSource(id),
                   )
                   .firstOrNull ??
-              '',
+              (SourceSite.providerIdFor(source) != source
+                  ? 'douyin-test'
+                  : 'douyin'),
       },
       'state': _states[stateKey] ?? <String, dynamic>{},
     };
-    final deadline = DateTime.now().add(const Duration(seconds: 30));
+    final deadline = DateTime.now().add(
+      Duration(seconds: package.credentialGroup == 'douyin' ? 120 : 30),
+    );
     try {
       for (var step = 0; step < 16; step++) {
         if (DateTime.now().isAfter(deadline) ||
@@ -313,6 +369,9 @@ class SubscriptionRuntime {
             if (status == 401 || status == 403) {
               _states[stateKey]?.remove('token');
               _states[stateKey]?.remove('wbi');
+            }
+            if (status == 403 && package.credentialGroup == 'douyin') {
+              throw const FormatException('抖音风控拦截（HTTP 403）：请在代理软件中将 douyin.com 设为直连（规则模式），并更新包含 UIFID 的完整 Cookie');
             }
             throw FormatException('站源请求失败（HTTP $status），请检查网络或更新站源');
           }
@@ -407,6 +466,35 @@ class SubscriptionRuntime {
     String profile,
     DateTime deadline,
   ) async {
+    if (package.credentialGroup == 'douyin' &&
+        const {
+          'catalog',
+          'categories',
+          'search',
+          'detail',
+          'resolve',
+          'live',
+          'creator',
+          'comments',
+          'danmaku',
+        }.contains(_activeActions[id])) {
+      return _pacedDouyinRequest(
+        '$profile:douyin',
+        id,
+        deadline,
+        () => _sendHttp(package, command, id, profile, deadline),
+      );
+    }
+    return _sendHttp(package, command, id, profile, deadline);
+  }
+
+  Future<Map<String, dynamic>> _sendHttp(
+    SourcePackage package,
+    Map<String, dynamic> command,
+    String id,
+    String profile,
+    DateTime deadline,
+  ) async {
     var uri = Uri.parse(command['url'] as String);
     if (uri.scheme != 'https' ||
         uri.userInfo.isNotEmpty ||
@@ -432,8 +520,14 @@ class SubscriptionRuntime {
       if ((cookie == null || cookie.isEmpty) &&
           package.document['credentialRequired'] == true)
         throw const FormatException('请在站源管理中配置账号 Cookie');
+      if (package.credentialGroup == 'douyin' && cookie != null && cookie.isNotEmpty) {
+        final match = RegExp(r'(?:^|;\s*)(?:uifid|uifid_temp)=([^;]+)', caseSensitive: false).firstMatch(cookie);
+        if (match != null && !requestHeaders.containsKey('uifid')) {
+          requestHeaders['uifid'] = match.group(1)!.trim();
+        }
+      }
     }
-    if (command['sign'] == true) {
+    if (command['sign'] == true && !uri.queryParameters.containsKey('a_bogus')) {
       if (package.credentialGroup != 'douyin' ||
           !Platform.isAndroid ||
           !package.credentialDomains.contains(uri.host))
@@ -485,7 +579,11 @@ class SubscriptionRuntime {
         'domains': package.domains,
         'credentialDomains': package.credentialDomains,
         'cookie': cookie ?? '',
-        'browser': package.document['browser'] == true,
+        'browser':
+            package.document['browser'] == true &&
+            (cookie == null ||
+                cookie.isEmpty ||
+                package.browserCredentialDomains.contains(uri.host)),
         'background':
             _activeActions[id] == 'catalog' &&
             _jobs[_identity(package.id)]?['running'] == true,
@@ -506,20 +604,6 @@ class SubscriptionRuntime {
       return Map<String, dynamic>.from(envelope['data'] as Map);
     }
 
-    if (package.credentialGroup == 'douyin' &&
-        const {
-          'catalog',
-          'categories',
-          'search',
-          'detail',
-          'resolve',
-          'live',
-          'creator',
-          'comments',
-          'danmaku',
-        }.contains(_activeActions[id])) {
-      return _pacedDouyinRequest('$profile:douyin', id, deadline, send);
-    }
     return send();
   }
 
@@ -535,60 +619,82 @@ class SubscriptionRuntime {
     _douyinRequestTails[key] = tail;
     try {
       await previous;
-      if (_cancelledRequests.contains(requestId))
-        throw const FormatException('请求已取消');
-      final now = DateTime.now();
-      final cooldown = _douyinCooldownUntil[key];
-      if (cooldown != null && cooldown.isAfter(now)) {
-        throw const FormatException('抖音接口请求较频繁，请稍后再试');
-      }
-      if (cooldown != null) _douyinCooldownUntil.remove(key);
-      final nextRequestAt = _douyinNextRequestAt[key];
-      if (nextRequestAt != null && nextRequestAt.isAfter(now)) {
-        final delay = nextRequestAt.difference(now);
-        if (now.add(delay).isAfter(deadline))
-          throw const FormatException('抖音请求排队超时，请稍后重试');
-        await Future<void>.delayed(delay);
-      }
-      if (_cancelledRequests.contains(requestId))
-        throw const FormatException('请求已取消');
-      if (DateTime.now().isAfter(deadline))
-        throw const FormatException('抖音请求排队超时，请稍后重试');
-      _douyinNextRequestAt[key] = DateTime.now().add(
-        const Duration(milliseconds: 1200),
-      );
-      final response = await send();
-      final status = response['status'];
-      final statusCode = status is num
-          ? status.toInt()
-          : int.tryParse('$status') ?? 0;
-      if (statusCode == 403 || statusCode == 418 || statusCode == 429) {
-        final retryAfter = response['retryAfter'] as String?;
-        final retrySeconds = int.tryParse(retryAfter ?? '');
-        var cooldown = retrySeconds != null && retrySeconds > 0
-            ? Duration(seconds: retrySeconds.clamp(1, 1800).toInt())
-            : const Duration(minutes: 1);
-        if (retrySeconds == null && retryAfter != null) {
-          try {
-            final remaining = HttpDate.parse(
-              retryAfter,
-            ).difference(DateTime.now());
-            if (!remaining.isNegative && remaining > Duration.zero) {
-              cooldown = remaining > const Duration(minutes: 30)
-                  ? const Duration(minutes: 30)
-                  : remaining;
-            }
-          } catch (_) {}
+      for (var attempt = 0; attempt < 2; attempt++) {
+        if (_cancelledRequests.contains(requestId))
+          throw const FormatException('请求已取消');
+        final now = DateTime.now();
+        final cooldown = _douyinCooldownUntil[key];
+        if (cooldown != null && cooldown.isAfter(deadline)) {
+          throw FormatException(
+            '抖音接口已限流（HTTP 429），已暂停约 ${cooldown.difference(now).inSeconds + 1} 秒，请稍后重试',
+          );
         }
-        final pauseUntil = DateTime.now().add(cooldown);
-        _douyinCooldownUntil[key] = pauseUntil;
-        _douyinNextRequestAt[key] = pauseUntil;
-        final seconds = cooldown.inSeconds;
-        throw FormatException(
-          '抖音接口拒绝或限制了请求（HTTP $statusCode），已暂停约 $seconds 秒，请稍后手动重试',
+        final nextRequestAt = _douyinNextRequestAt[key];
+        if (nextRequestAt != null && nextRequestAt.isAfter(now)) {
+          final delay = nextRequestAt.difference(now);
+          if (now.add(delay).isAfter(deadline))
+            throw const FormatException('抖音请求排队超时，请稍后重试');
+          while (DateTime.now().isBefore(nextRequestAt)) {
+            if (_cancelledRequests.contains(requestId)) {
+              throw const FormatException('请求已取消');
+            }
+            final remaining = nextRequestAt.difference(DateTime.now());
+            if (remaining <= Duration.zero) break;
+            await Future<void>.delayed(
+              remaining > const Duration(seconds: 1)
+                  ? const Duration(seconds: 1)
+                  : remaining,
+            );
+          }
+        }
+        if (_cancelledRequests.contains(requestId))
+          throw const FormatException('请求已取消');
+        if (DateTime.now().isAfter(deadline))
+          throw const FormatException('抖音请求排队超时，请稍后重试');
+        final response = await send();
+        _douyinNextRequestAt[key] = DateTime.now().add(
+          const Duration(milliseconds: 1000),
         );
+        final status = response['status'];
+        final statusCode = status is num
+            ? status.toInt()
+            : int.tryParse('$status') ?? 0;
+        if (statusCode == 403 || statusCode == 418 || statusCode == 429) {
+          AppDiagnostics.record('douyin_http_rejection', {
+            'operation': _activeActions[requestId],
+            'httpStatus': statusCode,
+          });
+        }
+        if (statusCode == 429) {
+          final retryAfter = response['retryAfter'] as String?;
+          final retrySeconds = int.tryParse(retryAfter ?? '');
+          var cooldown = retrySeconds != null && retrySeconds > 0
+              ? Duration(seconds: retrySeconds.clamp(1, 1800).toInt())
+              : const Duration(seconds: 15);
+          if (retrySeconds == null && retryAfter != null) {
+            try {
+              final remaining = HttpDate.parse(
+                retryAfter,
+              ).difference(DateTime.now());
+              if (!remaining.isNegative && remaining > Duration.zero) {
+                cooldown = remaining > const Duration(minutes: 30)
+                    ? const Duration(minutes: 30)
+                    : remaining;
+              }
+            } catch (_) {}
+          }
+          final pauseUntil = DateTime.now().add(cooldown);
+          _douyinCooldownUntil[key] = pauseUntil;
+          _douyinNextRequestAt[key] = pauseUntil;
+          if (attempt == 0 && pauseUntil.isBefore(deadline)) continue;
+          final seconds = cooldown.inSeconds;
+          throw FormatException(
+            '抖音接口已限流（HTTP $statusCode），已暂停约 $seconds 秒，请稍后重试',
+          );
+        }
+        return response;
       }
-      return response;
+      throw const FormatException('抖音请求未完成，请稍后重试');
     } finally {
       release.complete();
       if (identical(_douyinRequestTails[key], tail)) {

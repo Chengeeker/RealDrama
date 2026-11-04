@@ -1,6 +1,7 @@
 import 'douyin_settings_screen.dart';
 import 'douyin_source.dart';
 import 'bilibili_settings_screen.dart';
+import 'hanime_settings_screen.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -313,6 +314,17 @@ class _SourcesScreenState extends State<SourcesScreen> {
           unawaited(_refreshSource(source));
         }
       }
+    }
+  }
+
+  Future<void> _configureHanime(SourceSite source) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => HanimeSettingsScreen(store: widget.store),
+      ),
+    );
+    if (mounted && widget.store.allowsSource(source.id)) {
+      unawaited(_refreshSource(source));
     }
   }
 
@@ -962,6 +974,13 @@ class _SourcesScreenState extends State<SourcesScreen> {
               runSpacing: 8,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
+                if (source.id == 'hanime')
+                  OutlinedButton.icon(
+                    key: const ValueKey('credentials-hanime'),
+                    onPressed: enabled ? () => _configureHanime(source) : null,
+                    icon: const Icon(Icons.manage_accounts_outlined),
+                    label: const Text('Cookie 设置'),
+                  ),
                 IconButton.filledTonal(
                   key: ValueKey('update-${source.id}'),
                   tooltip: '更新',

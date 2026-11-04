@@ -45,7 +45,7 @@ func (d *Downloader) providerBaseURL(source string) string {
 	case sourceHanxiaoquan:
 		configured, fallback = d.cfg.HanxiaoquanURL, hanxiaoquanSiteBaseURL
 	case source91crj:
-		configured, fallback = d.cfg.Crj91URL, crjSiteBaseURL
+		fallback = crjSiteBaseURL
 	case sourceStripchat:
 		configured, fallback = d.cfg.StripchatURL, scHosts[0]
 	default:
@@ -77,7 +77,7 @@ func providerSourceForURL(raw string) string {
 		return sourceGuipian
 	case host == "jennyhow.com" || host == "www.jennyhow.com":
 		return sourceHanxiaoquan
-	case host == "91crdj.com" || host == "www.91crdj.com":
+	case host == "91crdj.com" || host == "www.91crdj.com" || host == "91crdjai.com" || host == "www.91crdjai.com":
 		return source91crj
 	case strings.Contains(host, "stripchat") || strings.Contains(host, "stripol"):
 		return sourceStripchat

@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/md5"
 	"crypto/rand"
+	"duanjuapp/native/internal/cryptoutil"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
@@ -118,7 +119,7 @@ func hongguoCommentArgus(query string, timestamp uint32, nonce hongguoCommentNon
 	varint(9, 135135744)
 	bytesField(10, make([]byte, 8))
 	varint(12, uint64(timestamp)*2)
-	bodyHash, queryHash := hongguoSM3(make([]byte, 16)), hongguoSM3([]byte(query))
+	bodyHash, queryHash := cryptoutil.SM3(make([]byte, 16)), cryptoutil.SM3([]byte(query))
 	bytesField(13, bodyHash[:6])
 	bytesField(14, queryHash[:6])
 	nested := []byte{8, 2 + (nonce[10]%49)*2}
@@ -131,7 +132,7 @@ func hongguoCommentArgus(query string, timestamp uint32, nonce hongguoCommentNon
 	varint(21, 738)
 	data := hongguoCommentPad(message)
 	seed := append(append(append([]byte(nil), key...), 0x3c, 0xcc, 0x56, 0x7b), key...)
-	derived := hongguoSM3(seed)
+	derived := cryptoutil.SM3(seed)
 	var rounds [72]uint64
 	for i := 0; i < 4; i++ {
 		rounds[i] = binary.LittleEndian.Uint64(derived[i*8:])
@@ -163,44 +164,4 @@ func hongguoCommentArgus(query string, timestamp uint32, nonce hongguoCommentNon
 	block, _ := aes.NewCipher(aesKey[:])
 	cipher.NewCBCEncrypter(block, iv[:]).CryptBlocks(container, container)
 	return base64.StdEncoding.EncodeToString(append([]byte{0x3c, 0xcc}, container...))
-}
-
-func hongguoSM3(input []byte) [32]byte {
-	length := uint64(len(input)) * 8
-	data := append(append([]byte(nil), input...), 0x80)
-	for len(data)%64 != 56 {
-		data = append(data, 0)
-	}
-	data = binary.BigEndian.AppendUint64(data, length)
-	state := [8]uint32{0x7380166f, 0x4914b2b9, 0x172442d7, 0xda8a0600, 0xa96f30bc, 0x163138aa, 0xe38dee4d, 0xb0fb0e4e}
-	for offset := 0; offset < len(data); offset += 64 {
-		var words [68]uint32
-		for i := 0; i < 16; i++ {
-			words[i] = binary.BigEndian.Uint32(data[offset+i*4:])
-		}
-		for i := 16; i < len(words); i++ {
-			v := words[i-16] ^ words[i-9] ^ bits.RotateLeft32(words[i-3], 15)
-			words[i] = v ^ bits.RotateLeft32(v, 15) ^ bits.RotateLeft32(v, 23) ^ bits.RotateLeft32(words[i-13], 7) ^ words[i-6]
-		}
-		a, b, c, d, e, f, g, h := state[0], state[1], state[2], state[3], state[4], state[5], state[6], state[7]
-		for i := 0; i < 64; i++ {
-			t, ff, gg := uint32(0x79cc4519), a^b^c, e^f^g
-			if i >= 16 {
-				t, ff, gg = 0x7a879d8a, (a&b)|(a&c)|(b&c), (e&f)|(^e&g)
-			}
-			ss1 := bits.RotateLeft32(bits.RotateLeft32(a, 12)+e+bits.RotateLeft32(t, i), 7)
-			tt1 := ff + d + (ss1 ^ bits.RotateLeft32(a, 12)) + (words[i] ^ words[i+4])
-			tt2 := gg + h + ss1 + words[i]
-			a, b, c, d = tt1, a, bits.RotateLeft32(b, 9), c
-			e, f, g, h = tt2^bits.RotateLeft32(tt2, 9)^bits.RotateLeft32(tt2, 17), e, bits.RotateLeft32(f, 19), g
-		}
-		for i, value := range [8]uint32{a, b, c, d, e, f, g, h} {
-			state[i] ^= value
-		}
-	}
-	var result [32]byte
-	for i, value := range state {
-		binary.BigEndian.PutUint32(result[i*4:], value)
-	}
-	return result
 }

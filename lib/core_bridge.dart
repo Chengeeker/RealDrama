@@ -944,15 +944,19 @@ class NativeRepository extends AppRepository {
     _authorize(drama.source);
     if (drama.cover.isEmpty) throw AppFailure('海报暂不可用');
     if (drama.source == 'crj91') {
-      final address = Uri.parse(
-        'https://91crdj.com/',
+      var address = Uri.parse(
+        'https://91crdjai.com/',
       ).resolve(drama.cover.replaceAll('&amp;', '&'));
-      final input = {
-        ...drama.toJson(),
-        'cover': address.scheme == 'http'
-            ? address.replace(scheme: 'https').toString()
-            : address.toString(),
-      };
+      if (const {
+        '91crdj.com',
+        'www.91crdj.com',
+        'www.91crdjai.com',
+      }.contains(address.host.toLowerCase())) {
+        address = address.replace(scheme: 'https', host: '91crdjai.com');
+      } else if (address.scheme == 'http') {
+        address = address.replace(scheme: 'https');
+      }
+      final input = {...drama.toJson(), 'cover': address.toString()};
       final prepared = await _call({
         'action': 'subscriptionCover',
         'drama': input,

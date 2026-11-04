@@ -17,6 +17,7 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private var deviceChannel: MethodChannel? = null
+    private var hanimeChannel: MethodChannel? = null
     private var televisionMode = false
     private var originalScreenBrightness: Float? = null
 
@@ -87,6 +88,14 @@ class MainActivity : FlutterActivity() {
                 DouyinSigner(this).sign(call.argument<String>("query") ?: "", call.argument<String>("userAgent") ?: "", result)
             } else result.notImplemented()
         }
+
+        hanimeChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "realdrama/hanime")
+            .also { channel ->
+                channel.setMethodCallHandler { call, result ->
+                    if (call.method == "verifyCloudflare") HanimeCloudflareVerifier(this).open(result)
+                    else result.notImplemented()
+                }
+            }
 
         deviceChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "duanju/device")
             .also { channel ->
@@ -168,6 +177,8 @@ class MainActivity : FlutterActivity() {
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         deviceChannel?.setMethodCallHandler(null)
         deviceChannel = null
+        hanimeChannel?.setMethodCallHandler(null)
+        hanimeChannel = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

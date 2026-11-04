@@ -108,6 +108,9 @@ func (transport *huangguoBrowserTransport) client(request *http.Request) (browse
 		proxyURL = proxy.String()
 	}
 	key := request.URL.Scheme + "://" + strings.ToLower(request.URL.Host) + "|" + proxyURL
+	if request.Context().Value(subscriptionBrowserKey{}) == true {
+		key += "|" + subscriptionBrowserSource(request.Context(), "subscription")
+	}
 	if client := transport.clients[key]; client != nil {
 		return client, nil
 	}

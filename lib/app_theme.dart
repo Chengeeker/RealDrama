@@ -156,6 +156,7 @@ abstract final class AppTheme {
         },
       ),
       splashFactory: const AppHapticSplashFactory(),
+      highlightColor: Colors.transparent,
       textTheme: textTheme,
       scaffoldBackgroundColor: background,
       cardTheme: CardThemeData(

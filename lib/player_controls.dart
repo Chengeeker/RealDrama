@@ -263,7 +263,11 @@ class _PlayerControlsState extends State<PlayerControls> {
     final buffered = state.buffer.inMilliseconds / 1000;
     final showFeedPlaybackControl = !state.playing || _playbackFeedbackVisible;
     final visible =
-        _visible || !state.playing || state.buffering || widget.panelOpen;
+        !widget.interactions.boosting &&
+        (_visible ||
+            !state.playing && !widget.fullscreen ||
+            state.buffering ||
+            widget.panelOpen);
     return MouseRegion(
       onHover: (_) => _show(),
       cursor: visible ? SystemMouseCursors.basic : SystemMouseCursors.none,
@@ -303,7 +307,9 @@ class _PlayerControlsState extends State<PlayerControls> {
                 excluding: !visible,
                 child: AnimatedOpacity(
                   opacity: visible ? 1 : 0,
-                  duration: const Duration(milliseconds: 180),
+                  duration: widget.interactions.boosting
+                      ? Duration.zero
+                      : const Duration(milliseconds: 180),
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
@@ -470,7 +476,7 @@ class _PlayerControlsState extends State<PlayerControls> {
                   ),
                 ),
               ),
-            _gestureFeedback(),
+            _gestureFeedback(constraints),
           ],
         ),
       ),
@@ -1061,7 +1067,7 @@ class _PlayerControlsState extends State<PlayerControls> {
     );
   }
 
-  Widget _gestureFeedback() => AnimatedBuilder(
+  Widget _gestureFeedback(BoxConstraints constraints) => AnimatedBuilder(
     animation: widget.interactions,
     builder: (context, _) {
       final feedback = widget.interactions.feedback;
@@ -1069,20 +1075,44 @@ class _PlayerControlsState extends State<PlayerControls> {
           widget.immersiveFeed && widget.interactions.speedFeedback) {
         return const SizedBox.shrink();
       }
+      final state = widget.player.state;
+      final portraitFullscreenSpeed =
+          widget.interactions.speedFeedback &&
+          widget.fullscreen &&
+          widget.swipeEnabled &&
+          state.height > state.width &&
+          state.width > 0;
+      final topLetterboxHeight = portraitFullscreenSpeed
+          ? (constraints.maxHeight -
+                    constraints.maxWidth * state.height / state.width) /
+                2
+          : 0.0;
+      if (portraitFullscreenSpeed && topLetterboxHeight < 48) {
+        return const SizedBox.shrink();
+      }
+      final badge = DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(
+            alpha: widget.interactions.speedFeedback ? .18 : .87,
+          ),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Text(feedback, textAlign: TextAlign.center),
+        ),
+      );
       return IgnorePointer(
         child: Align(
-          alignment: const Alignment(0, -.5),
-          child: Container(
-            margin: const EdgeInsets.all(16),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(
-                alpha: widget.interactions.speedFeedback ? .18 : .87,
-              ),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(feedback, textAlign: TextAlign.center),
-          ),
+          alignment: portraitFullscreenSpeed
+              ? Alignment.topCenter
+              : const Alignment(0, -.5),
+          child: portraitFullscreenSpeed
+              ? SizedBox(
+                  height: topLetterboxHeight,
+                  child: Center(child: badge),
+                )
+              : Container(margin: const EdgeInsets.all(16), child: badge),
         ),
       );
     },

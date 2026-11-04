@@ -271,15 +271,18 @@ class _FeedRecommendationSettingsScreenState
                 ),
               ),
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  groups.isEmpty
-                      ? '没有匹配的大类或二级题材'
-                      : _query.isEmpty
-                      ? '题材权重 · 5 个大类'
-                      : '匹配 ${groups.length} 个大类 · $topicCount 个二级题材',
-                  style: Theme.of(context).textTheme.labelLarge,
+              Padding(
+                padding: const EdgeInsets.only(left: 16),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    groups.isEmpty
+                        ? '没有匹配的大类或二级题材'
+                        : _query.isEmpty
+                        ? '题材权重 · 5 个大类'
+                        : '匹配 ${groups.length} 个大类 · $topicCount 个二级题材',
+                    style: Theme.of(context).textTheme.labelLarge,
+                  ),
                 ),
               ),
               const SizedBox(height: 8),

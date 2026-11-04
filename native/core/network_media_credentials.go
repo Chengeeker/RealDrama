@@ -23,6 +23,9 @@ type providerMediaCredentials struct {
 type providerMediaCredentialsKey struct{}
 
 func providerMediaContext(ctx context.Context, credentials *providerMediaCredentials) context.Context {
+	if credentials != nil {
+		ctx = douyinDirectContext(ctx, credentials.source)
+	}
 	if credentials != nil && credentials.browser {
 		ctx = subscriptionBrowserContext(ctx, credentials.source)
 	}

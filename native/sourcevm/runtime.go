@@ -114,6 +114,13 @@ func Request(raw string) (result string) {
 	var value goja.Value
 	var err error
 	if input.Command == "start" {
+		vm.Set("hongguoSign", func(parameters, body string, now int64) string {
+			result, err := hongguoPassportSign(parameters, body, now)
+			if err != nil {
+				panic(vm.NewTypeError(err.Error()))
+			}
+			return result
+		})
 		vm.Set("sha256hex", func(value string) string {
 			data, err := hex.DecodeString(value)
 			if err != nil || len(data) > 1<<20 {

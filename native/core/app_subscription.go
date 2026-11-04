@@ -59,6 +59,17 @@ type subscriptionHTTPRequest struct {
 	Browser           bool              `json:"browser"`
 }
 
+func subscriptionHeaderAllowed(name, source, hostname string) bool {
+	switch strings.ToLower(name) {
+	case "user-agent", "accept", "accept-language", "referer", "origin", "content-type", "authorization", "x-gorgon", "x-khronos", "x-ss-req-ticket", "x-ss-stub", "sdk-version", "x-xs-from-web", "temp", "x-user-agent", "uifid":
+		return true
+	case "x-helios", "x-medusa", "x-ss-dp", "x-tt-store-region", "x-tt-store-region-src":
+		return source == sourceHongguo && hostname == "api5-normal-sinfonlineb.fqnovel.com"
+	default:
+		return false
+	}
+}
+
 func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMessage) (map[string]any, error) {
 	var command subscriptionHTTPRequest
 	if len(raw) > 2<<20 || json.Unmarshal(raw, &command) != nil {
@@ -77,7 +88,8 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 	if command.Background {
 		ctx = context.WithValue(ctx, backgroundCatalogKey{}, true)
 	}
-	if command.Browser && command.Cookie == "" {
+	ctx = douyinDirectContext(ctx, command.Source)
+	if command.Browser {
 		source := command.Source
 		if !subscriptionID.MatchString(source) {
 			source = "subscription"
@@ -89,15 +101,13 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 		return nil, errors.New("请求地址无效")
 	}
 	for key, value := range command.Headers {
-		switch strings.ToLower(key) {
-		case "user-agent", "accept", "accept-language", "referer", "origin", "content-type", "authorization", "x-gorgon", "x-khronos", "x-ss-req-ticket", "x-ss-stub", "sdk-version", "x-xs-from-web", "temp", "x-user-agent":
-			if len(value) > 16384 {
-				return nil, errors.New("请求头过大")
-			}
-			request.Header.Set(key, value)
-		default:
+		if !subscriptionHeaderAllowed(key, command.Source, address.Hostname()) {
 			return nil, errors.New("请求头不受支持")
 		}
+		if len(value) > 16384 {
+			return nil, errors.New("请求头过大")
+		}
+		request.Header.Set(key, value)
 	}
 	if command.Cookie != "" {
 		allowedReadPost := command.Method == "POST" &&
@@ -322,6 +332,7 @@ func (engine *nativeEngine) subscriptionPlan(ctx context.Context, raw json.RawMe
 
 	for _, variant := range metadata.Variants {
 		variant.Variants = nil
+		variant.Source = metadata.Source
 		variantRaw, _ := json.Marshal(variant)
 		candidate, _, err := subscriptionProvider(validation, variantRaw)
 		if err != nil {

@@ -370,7 +370,7 @@ class _CachedCoverImageState extends State<CachedCoverImage> {
     widget.drama.source,
   )) {
     'crj91' => const {
-      'Referer': 'https://91crdj.com/',
+      'Referer': 'https://91crdjai.com/',
       'User-Agent':
           'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
     },

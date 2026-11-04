@@ -1,0 +1,358 @@
+[
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532"
+    },
+    "body": "",
+    "now": 1700000000123,
+    "nonce": [
+      16909060,
+      2309737967,
+      4275878552,
+      1985229328
+    ],
+    "query": "_rticket=1700000000125&aid=8662&app_name=novelread&device_id=1000000000000001&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "3f3b4313e71a7e1cbfbc359314fc3de34eab90a3d441761cae10fcb2a6aba1ff",
+      "X-SS-Req-Ticket": "8073108a892b449e3144e8cbc8a6d92c1470c763844f6fdbec203936fd754c0b",
+      "X-Helios": "de036b88a8b32a59206cf51fed2e730a0ddddf030cb7093e397b6a1ea3562b18",
+      "X-Medusa": "1b99d14da7dd85cf5cd4b6b48b254c58b4505e8d288540ab6b609d8bd12989fe",
+      "X-Gorgon": "99b7022792c59d18b6c470aebc8f3c4b69d4e6026316ea8f294242447848a9bc",
+      "X-SS-STUB": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "branch": 3763301186,
+    "proof": "dab558a418c28326d85eda90d7cddca5ced20e66",
+    "protoHash": "81fb12cf77316c9ef5a4525de20d1e32d32e7a6df8482eb616557f263e8ce0be"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532"
+    },
+    "body": "{\"video_id\":\"100001\",\"content_type\":1,\"biz_param\":{\"need_all_video_definition\":true}}",
+    "now": 1700000001123,
+    "nonce": [
+      287454021,
+      2580282929,
+      251456219,
+      2255774292
+    ],
+    "query": "_rticket=1700000001125&aid=8662&app_name=novelread&device_id=1000000000000001&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "b03c94ef74953171960deca89cf076c24a2c0cc168e84477add3bd75360ee8e1",
+      "X-SS-Req-Ticket": "e270ec47682ffc33c3efddeeda3d8d653de039b7d3f58218083bc5eca2a39678",
+      "X-Helios": "8cee71a2001ce13be4925a054f9f6c9b5c4e92597291d6ecb8d7921368d70289",
+      "X-Medusa": "74704d2088e629638df34e8e176459d8ff34c38450dfa4141b6a8a869252a856",
+      "X-Gorgon": "6316829d9c56f7a1fe9596decc14cd7d0745d9b1798e90e415ad79827722f9fe",
+      "X-SS-STUB": "329e4ca592609d8b04ad9d16b4fe34292945b3c73e65a4835f66823d1392fd58"
+    },
+    "branch": 1055785906,
+    "proof": "96038e93704bc553c96c6c69b03e1f954436f6ee",
+    "protoHash": "93b2f85375d35d351e6fb028eec0d592506ec97553db46d65c4a9e7dbebd9ff0"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532"
+    },
+    "body": "{\"video_id\":\"100002\",\"content_type\":1,\"biz_param\":{\"need_all_video_definition\":true}}",
+    "now": 1700000002123,
+    "nonce": [
+      557998982,
+      2850827891,
+      522001182,
+      2526319256
+    ],
+    "query": "_rticket=1700000002124&aid=8662&app_name=novelread&device_id=1000000000000001&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "21c8f67e0394045d96a410f617af83bb83b21d1f91bc7e5a3126960d7591b38c",
+      "X-SS-Req-Ticket": "b33a3b4d34b97f5c87319ae8472b08cf3a5a6bb6b6d8b806c23c96a0ffb87d43",
+      "X-Helios": "b1d75c69610d3b6c8df979c81ab5b57f302c99089b2505439738acf26ab19817",
+      "X-Medusa": "ad870d61d1ae3b003d5670beeca6c8371dc362045598437d727ba28497bc828a",
+      "X-Gorgon": "dfcc30626c804c2c2826d7c8eb821d82d15027531ac37dfa7d80ab172cccf19d",
+      "X-SS-STUB": "26884f80b8856dedc7fbdfc168efd00794a78fd628967df1467b234414c0ddb9"
+    },
+    "branch": 3990513922,
+    "proof": "02d4129104aeb3bb9638fc3816781a15cf9cb798",
+    "protoHash": "031067abc7fe6e7cd412e2873219cf37b672ffb9a749b2acc3048017e778ee4f"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532"
+    },
+    "body": "",
+    "now": 1700000003123,
+    "nonce": [
+      828543943,
+      3121372853,
+      792546145,
+      2796864220
+    ],
+    "query": "_rticket=1700000003123&aid=8662&app_name=novelread&device_id=1000000000000001&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "97129c7eb7bd75193b87a24e715baabd450bde0b58076935e383c3d6bcf4ce56",
+      "X-SS-Req-Ticket": "9ab079f94f3d296e919b871e9e05ce6e52bc0b4442f08b436f65bca201f338b4",
+      "X-Helios": "473e4203c381fa4df8a818ee236f3c183b72107149bc536b9b5477cd43c90ba3",
+      "X-Medusa": "940ffcf79c0cb826b36a5bc077a61ebbf161586fa7c3d34cb4eb9bb4e2905c3d",
+      "X-Gorgon": "26287f925ea4eb74db52e8aac94d7b21dc9f8608af88d8f2d9f324f0a70a275a",
+      "X-SS-STUB": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "branch": 495706866,
+    "proof": "79d942ade3c7bf5ecc991e1d088ea8d134803e14",
+    "protoHash": "6f341310a50aa29c6d507b8baf554dcd4511ebbaa5c6728fdca68fdaa9a23f8c"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532",
+      "extra": "test !'()*~ +/中文"
+    },
+    "body": "{\"video_id\":\"100004\",\"content_type\":1,\"biz_param\":{\"need_all_video_definition\":true}}",
+    "now": 1700000004123,
+    "nonce": [
+      1099088904,
+      3391917815,
+      1063091108,
+      3067409184
+    ],
+    "query": "_rticket=1700000004124&aid=8662&app_name=novelread&device_id=1000000000000001&extra=test+%21%27%28%29%2A~+%2B%2F%E4%B8%AD%E6%96%87&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "4fd74172be76ea92b6489b5e681e4f3a66ae06c8668829d14d7cd52552f1db24",
+      "X-SS-Req-Ticket": "146c3041bf584e94d54d2504f22534e4bb5dcc2a4214acb5fcca7258419a8166",
+      "X-Helios": "dd455221cd0d629ce799d40ac68a15ab32833a140b69d2d4755f9d80a751c52a",
+      "X-Medusa": "2473dd248a93410ce866fdc05ec736a3e57cbe4292a9f3c4cead497a51d4a7cf",
+      "X-Gorgon": "f04aeb35266a26002a32c2918e6e99a7c225372f6b9574e3734f5e7fc6e9d643",
+      "X-SS-STUB": "b7ba4301f44a7c21d37517a851626bfe5a33fa2fd0df7ef577cc52816de44e84"
+    },
+    "branch": 2841110126,
+    "proof": "f7903b2b9f785492ff51e0d35aea43ac3671bf8b",
+    "protoHash": "c81fead4bffcbb8b4ea054ef93a5a9508f0ccf00da0011bd2323b3544014971f"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532",
+      "extra": "test !'()*~ +/中文"
+    },
+    "body": "{\"video_id\":\"100005\",\"content_type\":1,\"biz_param\":{\"need_all_video_definition\":true}}",
+    "now": 1700000005123,
+    "nonce": [
+      1369633865,
+      3662462777,
+      1333636071,
+      3337954148
+    ],
+    "query": "_rticket=1700000005124&aid=8662&app_name=novelread&device_id=1000000000000001&extra=test+%21%27%28%29%2A~+%2B%2F%E4%B8%AD%E6%96%87&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "8f69a8edd846d6a2c62539e84874bf2c8045ed03c8b7003a6cd4b60c2f2775f8",
+      "X-SS-Req-Ticket": "b85738554ac2845994be4813a4e87d19be905870a3d8be4a0a9f84ed85f1cee5",
+      "X-Helios": "d1fcacbe3af120b9b29eb68bfc612b7910b2d8d3ecfc23a6be5872abeffa4443",
+      "X-Medusa": "fdf96261d895df93a18a270b0002c59359375d953205e837cdd5285e2e1aa015",
+      "X-Gorgon": "3c4d800a3108f9a1699c0b742ca78c1b5cdb1e8f86982896cc68f6ed2bb0243f",
+      "X-SS-STUB": "8d71b543583830d782c1f744eadf730ddd5ac786880ba480933c1d8ddb3c9bde"
+    },
+    "branch": 1303726091,
+    "proof": "796aaa54023635808863801ae7a770479d6dda8d",
+    "protoHash": "0ce3057300db59a2b88e239f2469ee108adfb45c726afb58ea12a2a3fd8490e3"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532",
+      "extra": "test !'()*~ +/中文"
+    },
+    "body": "",
+    "now": 1700000006123,
+    "nonce": [
+      1640178826,
+      3933007739,
+      1604181034,
+      3608499112
+    ],
+    "query": "_rticket=1700000006126&aid=8662&app_name=novelread&device_id=1000000000000001&extra=test+%21%27%28%29%2A~+%2B%2F%E4%B8%AD%E6%96%87&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "fdd279995915b8918534b033f2fe1cc4cab8503af29d00dd5a89ce63f0245f46",
+      "X-SS-Req-Ticket": "a85bb94faf22f70961a04ad7b2d2d84bd41fed61255f51b58303fd340dae9ccf",
+      "X-Helios": "7a8c2994730a5938b1314329204ba43a3b866f4bc8190641dfe5e1df7f9cd9fc",
+      "X-Medusa": "0fc845349e3a58058ff69917ee2b3f0b3e199ec88ce10d2f6d71ba31fb6ea5e7",
+      "X-Gorgon": "6d93ad72a1c8dd965da32e424cfde8e64065c19811ca151fc527d0f8b5926516",
+      "X-SS-STUB": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "branch": 3859734907,
+    "proof": "de57b534c4472f6734a55dd7c9234e2114ba8427",
+    "protoHash": "558d91875d2706a3d30ec83398b5d28858cd9d9fa98f49933cee31c60c5d35ff"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532",
+      "extra": "test !'()*~ +/中文"
+    },
+    "body": "{\"video_id\":\"100007\",\"content_type\":1,\"biz_param\":{\"need_all_video_definition\":true}}",
+    "now": 1700000007123,
+    "nonce": [
+      1910723787,
+      4203552701,
+      1874725997,
+      3879044076
+    ],
+    "query": "_rticket=1700000007123&aid=8662&app_name=novelread&device_id=1000000000000001&extra=test+%21%27%28%29%2A~+%2B%2F%E4%B8%AD%E6%96%87&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "1f04d9398dc5ad1128b4c539f78022efc1d796011208808c1b509387031ad848",
+      "X-SS-Req-Ticket": "93e407d00f1f1355bd7e0aae6e717c25745189adbbda8cc89ef306989073937f",
+      "X-Helios": "022f7ef5e0820be43de046db8735a4dd7d87fb0057bbe9bb51ad98bf90b365c4",
+      "X-Medusa": "5cfa3ac62e70e8af41a6ef176a8c2436951a83ad090d3f7115d13c987e22bcea",
+      "X-Gorgon": "be1b45953eb3b9ca8726ee8c5c1a703185ebe919f5104c560880823fb6c3a9e4",
+      "X-SS-STUB": "5a8e12f4995d6eb8c130f3d940fa7d0d6aebe4c5dd252a448ffd8ec12f2686a7"
+    },
+    "branch": 4212518856,
+    "proof": "bf80ee897b28ea61e08227e228dd369dee2cf324",
+    "protoHash": "6d5933eca47dab91fddfbeaf3b58947400bbb64c43e7b1ce11d37930f9f9fb7e"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532",
+      "extra": "test !'()*~ +/中文"
+    },
+    "body": "{\"video_id\":\"100008\",\"content_type\":1,\"biz_param\":{\"need_all_video_definition\":true}}",
+    "now": 1700000008123,
+    "nonce": [
+      2181268748,
+      179130367,
+      2145270960,
+      4149589040
+    ],
+    "query": "_rticket=1700000008125&aid=8662&app_name=novelread&device_id=1000000000000001&extra=test+%21%27%28%29%2A~+%2B%2F%E4%B8%AD%E6%96%87&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "7deb0720e24016b1522a913a53f6d8bc565fa7c7cea732bbfa505e9929a2c976",
+      "X-SS-Req-Ticket": "7597750a54484d9bc83b7c71d2e737e7df17b4b23e3bbd585748c40fb8d98f58",
+      "X-Helios": "a3268b7d11754c5d7f8190413414fb690838edc4a4e49cc9702b8b3ff5d19f0e",
+      "X-Medusa": "038a637480af0fbeb2862533c34fd34e62125e130ae4b81dd7672660aa1721c6",
+      "X-Gorgon": "33d5b2e5d3a12322fa58b4f3f6a068d766dfea409adaa8d2074445fcf5e5239c",
+      "X-SS-STUB": "61e66cbfb3b07c10967edf7e065b30b4edb5e1c1f81270754e56d8fcdcace387"
+    },
+    "branch": 3981177902,
+    "proof": "bf8919432653dea02c6f0cb937e22e0cc57d1e9d",
+    "protoHash": "e69e73f7f0b95d2c2f4b4be9abd168dde6d1a06b0a313650357bf0c577e5a168"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532",
+      "extra": "test !'()*~ +/中文"
+    },
+    "body": "",
+    "now": 1700000009123,
+    "nonce": [
+      2451813709,
+      449675329,
+      2415815923,
+      125166708
+    ],
+    "query": "_rticket=1700000009127&aid=8662&app_name=novelread&device_id=1000000000000001&extra=test+%21%27%28%29%2A~+%2B%2F%E4%B8%AD%E6%96%87&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "c53d5799eb4b14f351c1ad1f8826c7a67dfdb8992f7c59c78f8727f772f1d076",
+      "X-SS-Req-Ticket": "645f51e0b1b0ac02756c34411c81df35dd3397bdce160693dcfee647a71e5b90",
+      "X-Helios": "beef0113e1603940af96a5628841fc10d37aa298ed0fa64e36fa3cb7dd28df62",
+      "X-Medusa": "e6a95617360f869b36cdcc7e514929a65b12f8be2b30e437de27a9156030c7c6",
+      "X-Gorgon": "5dc7a21fbfb4eb787a5d095a643788f18506f1d3b566f66b756724ce09b2c066",
+      "X-SS-STUB": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "branch": 1284992725,
+    "proof": "6d7e35120d91faeebdf4bfa832e8e4754ed54eac",
+    "protoHash": "4c4f3519b23ad580ef6d33d3eaff4db543550e43e1868725a3c3e9d9153727c1"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532",
+      "extra": "test !'()*~ +/中文"
+    },
+    "body": "{\"video_id\":\"100010\",\"content_type\":1,\"biz_param\":{\"need_all_video_definition\":true}}",
+    "now": 1700000010123,
+    "nonce": [
+      2722358670,
+      720220291,
+      2686360886,
+      395711672
+    ],
+    "query": "_rticket=1700000010123&aid=8662&app_name=novelread&device_id=1000000000000001&extra=test+%21%27%28%29%2A~+%2B%2F%E4%B8%AD%E6%96%87&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "7aeb73cab69bcdbe7c90f011ecbc680daa08807bc74f2767602e763967483e94",
+      "X-SS-Req-Ticket": "bdab9e5646cf46bfd476c47624a749da962921f065d1628d8c042defa81268e8",
+      "X-Helios": "5a1b42c550ddb2f31c15348f00deb9b36762f92f329222b1308618a37424c593",
+      "X-Medusa": "072bd1c442714f85a47eebc8e18414cc78df10a018590837c75648baafaf1112",
+      "X-Gorgon": "0f9aecca75910c71051e1715b83a92e6656dda67ddbd5ae9ab49e40ec84636b8",
+      "X-SS-STUB": "40623f7cb6ed01f02950ac0af8e3b41a019eefd5037fcc6e67da3674df4178a9"
+    },
+    "branch": 421337067,
+    "proof": "90863641b7f6c8e4e4d49a66683b3af8df5a5fe5",
+    "protoHash": "8444556a0026894ff4a4ba234819bbda480cdf4cdf290a4d7ddd767674f74de3"
+  },
+  {
+    "params": {
+      "aid": "8662",
+      "device_id": "1000000000000001",
+      "iid": "1000000000000002",
+      "app_name": "novelread",
+      "version_code": "73532",
+      "extra": "test !'()*~ +/中文"
+    },
+    "body": "{\"video_id\":\"100011\",\"content_type\":1,\"biz_param\":{\"need_all_video_definition\":true}}",
+    "now": 1700000011123,
+    "nonce": [
+      2992903631,
+      990765253,
+      2956905849,
+      666256636
+    ],
+    "query": "_rticket=1700000011127&aid=8662&app_name=novelread&device_id=1000000000000001&extra=test+%21%27%28%29%2A~+%2B%2F%E4%B8%AD%E6%96%87&iid=1000000000000002&version_code=73532",
+    "headerHashes": {
+      "X-Khronos": "124d0fb43419291f2a43b7625edc9acae61dab84ed6e965046e7a4d5c1c57b11",
+      "X-SS-Req-Ticket": "16eb6ab321f2786ab59d26edda58aade7f7ab3da8b39824a5bc8f2aae44f7ca5",
+      "X-Helios": "4be012473f19b3ce90cc3ec8d81bce4d44b3aa429b88377f93828d91db2dbcfc",
+      "X-Medusa": "bd7413520d9223421cb9e76b1486e22c5d1062c9e3cc88f6b62f06d30c17cf40",
+      "X-Gorgon": "d14d829fa89088c41c32e3affdb4fc1eaf3f76c6749dcb28a61b8cc9b8be7f2a",
+      "X-SS-STUB": "61f2ae14302beff0f02a0eee9f107aaa43d3e10bf070c30f33da11799e22b3a9"
+    },
+    "branch": 1337377934,
+    "proof": "0e7d09e6264918d5a9c79e3f984a20b7ce1f1076",
+    "protoHash": "08776e7515ad9012fd9c80745e3ed14611482c7d3f48718ab70795e9715a707a"
+  }
+]

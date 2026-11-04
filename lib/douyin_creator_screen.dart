@@ -54,6 +54,7 @@ class _DouyinCreatorScreenState extends State<DouyinCreatorScreen> {
     if (_scroll.hasClients &&
         _scroll.position.extentAfter < 640 &&
         _hasMore &&
+        _error == null &&
         !_loading &&
         !_loadingMore) {
       unawaited(_load(more: true));
@@ -108,7 +109,7 @@ class _DouyinCreatorScreenState extends State<DouyinCreatorScreen> {
       setState(() {
         _loading = false;
         _loadingMore = false;
-        _error = error.toString();
+        _error = error.toString().replaceFirst(RegExp(r'^(?:FormatException|Exception):\s*'), '');
       });
     }
   }

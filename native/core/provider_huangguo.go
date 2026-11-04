@@ -119,7 +119,7 @@ func canonicalProviderSource(source string) string {
 		return sourceGuipian
 	case "hanxiaoquan", "jennyhow.com", "www.jennyhow.com":
 		return sourceHanxiaoquan
-	case "crj91", "91crdj.com", "www.91crdj.com":
+	case "crj91", "91crdj.com", "www.91crdj.com", "91crdjai.com", "www.91crdjai.com":
 		return source91crj
 	case "stripchat", "stripchat.com", "stripchat.global", "stripol.com", "zh.stripchat.com", "zh.stripchat.global", "zh.stripol.com":
 		return sourceStripchat

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -66,7 +67,21 @@ type proxyRouter struct {
 	systemOverride bool
 }
 
+type douyinDirectKey struct{}
+
+func douyinDirectContext(ctx context.Context, source string) context.Context {
+	switch source {
+	case "douyin", "douyin-live", "douyin-series", "douyin-theater", "douyin-test", "douyin-live-test", "douyin-series-test", "douyin-theater-test":
+		return context.WithValue(ctx, douyinDirectKey{}, true)
+	default:
+		return ctx
+	}
+}
+
 func (router *proxyRouter) proxy(request *http.Request) (*url.URL, error) {
+	if request.Context().Value(douyinDirectKey{}) == true {
+		return nil, nil
+	}
 	if request.URL.Hostname() == "127.0.0.1" || request.URL.Hostname() == "localhost" || request.URL.Hostname() == "::1" {
 		return nil, nil
 	}

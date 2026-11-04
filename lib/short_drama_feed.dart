@@ -264,7 +264,7 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
       _items.length - _index <= math.max(3, (_items.length / 2).ceil());
 
   bool _isDouyinRateLimit(Object error) => RegExp(
-    r'(?:抖音接口请求较频繁|HTTP\s*(?:403|418|429)|已暂停约\s*\d+\s*秒)',
+    r'(?:抖音接口请求较频繁|HTTP\s*429|已暂停约\s*\d+\s*秒)',
   ).hasMatch(error.toString());
 
   void _scheduleDouyinRetry(Object error) {
@@ -810,11 +810,15 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
         !_awaitingFirstPlayback && _consecutiveUnavailable == 0) {
       return;
     }
+    final wasAwaitingFirstPlayback = _awaitingFirstPlayback;
     setState(() {
       _awaitingFirstPlayback = false;
       _consecutiveUnavailable = 0;
       _error = null;
     });
+    if (wasAwaitingFirstPlayback) {
+      _primeNearbyDetails();
+    }
   }
 
   void _recordExposure(int index) {
@@ -899,10 +903,11 @@ class _ShortDramaFeedScreenState extends State<ShortDramaFeedScreen> {
     for (var index = first; index <= last; index++) {
       _detailFutureFor(_items[index]);
     }
-    if (upcoming.isNotEmpty) {
+    if (upcoming.isNotEmpty && !_awaitingFirstPlayback) {
+      final isDouyin = SourceSite.byId(_items[_index].source).isDouyin;
       unawaited(
         _warmUpcomingPlayback(upcoming.first).then((_) async {
-          if (upcoming.length > 1) {
+          if (!isDouyin && upcoming.length > 1) {
             await _warmUpcomingPlayback(upcoming[1]);
           }
         }),

@@ -56,7 +56,7 @@ class AppHapticSplashFactory extends InteractiveInkFeatureFactory {
     VoidCallback? onRemoved,
   }) {
     AppHaptics.light();
-    return InkRipple.splashFactory.create(
+    return NoSplash.splashFactory.create(
       controller: controller,
       referenceBox: referenceBox,
       position: position,

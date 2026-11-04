@@ -22,6 +22,9 @@ class SourcePackage {
   List<String> get domains => (document['domains'] as List).cast<String>();
   List<String> get credentialDomains =>
       (document['credentialDomains'] as List? ?? const []).cast<String>();
+  List<String> get browserCredentialDomains =>
+      (document['browserCredentialDomains'] as List? ?? const [])
+          .cast<String>();
   Set<String> get capabilities =>
       (document['capabilities'] as List).cast<String>().toSet();
   String get credentialGroup => document['credentialGroup'] as String? ?? id;
@@ -96,7 +99,17 @@ class SourcePackage {
     if (credentials is! List ||
         credentials.any((host) => host is! String || !domains.contains(host)))
       throw const FormatException('凭据域名必须在声明列表内');
-    if (value['browser'] == true && credentials.isNotEmpty)
+    final browserCredentials = value['browserCredentialDomains'] ?? <String>[];
+    if (browserCredentials is! List ||
+        browserCredentials.any(
+          (host) => host is! String || !credentials.contains(host),
+        ) ||
+        browserCredentials.toSet().length != browserCredentials.length ||
+        browserCredentials.isNotEmpty && value['browser'] != true)
+      throw const FormatException('浏览器凭据域名声明无效');
+    if (value['browser'] == true &&
+        credentials.isNotEmpty &&
+        browserCredentials.isEmpty)
       throw const FormatException('账号站源不能使用共享浏览器会话');
     final group = value['credentialGroup'] as String? ?? value['id'] as String;
     final protectedDomains = {

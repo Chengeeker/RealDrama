@@ -89,7 +89,6 @@ func Request(raw string) (result string) {
 		return `{"ok":true,"data":{}}`
 	}
 	if input.Command == "start" {
-
 		if item != nil || len(sessions.values) >= 8 || len(input.Program) > 2<<20 {
 			sessions.Unlock()
 			if len(input.Program) > 2<<20 {
@@ -114,6 +113,20 @@ func Request(raw string) (result string) {
 	var value goja.Value
 	var err error
 	if input.Command == "start" {
+		vm.Set("hongguoMediaURL", func(value, seed string) string {
+			result, err := hongguoMediaURL(value, seed)
+			if err != nil {
+				panic(vm.NewTypeError("media address invalid"))
+			}
+			return result
+		})
+		vm.Set("hongguoRegisterRequest", func(now int64) string {
+			result, err := hongguoRegisterRequest(now)
+			if err != nil {
+				panic(vm.NewTypeError("registration request invalid"))
+			}
+			return result
+		})
 		vm.Set("hongguoSign", func(parameters, body string, now int64) string {
 			result, err := hongguoPassportSign(parameters, body, now)
 			if err != nil {

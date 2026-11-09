@@ -1,0 +1,6 @@
+cmake_minimum_required(VERSION 3.22.1)
+project(realdrama_jni LANGUAGES CXX)
+add_library(realdrama_jni SHARED bridge.cpp)
+target_compile_features(realdrama_jni PRIVATE cxx_std_17)
+target_link_libraries(realdrama_jni PRIVATE dl log)
+target_link_options(realdrama_jni PRIVATE "-Wl,-z,max-page-size=16384")

@@ -1,0 +1,10 @@
+.gradle/
+.kotlin/
+.cxx/
+**/build/
+local.properties
+key.properties
+*.apk
+hs_err_pid*.log
+replay_pid*.log
+app/src/main/jniLibs/

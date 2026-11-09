@@ -1,22 +1,17 @@
 # RealDrama
 
-RealDrama 是一个 Flutter 视频客户端，源码仓库为 [Chengeeker/RealDrama](https://github.com/Chengeeker/RealDrama)。客户端提供目录浏览、播放器、本地资料和订阅管理；内容源程序由独立项目维护，并通过订阅导入。
+RealDrama 是一个 Android 视频客户端，使用 Jetpack Compose、Go 原生核心和 libmpv。应用支持内容浏览、播放、下载、本地资料与订阅管理。内容源由独立项目维护，通过订阅导入。
 
-> 客户端不托管视频或媒体文件，也不预装已启用的内容源。内容和播放能力取决于用户导入的订阅及其上游服务。
-
-## 项目概览
-
-| 项目 | 当前配置 |
+| 项目 | 配置 |
 | --- | --- |
-| 应用名称 | RealDrama |
-| Android 包名 | `com.real.drama` |
-| 应用图标 | 由 `assets/icon12-source.png` 统一生成应用内、Android、iOS、Windows 与电视横幅资源 |
-| 当前源码版本 | `1.1.14+2234` |
-| 最新已核验 Android 安装包 | `RealDrama-1.1.14+2234-arm64-v8a.apk` |
-| Android ABI | `arm64-v8a` |
-| 主要技术 | Flutter、Dart、Go 原生核心、MediaKit / libmpv |
+| 正式版 | 2.1.5（4254） |
+| 包名 | `com.real.drama` |
+| 平台 | Android 8.0+、ARM64 Android TV |
+| ABI | `arm64-v8a` |
 
-APK 和其他构建产物不纳入源码仓库。需要安装包时，请按下方说明自行构建。
+Compose 从 2.1.5 起作为正式客户端。覆盖安装保留原包名与签名，旧 Android 本地资料由迁移逻辑读取。Flutter 版及其 Windows、iOS 工程可在 Git 历史中查看（最后一个 Flutter 主线提交 `20273fa`）。
+
+本次保留 2.1.5 候选版的首页、播放器和订阅功能。退后台恢复涉及真实设备的渲染行为，仍待真机验收。
 
 ## 功能
 
@@ -31,13 +26,13 @@ APK 和其他构建产物不纳入源码仓库。需要安装包时，请按下�
 - 首页弹幕开关按订阅声明的能力显示，普通与全屏播放均可控制抖音短视频弹幕。
 - 视频流可展示作者资料与内容文字，并提供适用的只读互动信息。
 - 评论区表情短码在客户端转换为 Unicode Emoji，不依赖表情图片地址。
-- “站源管理”集中管理订阅、已导入来源、首页偏好、首页画质和推荐设置。
+- “站源管理”分为“订阅与更新”和“启用与维护”；首页偏好、画质与猜你喜欢移至独立的“首页与推荐”。
 
 ### 发现与搜索
 
 - 依据已导入的订阅浏览目录和分类；不同来源仅展示其声明支持的筛选与搜索能力。
 - 分类按订阅定义展示，支持分层分类、排序和筛选。
-- 下拉刷新只在当前已加载内容中换一批；站源更新通过单独入口触发。
+- 下拉刷新重新请求当前目录，已有缓存保留到手动刷新。站源程序更新通过单独入口触发。
 - 支持内容详情、章节列表、收藏及下载入口；具体能力由订阅声明。
 
 ### 详情播放器
@@ -68,7 +63,7 @@ APK 和其他构建产物不纳入源码仓库。需要安装包时，请按下�
 
 订阅可独立检查、更新或回退，不要求每次源程序调整都重新安装客户端。登录资料保存在设备本地安全存储，不放入公开订阅包。客户端提供通用请求、媒体播放与资源管理能力；实际内容、栏目和播放结果由已导入的订阅及其上游服务决定。
 
-红果 App 完整播放签名需要客户端 `1.1.7+2227` 或更新版本，并配合红果订阅 `0.1.4`。旧客户端仍能使用订阅的网页回退，但不能据此保证后续分集可播。
+红果的可用能力取决于已导入订阅的版本及上游服务。
 
 Hanime（18+）订阅已从当前订阅目录移除。曾经导入的本地包不会随目录更新自动卸载，请在“站源管理 → 站源订阅”中手动删除；其他来源的 Cookie 配置仍按各自的订阅说明使用。
 
@@ -83,169 +78,29 @@ Hanime（18+）订阅已从当前订阅目录移除。曾经导入的本地包�
 
 Cookie 等同于登录凭据，拿到它的人可能访问对应账号。Chrome 商店页面称扩展数据保持离线，并披露不收集或使用用户数据；这是开发者声明，不是独立安全审计。导出前请确认是官方商店中的对应扩展，只授予必要的网站访问权限，并仅在本机应用内使用。Cookie 过期或网站要求额外的请求签名、设备状态时，单独导出 Cookie 仍可能无法登录或播放；这不代表导出的格式错误。
 
-## 构建
+## 构建 Android
 
-### 环境
+需要 JDK 17、Go 1.25+、Python 3.10+，以及 Android SDK Platform 36、NDK 28.2.13676358、CMake 3.22.1。设置 `ANDROID_HOME` 指向 SDK。
 
-- Flutter `3.47.x`、Dart `3.12+`
-- Go `1.25.0+`、Python `3.10+`
-- Android：JDK 17、Android SDK 36、NDK `28.2.13676358`
-- Windows：Visual Studio C++ 桌面组件与 MinGW-w64 x64
-- iOS：macOS、Xcode 与 CocoaPods
-
-### Android
+从仓库根目录准备 ARM64 库，然后在 Compose 工程构建。
 
 ```sh
-python3 scripts/build_android.py --abi arm64-v8a
+python3 compose/tools/prepare_native.py
+cd compose
+./gradlew :app:assembleRelease :app:testDebugUnitTest -PuiAudit
 ```
 
-Android APK 输出到项目根目录。构建脚本会执行原生核心与 Flutter Release 构建，并校验安装包；每次成功打包后只保留本次生成的 APK，旧包会删除。安装包不包含用户导入的订阅。
+Windows 使用 `python` 和 `gradlew.bat`。Go 不在 PATH 时可用 `--go` 指定程序。准备脚本会编译 Go 核心，并下载和校验固定版本的 [libmpv 依赖](https://github.com/media-kit/libmpv-android-video-build/releases/tag/v1.1.7)。
 
-### Windows 与 iOS
+发布签名使用本机 `compose/key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 的 `compose/tools/build_release.py --ui-audit` 支持通过 `COMPOSE_BKS`、`COMPOSE_STORE_PASSWORD`、`COMPOSE_KEY_ALIAS`、`COMPOSE_KEY_PASSWORD`、`COMPOSE_BCPROV` 环境变量转换 BKS、签名和构建，生成 `compose/RealDrama-2.1.5-arm64-v8a.apk`。构建产物与签名配置存放在本地。
 
-```powershell
-.\scripts\build_windows.ps1
-.\scripts\build_windows.ps1 -AllSources
-```
-
-```sh
-python3 scripts/build_ios.py
-python3 scripts/build_ios.py --all-sources
-```
-
-Windows 输出位于 `dist/windows`，iOS 输出位于 `dist/ios`。iOS 包尚未签名，不能直接安装。
-
-### Android 本地调试
-
-```sh
-python3 scripts/build_native.py --platform android --abi arm64-v8a
-flutter pub get --enforce-lockfile
-flutter run
-```
-
-本地调试会构建通用原生核心并启动 Flutter 客户端。播放表现仍需在目标设备上结合已导入订阅验证。
-
-## 检查
-
-```sh
-python3 -m unittest discover -s scripts -p 'test_*.py'
-dart format --output=none --set-exit-if-changed lib test integration_test test_driver
-dart analyze --fatal-infos lib test integration_test test_driver
-flutter test --dart-define=DISABLE_REMOTE_IMAGES=true
-```
-
-Go 核心测试：
-
-```sh
-cd native
-go test -race ./...
-```
-
-Android 播放集成测试还需要连接并授权调试设备；静态检查和成功构建不代表已完成真机验收。
-
-## 平台状态
-
-| 平台 | 状态 |
-| --- | --- |
-| Android 8.0+ | ARM64 构建配置已接入；尚未对所有设备完成安装与播放验收 |
-| Windows 10/11 x64 | 构建脚本已接入，需在目标设备验证播放和局域网功能 |
-| Android TV | 共用 Flutter 工程，遥控器焦点与布局待电视设备验收 |
-| iOS 15.1+ | 工程和构建脚本已接入，待 Xcode 构建及真机验收 |
-
-## GitHub Actions
-
-推送 `main` / `master`、提交 Pull Request 或手动运行 **Build app packages** 会执行检查与构建。工作流的 Release 步骤限定在上游仓库；本仓库的推送不会自动创建发行版。
-
-Android 正式签名需在仓库 Secrets 配置 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD`。未配置时只能生成 debug 签名包。
+GitHub Actions 在 main、Pull Request 和手动触发时构建 ARM64 Android 应用，并运行订阅、加密和 Compose 回归测试。手动运行时可使用仓库的 Android 签名 Secrets 生成带原签名的构建产物。旧 Go 目录接口的历史测试仍有失败，正式版使用订阅接口的测试作为构建检查。
 
 ## 目录结构
 
 | 目录 | 内容 |
 | --- | --- |
-| `lib/` | Flutter 页面、播放器、设置、本地资料与 FFI 调用 |
-| `native/core/`、`native/bridge/` | 通用媒体、网络、下载、订阅运行环境与原生桥接 |
-| `android/`、`windows/`、`ios/` | 平台工程和应用资源 |
-| `assets/` | 应用图标与界面资源 |
-| `scripts/`、`.github/workflows/` | 构建、签名与维护工具 |
-| `test/`、`integration_test/` | 单元、界面与设备集成测试 |
-
-## 当前客户端版本
-
-源码 `0.21.16+2198` 将首页分页预取从队列剩余 3 条提前到消耗约一半候选时触发，后台按现有来源顺序续载并去重；抖音请求间隔调整为 1.2 秒，遇到限频后按冷却时间暂停并续试。ARM64 Release APK 已构建，签名、版本和 16 KiB 对齐检查通过；未进行设备播放验收。
-
-源码 `0.21.17+2199` 增加抖音、Bilibili、红果独立测试订阅的 ID 映射和账号权限白名单；测试来源保留独立目录、历史、开关和订阅状态，抖音/Bilibili 继续共用原版 Cookie。ARM64 Release APK 已构建，包名 `com.real.drama`、versionCode `4199`；签名和 16 KiB 对齐检查通过，订阅目录 14 项 SHA-256 校验通过。未做设备、账号、上游接口和真实播放验收。
-
-源码 `0.21.18+2200` 修复抖音放映厅栏目参数与分页数量；正式订阅和独立测试订阅已同步。ARM64 Release APK 已构建，包名 `com.real.drama`、versionCode `4200`；V2 签名与上一版一致，ARM64 原生库和 16 KiB 对齐检查通过。未做设备、账号和真实播放验收。
-
-源码 `0.21.19+2201` 为首页弹幕开关增加全屏入口，与普通首页顶栏共用开关状态；抖音短视频是否显示仍由已安装订阅的 `danmaku` 能力声明决定。ARM64 Release APK 已构建，包名 `com.real.drama`、versionCode `4201`；V2 签名、必需 ARM64 原生库和 16 KiB ZIP 对齐检查通过。未进行设备、账号和真实弹幕验收。
-
-此前导入到设备的订阅包和已保存的账号资料不会由源码更新自动删除；如不再需要，请在“站源订阅”中移除旧包，并自行清理对应账号资料。
-
-构建成功仅表示代码与安装包构建完成，不代表其他订阅、账号或目标设备均已验收。设备兼容性和播放结果仍需结合实际订阅进行验证。
-
-
-源码 `0.21.20+2202` 将首页推荐及发现页主顶栏调整为局部磨砂样式，使用主题半透明底色和裁切范围内的模糊层，不改变视频与内容布局。ARM64 Release APK 已构建，包名 `com.real.drama`、versionCode `4202`；V2 签名、必需原生库和 16 KiB 对齐检查通过。
-
-
-源码 `0.21.21+2203` 将发现页来源标题与一级/二级分类合并为吸顶磨砂区域，列表滚动经过分类栏后方并保持首屏位置不变。ARM64 Release APK 已构建，包名 `com.real.drama`、versionCode `4203`；V2 签名、原生库和 16 KiB 对齐检查通过，签名与上一版一致。
-
-源码 `0.21.22+2204` 移除了设置主页面标题栏和最近观看页的“继续观看”卡片。最近观看页将搜索框并入吸顶磨砂栏，分隔线位于搜索框下方，列表仍从原有首屏位置开始并可滚动经过顶栏。
-
-源码 `0.21.23+2205` 将无设置标题栏时的主设置内容顶部留白增加 12dp，避免内容贴近状态栏。
-
-源码 `0.21.24+2206` 在发现页和最近观看页的封面网格顶部增加 8dp 留白，让封面与吸顶顶栏的分界线保持间距。收藏页及顶栏位置不变。
-
-源码 `0.21.25+2207` 统一 Material 3 列表项和卡片默认样式，并重排设置分组：分组标题置于轻量 Surface 之外，去掉卡片描边，使用更克制的分隔线、17sp 列表标题和标准留白。信息流播放器等专用控件保持原有交互布局。
-
-ARM64 Release APK 已构建于项目根目录，包名、版本、V2 签名、必要原生库及 16 KiB ZIP 对齐检查通过；旧 APK 已清理。未连接设备，未做真机显示验收。
-
-ARM64 Release APK 已构建于项目根目录，包名与版本信息、V2 签名、必需原生库及 16 KiB ZIP 对齐静态检查通过。未连接设备，未做真机显示验收。
-
-源码 `0.21.27+2209` 统一设置分组的字号层级，并提高分组容器与页面背景的区分度。分组标题改用 14sp 次级字色，设置项统一使用 16sp 标题与 14sp 辅助文字；个性化页也改为组标题位于填充容器外、组内项目用分隔线连接。ARM64 Release APK 已构建并通过包名、版本、V2 签名及 16 KiB 对齐静态检查；未连接设备，未做真机视觉验收。
-
-源码 `0.21.28+2210` 将 M3 设置样式适配到站源订阅、当前站源、首页偏好、猜你喜欢、网络与资源、下载偏好、下载目录、WebDAV 和账号凭据等二级页面；统一常规列表标题与辅助文字字号，并去掉多处重描边容器。发现页一级/二级分类标签和排序筛选标签统一为紧凑 M3 Chip 样式。保留现有页面结构、业务状态、滚动、播放器及视频布局。ARM64 Release APK 为 34,643,041 字节；包名和版本、签名及 16 KiB 对齐静态检查通过。未连接设备，未做真机视觉验收。
-
-源码 `0.21.29+2211` 继续强化首页偏好、猜你喜欢和当前站源的分组容器与内部留白，并将发现页和最近观看的磨砂顶栏改为上方较实、靠近分界线更透的渐变磨砂。ARM64 Release APK 为 34,647,093 字节；包名、版本、V2 签名及 16 KiB ZIP 对齐静态检查通过。未连接设备，未做真机视觉验收。
-
-源码 `0.21.30+2212` 加大渐变磨砂顶栏上下透明度差异：状态栏端不透明度提高至 97%，分界线端降至 26%，保持原有局部模糊范围和模糊强度。完成后补记 APK 静态核验与真机验收状态。
-
-源码 `0.21.31+2213` 按复核反馈把状态栏端磨砂底色设为 98% 不透明，使上沿基本不透出模糊内容；分类栏分界线端设为 60% 不透明度，保留原有局部模糊强度。ARM64 Release APK 为 34,647,089 字节；包名 `com.real.drama`、versionName `0.21.31`、versionCode `4213`，V2 签名和 16 KiB ZIP 对齐静态检查通过。未连接设备，未做真机视觉验收。
-
-源码 `0.21.32+2214` 将手机发现页标题工具栏高度从 56dp 调整为 52dp，使来源选择器与分类分栏更紧凑；分类行高度、吸顶背景范围和列表滚动占位同步保持一致，其他页面不变。此前签名配置缺失导致该版本首次打包误用 debug 证书；已用指定发布 BKS 重打包，并确认 APK 证书与 BKS 一致。ARM64 Release APK 为 34,639,289 字节；包名 `com.real.drama`、versionName `0.21.32`、versionCode `4214`，V2 签名和 16 KiB ZIP 对齐静态检查通过。未连接设备，未做真机视觉验收。
-
-源码 `0.21.33+2215` 再将手机发现页工具栏高度由 52dp 收至 48dp，分类分栏及对应列表占位同步上移；共享磨砂顶栏状态栏端改为完全不透明，分界线端保持 60% 不透明度。ARM64 Release APK 为 34,639,141 字节；包名 `com.real.drama`、versionName `0.21.33`、versionCode `4215`，APK 证书与指定 BKS 匹配，V2 签名及 16 KiB ZIP 对齐检查通过。未连接设备，未做真机视觉验收。
-
-源码 `0.21.36+2218` 修复发现页下拉刷新指示器被吸顶顶栏遮住的问题：当发现页顶栏固定时，刷新圈从顶栏下沿开始出现，并使用主题前景色和背景色；其他滚动页保留默认位置。ARM64 Release APK 为 34,639,349 字节；包名 `com.real.drama`、versionName `0.21.36`、versionCode `4218`，证书与指定 BKS 匹配，V2 签名、必需 ARM64 原生库和 16 KiB ZIP 对齐检查通过。定向 Dart 分析无错误，仅有 1 条既有风格提示。未连接设备，未进行真机手势验收。
-
-
-源码 `1.0.0+2219` 更新应用版本名和构建号，并精简一级及二级设置页中重复的功能解释，保留当前计数、选择状态与错误信息。ARM64 Release APK `RealDrama-1.0.0+2219-arm64-v8a.apk` 为 34,637,277 字节；包名 `com.real.drama`、versionName `1.0.0`、versionCode `4219`。V2 签名与指定 BKS 一致，必需 ARM64 原生库和 16 KiB ZIP 对齐检查通过；根目录只保留此 APK。未连接设备，未进行真机 UI 验收。
-
-源码 `1.1.0+2220` 将普通页面路由改为新页横向滑入并覆盖旧页；手机底栏页签使用双向横向平移，保留首页播放器实例。桌面与电视导航保持即时切换，系统减少动态效果时关闭动画。ARM64 Release APK `RealDrama-1.1.0+2220-arm64-v8a.apk` 为 34,651,193 字节；包名 `com.real.drama`、versionName `1.1.0`、versionCode `4220`，V2 签名与上一版回退包一致，16 KiB ZIP 对齐检查通过。未连接设备，未做转场视觉验收。
-
-源码 `1.1.1+2221` 修复首页评论弹层关闭后抖音播放器被重建并自动播放的问题。ARM64 Release APK 为 34,651,033 字节；包名 `com.real.drama`、versionName `1.1.1`、versionCode `4221`，V2 签名、必要原生库和 16 KiB 对齐检查通过。该版随后采用的顶栏叠放方式改变了视频视口，已在 `1.1.2+2222` 回退；评论暂停修复保留，动态磨砂仍需另找不改变视口的实现。
-
-源码 `1.1.2+2222` 恢复首页原视频视口尺寸并保留评论暂停修复；首页推荐顶栏动态磨砂仍待用不改变视口的方案实现。ARM64 Release APK `RealDrama-1.1.2+2222-arm64-v8a.apk` 为 34,654,317 字节；包名 `com.real.drama`、versionName `1.1.2`、versionCode `4222`。V2 签名与 BKS 及上一版一致，必要 ARM64 原生库和 16 KiB 对齐检查通过；上一版保存在 `build/rollback`。未连接设备，未做真机视觉验收。
-
-源码 `1.1.3+2223` 将首页推荐顶栏改为不透明的主题色普通顶栏，移除背景模糊；保留顶栏尺寸、按钮和分隔线，不改变首页视频视口。ARM64 Release APK `RealDrama-1.1.3+2223-arm64-v8a.apk` 为 34,654,093 字节；包名 `com.real.drama`、versionName `1.1.3`、versionCode `4223`。V2 签名与回退包证书一致，17 个 ARM64 原生库齐全，16 KiB ZIP 对齐检查通过；`1.1.2+2222` 回退包保存在 `build/rollback`。Windows 临时签名配置中的 `storeFile` 使用正斜杠，避免 Java properties 将反斜杠解释为转义。签名临时文件已清理；未连接设备，未做真机视觉验收。
-
-源码 `1.1.4+2224` 为 Hanime（18+）订阅增加按本机资料保存的 Cookie 设置、仅向 `hanime1.me` 发送凭据、独立 Chrome 兼容请求会话与 Cloudflare 常见挑战页提示。交互式验证仍需在网页完成。ARM64 Release APK `RealDrama-1.1.4+2224-arm64-v8a.apk` 为 34,652,137 字节；包名 `com.real.drama`、versionName `1.1.4`、versionCode `4224`；V2 签名与上一版一致，必要 ARM64 原生库和 16 KiB ZIP 对齐检查通过。未连接设备，未验收 Hanime 真实账号、Cloudflare 验证或媒体播放。
-
-源码 `1.1.5+2225` 为 Hanime 增加 Android 应用内 Cloudflare 验证页：验证完成后只在用户点击同步时读取 `hanime1.me` 的 `cf_clearance` Cookie，并保存到当前资料安全存储。验证 WebView 的请求 UA 与站源 Chrome 150 请求保持一致；仅限制顶层导航到 HTTPS 的 `hanime1.me` 及其子域。ARM64 Release APK `RealDrama-1.1.5+2225-arm64-v8a.apk` 为 34,650,449 字节；包名 `com.real.drama`、versionName `1.1.5`、versionCode `4225`；V2 签名与 `1.1.4+2224` 回退包一致，必需 ARM64 库和 16 KiB ZIP 对齐检查通过。未连接设备，应用内挑战流程和 Hanime 实际目录/播放仍待设备验证。
-
-源码 `1.1.7+2227` 将 91 成人短剧的新请求、Referer 与相对封面地址统一到 `91crdjai.com`，并把已保存的旧域名详情、分集和封面地址归一到新主机。订阅包独立更新，不要求安装此 APK 才能拿到源程序更新；本版本同步修正客户端内置站源与封面请求。ARM64 Release APK `RealDrama-1.1.7+2227-arm64-v8a.apk` 为 34,675,029 字节；包名 `com.real.drama`、versionName `1.1.7`、versionCode `4227`、minSdk `26`、targetSdk `36`。V2 签名与 1.1.6 回退包证书一致，17 个 ARM64 原生库齐全，16 KiB ZIP 对齐检查通过；`1.1.6+2226` 回退包保存在 `build/rollback`。未连接设备，未做真机播放验收。
-
-源码 `1.1.8+2228` 将详情播放器竖屏视频全屏时的长按倍速提示居中放进视频上方黑边；按 `BoxFit.contain` 的实际留白计算位置，黑边不足以容纳提示时隐藏，避免覆盖画面。ARM64 Release APK `RealDrama-1.1.8+2228-arm64-v8a.apk` 为 34,675,057 字节；包名 `com.real.drama`、versionName `1.1.8`、versionCode `4228`、minSdk `26`、targetSdk `36`。V2 签名与上一版一致，17 个 ARM64 原生库齐全，16 KiB ZIP 对齐检查通过；`1.1.7+2227` 回退包保存在 `build/rollback`。未连接设备，未做真机视觉验收。
-
-
-源码 `1.1.9+2229` 修正抖音 HTTP 403/418 被误当作全局限频的问题；抖音共享请求队列在实际发送前生成签名，请求完成后间隔至少 1.5 秒；429 遵守 Retry-After，在两分钟预算内等待并最多自动重试一次。作者分页结果按用户、订阅和作者缓存两分钟并合并并发请求；分页失败后停止滚动自动重试。真实账号及设备播放待验收。
-
-`1.1.9+2229` ARM64 APK 已编译并通过包名、版本（versionCode 4229）、V2 签名一致性及 16 KiB ZIP 对齐静态检查，17 个原生库齐全，34,678,461 字节。上一版 1.1.8 回退包保存在 build/rollback；未做真实账号、设备作者页或限流恢复验收。
-
-源码 `1.1.10+2230` 根据 1.1.9 诊断日志确认抖音详情和作者接口返回 HTTP 403（没有 HTTP 429）。本版保留 403 作为上游拒绝、避免误判为限流，并限制作者页失败后的自动重试。HTTP 403 的上游原因尚未确认，不能据此保证关闭 VPN 或安装本版即可恢复。
-源码 `1.1.11+2231` 调整抖音首页请求调度与作者主页取数；真实账号加载速度、HTTP 403 是否解除及播放情况仍待设备验收：
-- 首页请求优化：配套订阅可复用信息流已有元数据，减少额外的单视频详情请求；视频地址按需解析，携带视频页 Referer 并缓存 30 分钟。客户端在首播未就绪前暂停后续项后台预热，并将抖音预热限制为后 1 项；共享接口队列在请求完成后间隔 1000ms。
-- 作者主页请求调整：配套订阅从作品接口取得列表与基础资料，并补全用户主页 Referer；客户端为作者主页分配独立通道（:creator），分页失败后停止滚动自动重试。HTTP 429 无 Retry-After 时默认等待 15 秒；这些调整不能保证解除上游 HTTP 403。
-
-源码 `1.1.13+2233` 修复“猜你喜欢”题材权重页分组标题的左侧留白，使标题与卡片内容起点（图标左侧）对齐；审查的其他设置分组已符合该对齐规则。ARM64 Release APK `RealDrama-1.1.13+2233-arm64-v8a.apk` 为 34,693,417 字节；包名 `com.real.drama`、versionName `1.1.13`、versionCode `4233`。V2 签名与回退包一致，17 个原生库仅包含 ARM64，16 KiB ZIP 对齐检查通过。回退包保存在 `build/rollback`；未连接设备，未进行真机视觉验收。
-
-源码 `1.1.14+2234` 统一关闭点击、长按产生的 Material 水波纹和普通 InkWell 按压高亮，保留触觉反馈与底栏现有视觉效果。定向 Dart 分析通过；ARM64 Release APK `RealDrama-1.1.14+2234-arm64-v8a.apk` 为 34,693,973 字节，versionCode `4234`，17 个原生库均为 ARM64，V2 签名与上一版一致，16 KiB ZIP 对齐检查通过。上一版保存在 `build/rollback`；未安装或进行真机交互验收。
+| `compose/` | 正式 Android 应用、Gradle 构建与 Android 测试 |
+| `native/` | Go 媒体核心、订阅运行时与 C 接口 |
+| `assets/` | 品牌原图与第三方许可 |
+| `.github/workflows/` | Android 构建与检查 |

@@ -11,6 +11,19 @@ import (
 	"testing"
 )
 
+func TestCanceledSubscriptionPrefetchRetainsPlayback(t *testing.T) {
+	engine := nativeEngine{playbacks: map[string]nativePlaybackChoice{"shared-plan": {}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := engine.subscriptionPrefetch(ctx, nativeInput{Subscription: []byte(`{"session":"shared-plan"}`)})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("prefetch error = %v, want cancellation", err)
+	}
+	if _, exists := engine.playbacks["shared-plan"]; !exists {
+		t.Fatal("canceling prefetch closed the playback session")
+	}
+}
+
 func TestHongguoBackupAddressesAndCodecAlternatives(t *testing.T) {
 	media, err := selectHongguoAppMedia(map[string]any{"video_list": []any{
 		map[string]any{"main_url": "https://media.test/hevc.mp4", "video_meta": map[string]any{"codec_type": "hevc", "definition": "1080p"}},

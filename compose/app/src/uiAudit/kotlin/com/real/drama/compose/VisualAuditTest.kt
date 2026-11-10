@@ -45,6 +45,9 @@ import androidx.compose.ui.Alignment
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.withTimeout
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -75,16 +78,20 @@ class VisualAuditTest {
             repo.subscriptions.installed.value = listOf(SourcePackage(obj("id" to "synthetic", "name" to "合成视频", "kind" to "video", "version" to "1", "program" to "function* main(){}",
                 "capabilities" to org.json.JSONArray(listOf("comments"))), "local:audit", "audit", ByteArray(0)))
         }
-        val detail = Detail(Drama(obj("id" to "synthetic:resume", "source" to "synthetic", "title" to "后台恢复检查")), listOf(Episode(obj("id" to "1"), 1)))
+        val source = mutableStateOf("synthetic")
         compose.setContent { CompositionLocalProvider(LocalRepository provides repo, LocalNavigate provides {}) {
-            DramaTheme(repo.store) { PlayerPane(detail, active = true, feed = true, localOnly = true,
-                localPlan = obj("url" to "/synthetic.mp4", "local" to true), modifier = Modifier.fillMaxSize()) }
+            DramaTheme(repo.store) { androidx.compose.runtime.key(source.value) {
+                val detail = Detail(Drama(obj("id" to "${source.value}:resume", "source" to source.value, "title" to "后台恢复检查")), listOf(Episode(obj("id" to "1"), 1)))
+                PlayerPane(detail, active = true, feed = true, localOnly = true,
+                    localPlan = obj("url" to "/synthetic.mp4", "local" to true), modifier = Modifier.fillMaxSize())
+            } }
         } }
         compose.waitUntil(10000) { compose.onAllNodes(androidx.compose.ui.test.hasText("后台恢复检查")).fetchSemanticsNodes().isNotEmpty() }
         compose.onRoot().performTouchInput { click() }
         compose.onNodeWithContentDescription("开始播放").assertExists()
-        val positions = listOf("喜欢", "评论", "收藏", "不喜欢").map { compose.onNodeWithText(it).fetchSemanticsNode().boundsInRoot.top }
+        val positions = listOf("喜欢", "评论", "收藏").map { compose.onNodeWithText(it).fetchSemanticsNode().boundsInRoot.top }
         org.junit.Assert.assertTrue(positions.zipWithNext().all { (before, after) -> before < after })
+        compose.onNodeWithText("不喜欢").assertDoesNotExist()
         repeat(3) {
             compose.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
             compose.activityRule.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
@@ -99,6 +106,31 @@ class VisualAuditTest {
             file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             bitmap.recycle()
         }
+        compose.runOnIdle { source.value = "hongguo" }
+        compose.waitUntil(10000) { compose.onAllNodes(androidx.compose.ui.test.hasText("不喜欢")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("不喜欢").assertIsDisplayed()
+    }
+
+    @Test fun fontWeightSliderSavesSevenStepsAndResetFollowsSystem() {
+        val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
+        runBlocking {
+            repo.store.open()
+            repo.store.set("fontWeightAdjustment", "-100", true)
+        }
+        compose.setContent { CompositionLocalProvider(LocalRepository provides repo, LocalNavigate provides {}) {
+            DramaTheme(repo.store) { SettingsPage("personalization", {}) }
+        } }
+        val slider = compose.onNodeWithContentDescription("字体粗细").performScrollTo()
+        compose.onNodeWithText("偏细").assertExists()
+        slider.performSemanticsAction(SemanticsActions.SetProgress) { it(-300f) }
+        compose.waitUntil(10000) { repo.store.text("fontWeightAdjustment", global = true) == "-300" }
+        compose.onNodeWithText("效果预览 (极细)").assertExists()
+        val backup = repo.store.exportBackup()
+        org.junit.Assert.assertEquals("-300", LocalStore.decodeBackup(backup).text("fontWeightAdjustment"))
+        compose.onNodeWithText("重置").performScrollTo().performClick()
+        compose.waitUntil(10000) { !repo.store.values.has("fontWeightAdjustment") }
+        compose.onNodeWithText("效果预览 (跟随系统)").assertExists()
+        org.junit.Assert.assertFalse(LocalStore.decodeBackup(repo.store.exportBackup()).has("fontWeightAdjustment"))
     }
 
     @Test fun surfaceRestoreSkipsDestroyedAndDuplicateAttachments() = runBlocking {
@@ -208,6 +240,10 @@ class VisualAuditTest {
         statusInset(64)
         compose.waitForIdle()
         org.junit.Assert.assertEquals(64, measuredStatus)
+        val positions = listOf("刷新推荐", "清屏", "全屏播放").map {
+            compose.onNodeWithContentDescription(it).fetchSemanticsNode().boundsInRoot.left
+        }
+        org.junit.Assert.assertTrue(positions.zipWithNext().all { (before, after) -> before < after })
         compose.onNodeWithContentDescription("全屏播放").performClick()
         statusInset(64)
         compose.waitForIdle()
@@ -360,10 +396,39 @@ class VisualAuditTest {
         org.junit.Assert.assertFalse(live.containsKey("video-3"))
         org.junit.Assert.assertFalse(live.containsKey("video-5"))
     }
+    @Test fun feedPreviewWaitsForAFrameFromTheCurrentTexture() {
+        val player = MpvPlayer(org.json.JSONObject(), observeInitially = false, feed = true)
+        val texture = object : android.graphics.SurfaceTexture(0) {
+            var displayedTimestamp = 0L
+            override fun getTimestamp() = displayedTimestamp
+        }
+        val readiness = mutableListOf<Boolean>()
+        val view = FittedVideoTexture(compose.activity, player) { readiness.add(it) }
+        try {
+            compose.runOnIdle {
+                val listener = view.surfaceTextureListener!!
+                listener.onSurfaceTextureAvailable(texture, 360, 720)
+                view.setVideoAspect(9f / 16f)
+                listener.onSurfaceTextureSizeChanged(texture, 720, 360)
+                listener.onSurfaceTextureUpdated(texture)
+                org.junit.Assert.assertTrue(readiness.isEmpty())
+                texture.displayedTimestamp = 1L
+                view.setVideoAspect(16f / 9f)
+                listener.onSurfaceTextureUpdated(texture)
+                org.junit.Assert.assertEquals(listOf(true), readiness)
+                view.setVideoAspect(0f)
+                view.setVideoAspect(9f / 16f)
+                org.junit.Assert.assertEquals(listOf(true, false), readiness)
+                listener.onSurfaceTextureDestroyed(texture)
+                listener.onSurfaceTextureUpdated(texture)
+                org.junit.Assert.assertEquals(listOf(true, false), readiness)
+            }
+        } finally { player.close() }
+    }
     @Test fun fullscreenSizeChangesKeepOutputAndMediaAlive() = runBlocking {
         AuditNativeBridge.commands.clear()
         AuditNativeBridge.playerCreations.set(0)
-        val player = MpvPlayer(org.json.JSONObject(), observeInitially = false)
+        val player = MpvPlayer(org.json.JSONObject(), observeInitially = false, feed = true)
         val texture = android.graphics.SurfaceTexture(0)
         val view = FittedVideoTexture(compose.activity, player)
         try {
@@ -387,6 +452,12 @@ class VisualAuditTest {
             org.junit.Assert.assertEquals(1, AuditNativeBridge.commands.count { it.getOrNull(1) == "android-surface-size" })
             org.junit.Assert.assertFalse(AuditNativeBridge.commands.any { it.getOrNull(1) == "vo" })
             org.junit.Assert.assertTrue(player.state.value.playing)
+            val initial = AuditNativeBridge.commands.toList()
+            org.junit.Assert.assertTrue(initial.takeWhile { it.firstOrNull() != "loadfile" }.contains(listOf("set", "cache-secs", "6")))
+            org.junit.Assert.assertTrue(initial.contains(listOf("set", "demuxer-hysteresis-secs", "3.0")))
+            player.observe(true)
+            compose.waitUntil(10000) { AuditNativeBridge.commands.contains(listOf("set", "demuxer-hysteresis-secs", "12.0")) }
+            org.junit.Assert.assertTrue(AuditNativeBridge.commands.contains(listOf("set", "cache-secs", "24")))
         } finally { player.detach(texture); player.close() }
     }
     @get:Rule val compose = createAndroidComposeRule<androidx.activity.ComponentActivity>()
@@ -506,31 +577,97 @@ class VisualAuditTest {
             "local:audit", "audit", ByteArray(0),
         ))
         AuditNativeBridge.feedWarmups.set(0)
-        val warming = java.util.concurrent.CountDownLatch(1)
-        val finish = java.util.concurrent.CountDownLatch(1)
-        AuditNativeBridge.onFeedWarmup = {
-            warming.countDown()
-            check(finish.await(5, java.util.concurrent.TimeUnit.SECONDS))
-        }
         val preparation = FeedPlaybackPreparation(repo, this)
         preparation.retain(setOf(drama.id), setOf(drama.id))
         val detail = preparation.detail(drama)
         org.junit.Assert.assertSame(detail, preparation.detail(drama))
         val episode = detail.await().getOrThrow().episodes.first()
         try {
-            preparation.prepare(drama, episode, 720)
-            preparation.prepare(drama, episode, 720)
-            check(withContext(Dispatchers.IO) { warming.await(5, java.util.concurrent.TimeUnit.SECONDS) })
-            preparation.retain(setOf(drama.id), setOf(drama.id))
-            val plan = requireNotNull(preparation.take(drama, episode, 720))
-            org.junit.Assert.assertEquals("feed-audit", plan.text("session"))
-            org.junit.Assert.assertNull(preparation.take(drama, episode, 720))
-            org.junit.Assert.assertEquals(1, AuditNativeBridge.feedWarmups.get())
-            repo.release(plan)
+            for (activateEarly in listOf(false, true)) {
+                val warming = java.util.concurrent.CountDownLatch(1)
+                val finish = java.util.concurrent.CountDownLatch(1)
+                AuditNativeBridge.onFeedWarmup = {
+                    warming.countDown()
+                    check(finish.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                }
+                try {
+                    preparation.prepare(drama, episode, 720)
+                    preparation.prepare(drama, episode, 720)
+                    check(withContext(Dispatchers.IO) { warming.await(5, java.util.concurrent.TimeUnit.SECONDS) })
+                    val active = mutableStateOf(false)
+                    val taking = async(start = CoroutineStart.UNDISPATCHED) {
+                        preparation.take(drama, episode, 720) { active.value }
+                    }
+                    org.junit.Assert.assertFalse(taking.isCompleted)
+                    if (activateEarly) {
+                        active.value = true
+                        androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                    } else finish.countDown()
+                    val plan = requireNotNull(withTimeout(4000) { taking.await() })
+                    org.junit.Assert.assertEquals("feed-audit", plan.text("session"))
+                    org.junit.Assert.assertEquals(if (activateEarly) 0L else 1024L, plan.optLong("prefetchedBytes"))
+                    if (activateEarly) org.junit.Assert.assertEquals(1L, finish.count)
+                    org.junit.Assert.assertNull(preparation.take(drama, episode, 720))
+                    repo.release(plan)
+                } finally { finish.countDown() }
+            }
+            org.junit.Assert.assertEquals(2, AuditNativeBridge.feedWarmups.get())
         } finally {
-            finish.countDown()
             AuditNativeBridge.onFeedWarmup = {}
             preparation.retain(emptySet(), emptySet())
+        }
+    }
+
+    @Test fun feedSwipeSettlesWhileNextDetailsAreStillLoading() {
+        val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
+        val candidates = (7..8).map { number ->
+            Drama(obj("id" to "hongguo:swipe-$number", "source" to "hongguo", "title" to "滑动检查 $number", "episodes" to number))
+        }
+        val ordered = runBlocking {
+            repo.store.open()
+            repo.subscriptions.installed.value = listOf(SourcePackage(
+                obj("id" to "hongguo", "name" to "合成来源", "version" to "1", "program" to "function* main(){}",
+                    "capabilities" to org.json.JSONArray(listOf("catalog"))), "local:audit", "audit", ByteArray(0),
+            ))
+            repo.store.set("homeFeedPreferences", obj("hongguo" to obj("enabled" to true, "categories" to obj("short_play" to true))))
+            repo.saveCatalog("hongguo", "short_play", Catalog(candidates, false, 1))
+            repo.recommendations.rank(candidates, repo.store, 0, excludeRecent = true)
+        }
+        val (first, next) = ordered
+        val loading = java.util.concurrent.CountDownLatch(1)
+        val finish = java.util.concurrent.CountDownLatch(1)
+        AuditNativeBridge.onFeedDetail = { id ->
+            if (id == next.id) {
+                loading.countDown()
+                check(finish.await(15, java.util.concurrent.TimeUnit.SECONDS))
+            }
+        }
+        try {
+            compose.setContent { CompositionLocalProvider(LocalRepository provides repo, LocalNavigate provides {}) {
+                DramaTheme(repo.store) { FeedScreen(true, false, false, {}, onFullScreen = {}) }
+            } }
+            compose.waitUntil(8000) {
+                loading.count == 0L && compose.onAllNodes(androidx.compose.ui.test.hasText(first.title)).fetchSemanticsNodes().isNotEmpty()
+            }
+            val root = compose.onRoot()
+            val viewport = root.fetchSemanticsNode().boundsInRoot
+            val firstTitle = compose.onNodeWithText(first.title)
+            val initialTop = firstTitle.fetchSemanticsNode().boundsInRoot.top
+            root.performTouchInput {
+                down(androidx.compose.ui.geometry.Offset(center.x, height * .80f))
+                moveTo(androidx.compose.ui.geometry.Offset(center.x, height * .14f))
+            }
+            org.junit.Assert.assertTrue(initialTop - firstTitle.fetchSemanticsNode().boundsInRoot.top > viewport.height * .5f)
+            compose.runOnIdle { org.junit.Assert.assertEquals(first.id, repo.recommendations.recent.last().id) }
+            root.performTouchInput { up() }
+            compose.waitUntil(4000) { repo.recommendations.recent.lastOrNull()?.id == next.id }
+            val placeholder = compose.onNodeWithText("共 ${next.json.optInt("episodes")} 集")
+            placeholder.assertIsDisplayed()
+            org.junit.Assert.assertEquals(viewport.bottom - 9f, placeholder.fetchSemanticsNode().boundsInRoot.bottom, 3f)
+            org.junit.Assert.assertEquals(1L, finish.count)
+        } finally {
+            finish.countDown()
+            AuditNativeBridge.onFeedDetail = {}
         }
     }
 
@@ -914,6 +1051,7 @@ class AuditNativeBridge {
         var longCatalog = false
         val feedWarmups = java.util.concurrent.atomic.AtomicInteger()
         @Volatile var onFeedWarmup: () -> Unit = {}
+        @Volatile var onFeedDetail: (String) -> Unit = {}
         @JvmStatic @Implementation fun __staticInitializer__() {
             ReflectionHelpers.setStaticField(NativeBridge::class.java, "INSTANCE", ReflectionHelpers.callConstructor(NativeBridge::class.java))
         }
@@ -925,7 +1063,11 @@ class AuditNativeBridge {
             if (action == "catalog" || action == "search") catalogRequests.incrementAndGet()
             val fixture = auditData()
             val value = when (action) {
-                "detail" -> obj("drama" to request.getJSONObject("payload").getJSONObject("drama"), "chapters" to fixture.getJSONArray("chapters"))
+                "detail" -> {
+                    val drama = request.getJSONObject("payload").getJSONObject("drama")
+                    onFeedDetail(drama.text("id"))
+                    obj("drama" to drama, "chapters" to fixture.getJSONArray("chapters"))
+                }
                 "categories" -> obj("items" to org.json.JSONArray())
                 "creator" -> fixture.getJSONObject("creator")
                 "rankingBoards" -> obj("items" to fixture.getJSONArray("rankingBoards"))

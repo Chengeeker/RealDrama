@@ -33,7 +33,6 @@ func (engine *nativeEngine) subscriptionPrefetch(ctx context.Context, input nati
 		cancel()
 	}
 	if err := ctx.Err(); err != nil {
-		engine.nativeReleasePlayback(plan.Session)
 		return nativePlan{}, err
 	}
 	return plan, nil

@@ -1,7 +1,10 @@
 package com.real.drama.compose
 
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
@@ -12,6 +15,12 @@ internal fun feedRetainedPlayers(ids: List<String>, current: Int, retained: Set<
     val nearby = ids.subList((current - 2).coerceAtLeast(0), (current + 3).coerceAtMost(ids.size)).toSet()
     return (retained + selected + listOfNotNull(ids.getOrNull(current + 1).takeIf { warm })).intersect(nearby)
 }
+
+internal const val feedLookahead = 5
+
+internal fun feedUpcomingPreloads(upcoming: List<Drama>, currentIsDouyin: Boolean, isDouyin: (Drama) -> Boolean): List<Drama> =
+    upcoming.take(if (currentIsDouyin) 1 else feedLookahead)
+        .filterIndexed { index, drama -> index == 0 || !isDouyin(drama) }
 
 internal fun feedResumeIndex(episodes: List<Episode>, watch: JSONObject?): Int {
     if (watch == null || watch.optDouble("duration") > 1 && watch.optDouble("position") >= watch.optDouble("duration") - 1) return 0
@@ -85,6 +94,7 @@ internal class FeedPlaybackPreparation(private val repo: Repository, private val
         var plan: JSONObject? = null
         var expires = 0L
         var taken = false
+        val finished = MutableStateFlow(false)
     }
     private val details = mutableMapOf<String, Deferred<Result<Detail>>>()
     private val prepared = mutableMapOf<String, Preparation>()
@@ -105,9 +115,10 @@ internal class FeedPlaybackPreparation(private val repo: Repository, private val
         prepared.keys.filterNot(planIds::contains).forEach { discard(it) }
     }
 
-    fun prepare(drama: Drama, episode: Episode, quality: Int) {
+    fun prepare(drama: Drama, episode: Episode, quality: Int): Job? {
         val epoch = repo.store.epoch
-        if (drama.id !in targets || matching(drama, episode, quality) != null) return
+        if (drama.id !in targets) return null
+        matching(drama, episode, quality)?.let { return it.task }
         discard(drama.id)
         val entry = Preparation(episode.number, quality, epoch)
         prepared[drama.id] = entry
@@ -121,7 +132,7 @@ internal class FeedPlaybackPreparation(private val repo: Repository, private val
                 check(entry.expires > now && repo.store.epoch == epoch)
                 entry.resolved.complete(Unit)
                 mediaRead.withLock {
-                    if (!entry.taken) {
+                    if (!entry.taken && (repo.source(drama.source)?.group != "douyin" || !repo.runtime.douyinCoolingDown)) {
                         val warmed = repo.warmPlayback(plan, quality)
                         if (!entry.taken) entry.plan = warmed
                     }
@@ -131,19 +142,30 @@ internal class FeedPlaybackPreparation(private val repo: Repository, private val
             } catch (_: Exception) {
                 if (!entry.resolved.isCompleted && prepared[drama.id] === entry) discard(drama.id)
             } finally {
+                entry.finished.value = true
                 entry.resolved.complete(Unit)
             }
         }
         entry.task.start()
+        return entry.task
     }
 
-    suspend fun take(drama: Drama, episode: Episode, quality: Int): JSONObject? {
+    suspend fun warm(drama: Drama, episode: Episode, quality: Int): Boolean {
+        prepare(drama, episode, quality)?.join()
+        return matching(drama, episode, quality)?.plan != null
+    }
+
+    suspend fun take(drama: Drama, episode: Episode, quality: Int, playNow: () -> Boolean = { true }): JSONObject? {
         val entry = matching(drama, episode, quality) ?: return null
         entry.resolved.await()
+        if (!playNow() && !entry.finished.value) {
+            entry.finished.combine(snapshotFlow { playNow() }) { finished, active -> finished || active }.first { it }
+        }
         if (matching(drama, episode, quality) !== entry) return null
         val plan = entry.plan ?: return null
         entry.taken = true
         prepared.remove(drama.id)
+        if (!entry.finished.value) entry.task.cancel()
         return plan
     }
 
@@ -155,6 +177,7 @@ internal class FeedPlaybackPreparation(private val repo: Repository, private val
     private fun discard(id: String) {
         val entry = prepared.remove(id) ?: return
         entry.task.cancel()
+        entry.finished.value = true
         entry.resolved.complete(Unit)
         release(entry.plan)
     }

@@ -26,11 +26,10 @@ fun SettingsDropdown(value: String, options: List<Pair<String, String>>, enabled
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PersonalizationSettings() {
     val repo = LocalRepository.current; val action = rememberAction()
-    fun save(key: String, value: Any) = action { repo.store.set(key, value, true) }
+    fun save(key: String, value: Any?) = action { repo.store.set(key, value, true) }
     AppearanceSection("启动界面") {
         Column(Modifier.padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 8.dp)) {
             Text("应用启动时打开", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -51,9 +50,9 @@ fun PersonalizationSettings() {
     Spacer(Modifier.height(16.dp))
     AppearanceSection("交互与排版") {
         SwitchRow("震动反馈", repo.store.bool("hapticFeedback", true, true)) { save("hapticFeedback", it) }
-        SettingRow("字体粗细")
-        FlowRow(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf(-100 to "细体", 0 to "标准", 100 to "中等", 200 to "较粗", 300 to "粗体").forEach { (value, label) -> LegacyChip(repo.store.text("fontWeightAdjustment", "0", true) == value.toString(), { save("fontWeightAdjustment", value.toString()) }, { Text(label) }) }
-        }
+    }
+    Spacer(Modifier.height(16.dp))
+    FontWeightSetting(repo.store.text("fontWeightAdjustment", "", true).toIntOrNull()) {
+        save("fontWeightAdjustment", it?.toString())
     }
 }

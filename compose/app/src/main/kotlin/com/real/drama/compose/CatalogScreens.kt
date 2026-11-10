@@ -27,7 +27,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -364,6 +367,10 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
         repo.available().filter { it.kind != "live" && ("catalog" in it.capabilities || "recommendations" in it.capabilities) && preference.optJSONObject(it.id)?.optBoolean("enabled") == true }
     }
     val pager = rememberPagerState { rows.size }
+    val pageIndex = pager.settledPage
+    suspend fun awaitScrollIdle() {
+        if (pager.isScrollInProgress) snapshotFlow { pager.isScrollInProgress }.first { !it }
+    }
     val scope = rememberCoroutineScope()
     val preparation = remember(repo, scope) { FeedPlaybackPreparation(repo, scope) }
     DisposableEffect(preparation) { onDispose { preparation.retain(emptySet(), emptySet()) } }
@@ -374,6 +381,7 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
     var batchRevision by remember { mutableIntStateOf(0) }
     var retryAt by remember { mutableLongStateOf(0L) }
     var firstPlayback by remember { mutableStateOf(false) }
+    var readyForPreload by remember(active) { mutableStateOf<String?>(null) }
     var batchCursor by rememberSaveable { mutableIntStateOf(0) }
     val sessionUnavailable = remember { mutableSetOf<String>() }
     val batches = remember(enabled, rawPreference) { feedCategoryBatches(enabled.associate { it.id to feedRequestCategories(it.id, preference.optJSONObject(it.id) ?: JSONObject()) }) }
@@ -456,7 +464,8 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
         if (!sessionUnavailable.add(drama.id)) return
         val removed = rows.indexOfFirst { it.id == drama.id }
         if (removed < 0) return
-        val nextPage = (pager.currentPage - if (removed < pager.currentPage) 1 else 0)
+        val selectedPage = pager.settledPage
+        val nextPage = selectedPage - if (removed < selectedPage) 1 else 0
         consecutiveUnavailable++
         rows = rows.filterNot { it.id == drama.id }
         if (rows.isNotEmpty()) pager.requestScrollToPage(nextPage.coerceIn(0, rows.lastIndex))
@@ -476,20 +485,21 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
     LaunchedEffect(rawPreference, hiddenSources, repo.store.epoch, packages, refresh) {
         feedJob?.cancel(); generation++; loading = false; emptyAttempts = 0; consecutiveUnavailable = 0
         firstPlayback = false; retryAt = 0; error = null
+        readyForPreload = null
         pageControls = null
         preparation.retain(emptySet(), emptySet())
         rows = emptyList(); pages.clear(); finished.clear()
         pager.requestScrollToPage(0)
     }
-    LaunchedEffect(pager.currentPage, repo.store.json("feedRecommendation").toString(), repo.recommendations.revision) {
+    LaunchedEffect(pageIndex, repo.store.json("feedRecommendation").toString(), repo.recommendations.revision) {
         val queue = rows
-        val first = minOf(queue.size, pager.currentPage + 6); val end = minOf(queue.size, first + 60)
+        val first = minOf(queue.size, pageIndex + 6); val end = minOf(queue.size, first + 60)
         if (first < end) {
             val ranked = repo.recommendations.rank(queue.subList(first, end), repo.store, refresh)
             if (rows === queue) rows = queue.take(first) + ranked + queue.drop(end)
         }
     }
-    val currentDrama = rows.getOrNull(pager.currentPage)
+    val currentDrama = rows.getOrNull(pageIndex)
     val boost = active && boostingDramaId != null && boostingDramaId == currentDrama?.id
     LaunchedEffect(boost) { onBoost(boost) }
     val manageOrientation = active && !television && returnOrientation != null
@@ -524,12 +534,12 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
             catch (_: Exception) { repo.diagnostics.record("feed_exposure_save_failed", JSONObject()) }
         }
     }
-    LaunchedEffect(pager.currentPage, rows.size, active, generation, batchRevision, retryAt, firstPlayback) {
+    LaunchedEffect(pageIndex, rows.size, active, generation, batchRevision, retryAt, firstPlayback) {
         if (!active || batches.isEmpty() || loading || consecutiveUnavailable >= 20) return@LaunchedEffect
         val wait = retryAt - System.currentTimeMillis()
         if (wait > 0) delay(wait)
         if (retryAt != 0L) retryAt = 0
-        val needMore = if (rows.isEmpty()) emptyAttempts < 8 else firstPlayback && rows.size - pager.currentPage <= maxOf(3, (rows.size + 1) / 2)
+        val needMore = if (rows.isEmpty()) emptyAttempts < 8 else firstPlayback && rows.size - pageIndex <= maxOf(3, (rows.size + 1) / 2)
         if (needMore && batches.any { batch -> batch.any { (source, category) -> "$source:$category" !in finished } }) {
             loading = true
             feedJob = scope.launch { append() }
@@ -537,13 +547,31 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
     }
     val controls = pageControls?.takeIf { it.first == currentDrama?.id }?.second
     val currentSource = currentDrama?.let { repo.source(it.source) }
-    val afterCurrent = (pager.currentPage + 1).coerceAtMost(rows.size)
-    val upcoming = rows.subList(afterCurrent, (afterCurrent + radius).coerceAtMost(rows.size))
+    val lifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
+    val canPreload = active && !lowMemory && lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    val afterCurrent = (pageIndex + 1).coerceAtMost(rows.size)
+    val nextDrama = rows.getOrNull(afterCurrent)
+    fun isDouyin(drama: Drama) = repo.source(drama.source)?.group == "douyin"
+    fun canWarm(drama: Drama) = !isDouyin(drama) || !repo.runtime.douyinCoolingDown
+    val upcoming = if (canPreload) feedUpcomingPreloads(
+        rows.subList(afterCurrent, (afterCurrent + feedLookahead).coerceAtMost(rows.size)), currentSource?.group == "douyin", ::isDouyin,
+    ) else emptyList()
     val previous = rows.subList((afterCurrent - 1 - radius).coerceAtLeast(0), (afterCurrent - 1).coerceAtLeast(0))
+    LaunchedEffect(generation, currentDrama?.id, upcoming, radius, readyForPreload) {
+        if (currentDrama == null || readyForPreload != currentDrama.id) return@LaunchedEffect
+        val visibleNeighbors = rows.subList(afterCurrent, (afterCurrent + radius).coerceAtMost(rows.size)).toSet()
+        for (drama in upcoming) {
+            if (drama in visibleNeighbors || !canWarm(drama)) continue
+            awaitScrollIdle()
+            if (canWarm(drama)) loadCoverBitmap(repo, drama)
+        }
+    }
     var retainedPlayers by remember(generation, homeQuality, lowMemory) { mutableStateOf(emptySet<String>()) }
-    val playerIds = if (active) feedRetainedPlayers(rows.map { it.id }, pager.currentPage, retainedPlayers, firstPlayback, lowMemory) else emptySet()
+    var preparedNext by remember(generation, homeQuality, currentDrama?.id, canPreload) { mutableStateOf<String?>(null) }
+    val warmNext = canPreload && preparedNext != null && preparedNext == nextDrama?.id
+    val playerIds = if (active) feedRetainedPlayers(rows.map { it.id }, pageIndex, retainedPlayers, warmNext, lowMemory) else emptySet()
     SideEffect { if (retainedPlayers != playerIds) retainedPlayers = playerIds }
-    LaunchedEffect(active, generation, currentDrama?.id, upcoming.map { it.id }, previous.map { it.id }, firstPlayback, homeQuality, radius) {
+    LaunchedEffect(active, generation, currentDrama?.id, upcoming.map { it.id }, previous.map { it.id }, homeQuality, readyForPreload, radius) {
         val forward = listOfNotNull(currentDrama) + upcoming
         val nearby = forward + previous.asReversed()
         preparation.retain(
@@ -551,14 +579,18 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
             if (active && radius > 0) forward.map { it.id }.toSet() else emptySet(),
         )
         if (!active) return@LaunchedEffect
-        nearby.forEach { preparation.detail(it) }
-        if (!firstPlayback) return@LaunchedEffect
-        val ahead = upcoming.take(if (currentSource?.group == "douyin") 1 else 2)
-        for (drama in ahead) {
-            if (drama.id in playerIds) continue
+        currentDrama?.let { preparation.detail(it) }
+        nextDrama?.takeIf { it in upcoming && canWarm(it) }?.let { preparation.detail(it) }
+        if (currentDrama == null || readyForPreload != currentDrama.id) return@LaunchedEffect
+        for (drama in upcoming) {
+            if (drama.id in retainedPlayers || !canWarm(drama)) continue
+            awaitScrollIdle()
             val detail = preparation.detail(drama).await().getOrNull() ?: continue
             val episode = detail.episodes.getOrNull(feedResumeIndex(detail.episodes, repo.store.watch(drama))) ?: continue
-            preparation.prepare(detail.drama, episode, homeQuality)
+            awaitScrollIdle()
+            if (canWarm(drama) && preparation.warm(detail.drama, episode, homeQuality) && drama.id == nextDrama?.id) {
+                preparedNext = drama.id
+            }
         }
     }
     val danmaku by repo.danmaku.collectAsState()
@@ -585,11 +617,11 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
             else if (!clean) {
                 Row(Modifier.width(feedWidth).fillMaxHeight().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("推荐", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp, fontWeight = appTextWeight(FontWeight.Bold))
-                    if (canChooseEpisodes) IconAction("grid_view_rounded", controls?.let { "选集 · 第 ${it.episode} 集" } ?: "选集", controls != null) { controls?.episodes?.invoke() }
-                    if (canDanmaku) danmakuButton()
                     IconAction("refresh_rounded", "刷新推荐") { refresh++ }
-                    IconAction("fullscreen_rounded", "全屏播放") { setFullscreen(true) }
                     IconAction("visibility_off_rounded", "清屏") { onClean(true) }
+                    if (canDanmaku) danmakuButton()
+                    IconAction("fullscreen_rounded", "全屏播放") { setFullscreen(true) }
+                    if (canChooseEpisodes) IconAction("grid_view_rounded", controls?.let { "选集 · 第 ${it.episode} 集" } ?: "选集", controls != null) { controls?.episodes?.invoke() }
                 }
                 HorizontalDivider(Modifier.align(Alignment.BottomCenter), thickness = .5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .24f))
             }
@@ -619,57 +651,70 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
         else VerticalPager(pager, modifier = Modifier.width(feedWidth).fillMaxHeight(), beyondViewportPageCount = radius, key = { rows.getOrNull(it)?.id ?: it }) { index ->
             val drama = rows.getOrNull(index)
             if (drama != null) {
-                var detail by remember(drama.id) { mutableStateOf<Detail?>(null) }
-                var failed by remember(drama.id) { mutableStateOf<String?>(null) }
-                val current = index == pager.currentPage
-                val pageActive = active && current
-                val keepPlayer = drama.id in playerIds
-                LaunchedEffect(drama.id, generation, pageActive, keepPlayer) {
-                    if (!pageActive && !keepPlayer) return@LaunchedEffect
-                    val result = preparation.detail(drama).await()
-                    detail = result.getOrNull()
-                    failed = result.exceptionOrNull()?.let { it.message ?: "无法读取分集" }
+                var detail by remember(drama.id, generation) { mutableStateOf<Detail?>(null) }
+                var failed by remember(drama.id, generation) { mutableStateOf(false) }
+                val previewBitmap by rememberCoverBitmap(drama)
+                val preview: @Composable (Modifier) -> Unit = { modifier ->
+                    DramaCover(drama, modifier) { CoverImage(previewBitmap, it, poster = true) }
                 }
-                LaunchedEffect(failed, detail, pageActive) { if (pageActive && (failed != null || detail?.episodes?.isEmpty() == true)) unavailable(drama) }
+                val pageActive = active && index == pageIndex
+                val keepPlayer = pageActive || drama.id in playerIds
+                LaunchedEffect(drama.id, generation, keepPlayer) {
+                    if (!keepPlayer || detail != null || failed) return@LaunchedEffect
+                    val result = preparation.detail(drama).await()
+                    awaitScrollIdle()
+                    detail = result.getOrNull()
+                    failed = result.isFailure
+                }
+                LaunchedEffect(failed, detail, pageActive) {
+                    if (pageActive && (failed || detail?.episodes?.isEmpty() == true)) {
+                        awaitScrollIdle()
+                        if (rows.getOrNull(pager.settledPage)?.id == drama.id) unavailable(drama)
+                    }
+                }
                 Box(Modifier.fillMaxSize()) {
                     val ready = detail
                     when {
-                        failed != null || detail?.episodes?.isEmpty() == true -> Box(Modifier.fillMaxSize().background(Color.Black))
-                        ready != null && (pageActive || keepPlayer) -> PlayerPane(ready, initialIndex = feedResumeIndex(ready.episodes, repo.store.watch(drama)), active = pageActive, feed = true, modifier = Modifier.fillMaxSize(), externalFull = full && pageActive, externalClean = clean, onClean = onClean,
+                        ready != null && ready.episodes.isNotEmpty() && keepPlayer -> PlayerPane(ready, initialIndex = feedResumeIndex(ready.episodes, repo.store.watch(drama)), active = pageActive, feed = true, modifier = Modifier.fillMaxSize(), externalFull = full && pageActive, externalClean = clean, onClean = onClean, feedPreview = preview,
                             takeFeedPlan = { target, episode, quality ->
-                                preparation.prepare(target, episode, quality)
-                                preparation.take(target, episode, quality)
+                                val playNow = { rows.getOrNull(pager.settledPage)?.id == target.id }
+                                preparation.take(target, episode, quality, playNow)
                             },
                             onVideoAspectRatio = { ratio ->
-                                if (rows.getOrNull(pager.currentPage)?.id == drama.id) videoAspect = drama.id to ratio
+                                if (rows.getOrNull(pager.settledPage)?.id == drama.id) videoAspect = drama.id to ratio
                             },
                             onBoost = { boosting ->
-                                if (boosting && rows.getOrNull(pager.currentPage)?.id == drama.id) boostingDramaId = drama.id
+                                if (boosting && rows.getOrNull(pager.settledPage)?.id == drama.id) boostingDramaId = drama.id
                                 if (!boosting && boostingDramaId == drama.id) boostingDramaId = null
                             },
                             onControls = { value ->
-                                if (value != null && rows.getOrNull(pager.currentPage)?.id == drama.id) pageControls = drama.id to value
+                                if (value != null && rows.getOrNull(pager.settledPage)?.id == drama.id) pageControls = drama.id to value
                                 else if (value == null && pageControls?.first == drama.id) pageControls = null
                             }, onFullScreen = ::setFullscreen,
-                            onUnavailable = { if (rows.getOrNull(pager.currentPage)?.id == drama.id) unavailable(drama) },
+                            onUnavailable = { failed = true },
                             onAvailable = {
-                                if (rows.getOrNull(pager.currentPage)?.id == drama.id) {
+                                if (rows.getOrNull(pager.settledPage)?.id == drama.id) {
                                     firstPlayback = true
+                                    readyForPreload = drama.id
                                     consecutiveUnavailable = 0
                                     error = null
                                 }
-                            }, onComments = { nav(Route("comments", drama)) }, onCreator = { nav(Route("creator", drama)) }, onNext = { scope.launch { if (pager.currentPage + 1 < rows.size) pager.animateScrollToPage(pager.currentPage + 1) } })
+                            }, onComments = { nav(Route("comments", drama)) }, onCreator = { nav(Route("creator", drama)) }, onNext = {
+                                scope.launch {
+                                    val selected = pager.settledPage
+                                    if (!pager.isScrollInProgress && rows.getOrNull(selected)?.id == drama.id && selected + 1 < rows.size) {
+                                        pager.animateScrollToPage(selected + 1)
+                                    }
+                                }
+                            })
                         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            DramaCover(drama, Modifier.matchParentSize())
-                            if (pageActive && ready == null) LoadingRing(color = Color.White)
+                            preview(Modifier.matchParentSize())
+                            if (pageActive && ready == null && !failed) LoadingRing(color = Color.White)
                         }
                     }
                     if (clean) FeedCleanExit { onClean(false) }
                 }
             }
-        }
-        if (rows.isNotEmpty() && !firstPlayback) Box(Modifier.matchParentSize().background(Color.Black), contentAlignment = Alignment.Center) {
-            LoadingRing(color = Color.White)
         }
         if (clean && rows.isEmpty()) FeedCleanExit { onClean(false) }
         if (full && boost) Box(Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).padding(top = 8.dp)) { boostHint() }

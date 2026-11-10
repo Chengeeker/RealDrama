@@ -43,9 +43,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONObject
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 data class PlaybackState(val position: Double = 0.0, val duration: Double = 0.0, val playing: Boolean = false, val buffering: Boolean = true,
-    val completed: Boolean = false, val width: Double = 0.0, val height: Double = 0.0, val error: String? = null, val buffered: Double = 0.0)
+    val completed: Boolean = false, val width: Double = 0.0, val height: Double = 0.0, val error: String? = null, val buffered: Double = 0.0,
+    val positionRevision: Long = 0L)
 
 internal fun playbackSnapshot(values: DoubleArray, intent: Boolean, previousError: String?): PlaybackState {
     require(values.size == 11)
@@ -61,6 +64,10 @@ internal fun playbackSnapshot(values: DoubleArray, intent: Boolean, previousErro
 internal fun scrubPosition(start: Double, distance: Float, width: Int, duration: Double): Double =
     if (width <= 0 || !duration.isFinite() || duration <= 0) start else
         (start + distance / width * minOf(duration, 180.0)).coerceIn(0.0, duration)
+
+internal fun feedCacheSeconds(duration: Double): Int =
+    if (!duration.isFinite() || duration <= 0.0) 6 else
+        (duration * .30).roundToInt().coerceIn(3, 24).coerceAtMost(ceil(duration).toInt())
 
 internal suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPlaybackScrub(
     state: () -> PlaybackState, preview: (Float?) -> Unit, seek: (Double) -> Unit,
@@ -137,7 +144,7 @@ fun FeedAction(icon: String, label: String, selected: Boolean = false, compact: 
             style = LocalTextStyle.current.copy(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 6f)))
     }
 }
-class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean = true) {
+class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean = true, feed: Boolean = false) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
     private var handle = 0L
@@ -149,6 +156,8 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
     private var start = 0.0
     @Volatile private var intent = false
     private var playbackRate = preferences.optDouble("speed", 1.0)
+    private val adaptiveCache = feed && !preferences.optBoolean("lowMemory")
+    private var cacheWindow = 0
     @Volatile private var closed = false
     private val observing = MutableStateFlow(observeInitially)
     fun observe(value: Boolean) { observing.value = value }
@@ -201,7 +210,9 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
                 mutex.withLock {
                     if (!closed && observing.value && handle != 0L && pending != null) {
                         try {
-                            state.value = playbackSnapshot(NativeBridge.playerSnapshot(handle), intent, state.value.error)
+                            val snapshot = playbackSnapshot(NativeBridge.playerSnapshot(handle), intent, state.value.error)
+                            if (adaptiveCache) setFeedCache(feedCacheSeconds(snapshot.duration))
+                            state.value = snapshot.copy(positionRevision = state.value.positionRevision)
                         } catch (error: Exception) {
                             state.value = state.value.copy(playing = false, buffering = false, error = error.message ?: "无法读取播放器状态")
                         }
@@ -213,13 +224,18 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
     }
     suspend fun open(plan: JSONObject, position: Double = 0.0) = withContext(Dispatchers.IO) { mutex.withLock {
         if (closed) return@withLock
-        pending = plan; start = position; state.value = PlaybackState(position = position, playing = intent, buffering = intent)
+        pending = plan; start = position
+        state.value = PlaybackState(position = position, playing = intent, buffering = intent, positionRevision = state.value.positionRevision + 1)
         if (handle != 0L) openLocked(plan, position)
     } }
     private fun openLocked(plan: JSONObject, position: Double) {
         val address = plan.getString("url")
         require(address.startsWith("https://") || address.startsWith("http://") || address.startsWith("/") || address.startsWith("file://")) { "媒体地址无效" }
         command("stop")
+        if (adaptiveCache) {
+            cacheWindow = 0
+            setFeedCache(feedCacheSeconds(0.0))
+        }
         val headers = plan.optJSONObject("headers") ?: JSONObject()
         val encoded = headers.keys().asSequence().map { key ->
             val value = headers.getString(key); require(!key.contains('\n') && !value.contains('\n') && !value.contains('\r'))
@@ -237,6 +253,12 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
         check(command("loadfile", address, "replace") >= 0) { "无法打开媒体" }
         command("set", "pause", if (intent) "no" else "yes")
     }
+    private fun setFeedCache(seconds: Int) {
+        if (seconds == cacheWindow) return
+        cacheWindow = seconds
+        command("set", "cache-secs", seconds.toString())
+        command("set", "demuxer-hysteresis-secs", (seconds / 2.0).toString())
+    }
     suspend fun play(value: Boolean) {
         intent = value
         withContext(Dispatchers.IO) { mutex.withLock {
@@ -247,7 +269,9 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
     suspend fun seek(seconds: Double) = withContext(Dispatchers.IO) { mutex.withLock {
         val target = seconds.coerceIn(0.0, state.value.duration.takeIf { it > 0 } ?: Double.MAX_VALUE)
         start = target
-        if (command("seek", target.toString(), "absolute+exact") >= 0) state.value = state.value.copy(position = target, completed = false)
+        if (command("seek", target.toString(), "absolute+exact") >= 0) {
+            state.value = state.value.copy(position = target, completed = false, positionRevision = state.value.positionRevision + 1)
+        }
     } }
     suspend fun rate(speed: Double) = withContext(Dispatchers.IO) { mutex.withLock { playbackRate = speed; command("set", "speed", speed.toString()); Unit } }
     suspend fun volume(value: Double) = withContext(Dispatchers.IO) { mutex.withLock { command("set", "volume", value.coerceIn(0.0, 100.0).toString()); Unit } }
@@ -313,9 +337,12 @@ internal suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectF
 }
 
 @Composable
-fun VideoSurface(player: MpvPlayer, modifier: Modifier = Modifier) {
+fun VideoSurface(player: MpvPlayer, modifier: Modifier = Modifier, onFrameReady: ((Boolean) -> Unit)? = null) {
     val state by player.state.collectAsState()
-    AndroidView(factory = { FittedVideoTexture(it, player) }, modifier = modifier,
+    val latestOnFrameReady by rememberUpdatedState(onFrameReady)
+    AndroidView(factory = { context ->
+        FittedVideoTexture(context, player, if (onFrameReady == null) null else { ready -> latestOnFrameReady?.invoke(ready) })
+    }, modifier = modifier,
         update = { it.setVideoAspect(if (state.width > 0 && state.height > 0) (state.width / state.height).toFloat() else 0f) })
 }
 
@@ -324,13 +351,15 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
     handoff: LanPreparedPlayback? = null, localPlan: JSONObject? = null, mediaId: String = "", localOnly: Boolean = false,
     selectedIndex: Int? = null, onIndexChanged: (Int) -> Unit = {}, externalFull: Boolean? = null, externalClean: Boolean? = null,
     takeFeedPlan: (suspend (Drama, Episode, Int) -> JSONObject?)? = null,
+    feedPreview: (@Composable (Modifier) -> Unit)? = null,
     onVideoAspectRatio: (Double) -> Unit = {},
     onControls: (PlayerActions?) -> Unit = {}, onClean: (Boolean) -> Unit = {}, onBoost: (Boolean) -> Unit = {}, onFullScreen: (Boolean) -> Unit = {}, onComments: () -> Unit = {}, onCreator: () -> Unit = {}, onNext: () -> Unit = {}, onBack: () -> Unit = {}, onUnavailable: () -> Unit = {}, onAvailable: () -> Unit = {}) {
     val repo = LocalRepository.current; val action = rememberAction(); val context = LocalContext.current; val nav = LocalNavigate.current
     val rawPreferences = repo.store.text("playback", "{}")
     val preferences = remember(rawPreferences) { JSONObject(rawPreferences) }
     val television = !feed && televisionMode()
-    val player = remember(detail.drama.id) { MpvPlayer(preferences, observeInitially = active || !feed) }
+    val player = remember(detail.drama.id) { MpvPlayer(preferences, observeInitially = active || !feed, feed = feed) }
+    var videoFrameReady by remember(player) { mutableStateOf(false) }
     val state by player.state.collectAsState()
     var index by remember(detail.drama.id) { mutableIntStateOf(initialIndex.coerceIn(0, (detail.episodes.size - 1).coerceAtLeast(0))) }
     var plan by remember(detail.drama.id) { mutableStateOf<JSONObject?>(null) }
@@ -602,8 +631,9 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             else -> false
         }
     }.focusRequester(rootFocus).focusable()) {
-        VideoSurface(player, Modifier.fillMaxSize())
-        if (active && danmaku && episode != null && "danmaku" in source?.capabilities.orEmpty() && !localOnly && plan?.optBoolean("local") == false && !loading && failure == null && !boost && (!feed || !clean)) DanmakuOverlay(detail.drama, episode, state, if (boost) holdSpeed else speed)
+        VideoSurface(player, Modifier.fillMaxSize(), if (feedPreview == null) null else { ready -> videoFrameReady = ready })
+        if (!videoFrameReady) feedPreview?.invoke(Modifier.matchParentSize())
+        if (active && danmaku && episode != null && "danmaku" in source?.capabilities.orEmpty() && !localOnly && plan?.optBoolean("local") == false && !loading && failure == null && (!feed || !clean)) DanmakuOverlay(detail.drama, episode, state, if (boost) holdSpeed else speed)
         Box(Modifier.fillMaxSize().pointerInput(player, speed, feed, holdSpeed, active, loading, failure, externalClean, locked) {
             if (!active) return@pointerInput
             if (locked) { detectTapGestures { lockVisible = true; interaction++ }; return@pointerInput }
@@ -671,7 +701,9 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                 } else { volume = (volume - amount / size.height * 100).coerceIn(0.0, 100.0); hint = "音量 ${volume.toInt()}%"; action { player.volume(volume) } }
             }) } finally { adjusting = false }
         }))
-        if (!loading && showBuffering && failure == null && !state.completed) LoadingRing(Modifier.align(Alignment.Center))
+        if ((active && loading && feedPreview != null && !videoFrameReady || !loading && showBuffering) && failure == null && !state.completed) {
+            LoadingRing(Modifier.align(Alignment.Center))
+        }
         val playbackTitle = buildString {
             append(detail.drama.title)
             if (episodic) append(" · 第 ${episode?.number ?: 1} 集")
@@ -731,7 +763,15 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                     if (source?.capabilities?.contains("comments") == true) FeedAction("chat_bubble_outline_rounded", "评论", compact = compact) { menu = "comments" }
                     val saved = repo.store.favorites().any { it.id == detail.drama.id }
                     FeedAction(if (saved) "bookmark_rounded" else "bookmark_border_rounded", if (source?.kind == "drama") "追剧" else "收藏", saved, compact) { action { repo.store.favorite(detail.drama) } }
-                    FeedAction("not_interested_rounded", "不喜欢", compact = compact) { action { repo.store.set("feedNotInterested", org.json.JSONArray((repo.store.list("feedNotInterested").strings() + "${detail.drama.source}:${detail.drama.id}").distinct())); repo.recommendations.notInterested(detail.drama); liked = false; onNext() } }
+                    if (detail.drama.source == "hongguo") FeedAction("not_interested_rounded", "不喜欢", compact = compact) {
+                        action {
+                            val disliked = repo.store.list("feedNotInterested").strings() + "${detail.drama.source}:${detail.drama.id}"
+                            repo.store.set("feedNotInterested", org.json.JSONArray(disliked.distinct()))
+                            repo.recommendations.notInterested(detail.drama)
+                            liked = false
+                            onNext()
+                        }
+                    }
                 }
                 if (state.duration > 0 && source?.kind != "live") {
                     if (source?.kind == "video") {
@@ -851,6 +891,45 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
 internal fun danmakuPosition(position: Double, elapsedSeconds: Double, playing: Boolean, speed: Double): Double =
     position + if (playing) elapsedSeconds.coerceIn(0.0, .5) * speed else 0.0
 
+internal class DanmakuFlight {
+    internal data class Bullet(val text: String, val launchedAt: Double)
+
+    private var rows: List<Pair<Double, String>>? = null
+    private var next = 0
+    private var frame = 0L
+    private var running = false
+    private var rate = 1.0
+    private val lanes = arrayOfNulls<Bullet>(4)
+    private var travel = 0.0
+
+    fun draw(
+        rows: List<Pair<Double, String>>, position: Double, frame: Long, running: Boolean, speed: Double,
+        render: (lane: Int, text: String, fraction: Float) -> Unit,
+    ) {
+        if (this.running && running) travel += ((frame - this.frame) / 1e9).coerceIn(0.0, .05) * rate
+        this.frame = frame
+        this.running = running
+        rate = speed
+        if (this.rows !== rows) {
+            this.rows = rows
+            next = rows.indexOfFirst { it.first >= position }.takeIf { it >= 0 } ?: rows.size
+        }
+        for (lane in lanes.indices) {
+            val bullet = lanes[lane] ?: continue
+            if (travel - bullet.launchedAt >= 6.0) lanes[lane] = null
+        }
+        while (running && next < rows.size && rows[next].first <= position) {
+            val lane = lanes.indexOfFirst { it == null }
+            val text = rows[next++].second
+            if (lane >= 0) lanes[lane] = Bullet(text, travel)
+        }
+        for (lane in lanes.indices) {
+            val bullet = lanes[lane] ?: continue
+            render(lane, bullet.text, ((travel - bullet.launchedAt) / 6.0).toFloat())
+        }
+    }
+}
+
 @Composable
 fun DanmakuOverlay(drama: Drama, episode: Episode, state: PlaybackState, speed: Double = 1.0) {
     val repo = LocalRepository.current
@@ -868,23 +947,21 @@ fun DanmakuOverlay(drama: Drama, episode: Episode, state: PlaybackState, speed: 
         color = android.graphics.Color.WHITE; textSize = with(density) { 16.sp.toPx() }
         setShadowLayer(with(density) { 2.dp.toPx() }, 0f, 0f, android.graphics.Color.BLACK)
     } }
-    val sampledAt = remember(state.position, state.playing, state.buffering) { System.nanoTime() }
+    val running = state.playing && !state.buffering
+    val flight = remember(drama.id, episode.id, state.positionRevision) { DanmakuFlight() }
+    val sampledAt = remember(state.position, state.positionRevision, running) { System.nanoTime() }
     var frame by remember { mutableLongStateOf(sampledAt) }
-    LaunchedEffect(state.playing, state.buffering) {
-        if (state.playing && !state.buffering) while (isActive) withFrameNanos { frame = it }
+    LaunchedEffect(running) {
+        if (running) while (isActive) withFrameNanos { frame = System.nanoTime() }
     }
     Canvas(Modifier.fillMaxSize()) {
-        val position = danmakuPosition(state.position, (frame - sampledAt) / 1e9, state.playing && !state.buffering, speed)
-        val found = rows.binarySearch { it.first.compareTo(position - 6) }
-        val start = if (found >= 0) found else -found - 1
+        val now = frame
+        val position = danmakuPosition(state.position, (now - sampledAt) / 1e9, running, speed)
         drawContext.canvas.save()
         drawContext.canvas.clipRect(0f, 0f, size.width, size.height)
-        for (i in start until minOf(start + 4, rows.size)) {
-            val (at, text) = rows[i]
-            if (at > position) break
-            val fraction = ((position - at) / 6).toFloat()
+        flight.draw(rows, position, now, running, speed) { lane, text, fraction ->
             val x = size.width - fraction * (size.width + paint.measureText(text))
-            drawContext.canvas.nativeCanvas.drawText(text, x, 12.dp.toPx() + paint.textSize + (i % 4) * 30.dp.toPx(), paint)
+            drawContext.canvas.nativeCanvas.drawText(text, x, 12.dp.toPx() + paint.textSize + lane * 30.dp.toPx(), paint)
         }
         drawContext.canvas.restore()
     }

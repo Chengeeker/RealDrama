@@ -23,7 +23,8 @@ class SourceRuntime(private val context: Context, val subscriptions: Subscriptio
     private val slots = Semaphore(3)
     private val paced = Mutex()
     private var nextRequest = 0L
-    private var cooldown = 0L
+    @Volatile private var cooldown = 0L
+    internal val douyinCoolingDown: Boolean get() = System.currentTimeMillis() < cooldown
     private val serial = AtomicLong(System.currentTimeMillis() * 1000)
     private val active = ConcurrentHashMap<String, JSONObject>()
     suspend fun clearCredentials(group: String) {

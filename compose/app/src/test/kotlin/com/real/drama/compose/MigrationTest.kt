@@ -6,6 +6,25 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MigrationTest {
+    @Test fun feedLookaheadCapsOrdinaryAndDouyinCandidates() {
+        val regular = (1..8).map { number -> Drama(obj("id" to "hongguo:$number", "source" to "hongguo")) }
+        val douyin = Drama(obj("id" to "douyin:1", "source" to "douyin"))
+        fun candidates(rows: List<Drama>, currentIsDouyin: Boolean = false) =
+            feedUpcomingPreloads(rows, currentIsDouyin) { it.source == "douyin" }
+        assertEquals(regular.take(5), candidates(regular))
+        assertEquals(regular.take(1), candidates(regular, currentIsDouyin = true))
+        assertEquals(listOf(douyin) + regular.take(4), candidates(listOf(douyin) + regular))
+        assertEquals(regular.take(4), candidates(regular.take(1) + douyin + regular.drop(1)))
+        assertEquals(listOf(douyin), candidates(listOf(douyin) + regular, currentIsDouyin = true))
+    }
+    @Test fun feedCacheWindowUsesDurationWithinBounds() {
+        assertEquals(6, feedCacheSeconds(Double.NaN))
+        assertEquals(6, feedCacheSeconds(0.0))
+        assertEquals(2, feedCacheSeconds(2.0))
+        assertEquals(9, feedCacheSeconds(30.0))
+        assertEquals(18, feedCacheSeconds(60.0))
+        assertEquals(24, feedCacheSeconds(3600.0))
+    }
     @Test fun videoTextureKeepsAspectAcrossRepeatedViewportChanges() {
         for (aspect in listOf(16f / 9f, 9f / 16f, 1f, 2.4f)) repeat(20) {
             for ((w, h) in listOf(360f to 720f, 800f to 360f, 360f to 640f)) {
@@ -46,6 +65,27 @@ class MigrationTest {
         assertEquals(10.0, danmakuPosition(10.0, .2, false, 1.0), .0001)
         assertEquals(10.4, danmakuPosition(10.0, .2, true, 2.0), .0001)
         assertEquals(10.5, danmakuPosition(10.0, 2.0, true, 1.0), .0001)
+    }
+    @Test fun danmakuEntersAtRightAndKeepsMovingAcrossSpeedChanges() {
+        val flight = DanmakuFlight()
+        val page = listOf(35.0 to "already passed", 41.0 to "next")
+        fun draw(at: Double, millis: Long, speed: Double = 1.0, running: Boolean = true,
+            rows: List<Pair<Double, String>> = page,
+        ) = buildMap {
+            flight.draw(rows, at, millis * 1_000_000, running, speed) { _, text, fraction -> put(text, fraction) }
+        }
+        assertTrue(draw(40.0, 1_000).isEmpty())
+        assertEquals(mapOf("next" to 0f), draw(41.1, 1_020))
+        val beforeBoost = draw(41.1, 1_040, 2.0).getValue("next")
+        val duringBoost = draw(41.1, 1_060, 2.0).getValue("next")
+        val onRelease = draw(41.5, 1_080, 1.0).getValue("next")
+        val afterRelease = draw(41.5, 1_100).getValue("next")
+        assertEquals(beforeBoost * 2, duringBoost - beforeBoost, .00001f)
+        assertEquals(duringBoost - beforeBoost, onRelease - duringBoost, .00001f)
+        assertEquals(beforeBoost, afterRelease - onRelease, .00001f)
+        assertEquals(afterRelease, draw(41.5, 1_120, running = false).getValue("next"))
+        val newPage = listOf(44.0 to "stale page entry", 45.0 to "fresh")
+        assertEquals(mapOf("next" to afterRelease, "fresh" to 0f), draw(45.0, 5_000, rows = newPage))
     }
     @Test fun openingOrReplacingMediaPreservesLatestPauseIntent() = kotlinx.coroutines.runBlocking {
         val player = MpvPlayer(JSONObject(), observeInitially = false)

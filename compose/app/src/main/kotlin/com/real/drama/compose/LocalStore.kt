@@ -114,7 +114,7 @@ class LocalStore(private val context: Context) {
             snapshotState.value = next
         }
     }
-    suspend fun set(name: String, value: Any, global: Boolean = false) {
+    suspend fun set(name: String, value: Any?, global: Boolean = false) {
         val expectedEpoch = epoch
         check(!locked.value)
         val protected = global && name !in setOf("displayMode", "themeMode", "dynamicColor", "themeSeed", "fontWeightAdjustment", "navigationStyle", "hapticFeedback", "startupDestination")
@@ -267,7 +267,7 @@ class LocalStore(private val context: Context) {
         globalKeys.filterNot { it in setOf("profiles", "activeProfile", "sourceGateSalt", "sourceGateHash") }.forEach { name ->
             if (values.has(name)) backup.put(name, values.get(name))
         }
-        backup.put("fontWeightAdjustment", values.text("fontWeightAdjustment", "0").toInt())
+        values.text("fontWeightAdjustment").toIntOrNull()?.let { backup.put("fontWeightAdjustment", it) }
         val libraries = JSONObject()
         for (p in profiles) {
             val library = JSONObject()
@@ -401,7 +401,11 @@ class LocalStore(private val context: Context) {
             require(data.optInt("schema") == 1 && data.text("app") == "zhenguojian") { "备份格式不兼容" }
             val next = obj("profiles" to data.getJSONArray("profiles").toString(), "activeProfile" to "default")
             globalKeys.filterNot { it in setOf("profiles", "activeProfile", "sourceGateSalt", "sourceGateHash") }.forEach { if (data.has(it)) next.put(it, data.get(it)) }
-            if (data.has("fontWeightAdjustment")) { require(integral(data.opt("fontWeightAdjustment")) && data.optInt("fontWeightAdjustment") in setOf(-100, 0, 100, 200, 300)); next.put("fontWeightAdjustment", data.getInt("fontWeightAdjustment").toString()) }
+            if (data.has("fontWeightAdjustment")) {
+                val weight = data.optInt("fontWeightAdjustment")
+                require(integral(data.opt("fontWeightAdjustment")) && weight in -300..300 && weight % 100 == 0)
+                next.put("fontWeightAdjustment", weight.toString())
+            }
             data.getJSONArray("profiles").objects().forEach { p ->
                 val id = p.getString("id")
                 val library = data.getJSONObject("libraries").getJSONObject(id)

@@ -125,11 +125,13 @@ class FeedRecommendations(val groups: List<JSONObject>) {
 
     private fun rankCandidates(candidates: List<Drama>, store: LocalStore, seed: Int, excludeRecent: Boolean, excludedCategories: List<String>): List<Drama> {
         val preferences = store.json("feedRecommendation")
-        val excluded = store.list("feedNotInterested").strings().toSet() + store.json("unavailableFeedDramas").let { data -> data.keys().asSequence().filter { data.optLong(it) > System.currentTimeMillis() }.toList() }
+        val disliked = store.list("feedNotInterested").strings().toSet()
+        val unavailable = store.json("unavailableFeedDramas").let { data -> data.keys().asSequence().filter { data.optLong(it) > System.currentTimeMillis() }.toSet() }
         val recentIds = if (excludeRecent) recent.map { it.id }.toSet() else emptySet()
         val recentTitles = if (excludeRecent) recent.map { normalizedSearchText(it.title) }.filter { it.isNotEmpty() }.toSet() else emptySet()
         val unique = candidates.filterNot {
-            it.id in excluded || "${it.source}:${it.id}" in excluded || it.id in recentIds ||
+            it.id in unavailable || "${it.source}:${it.id}" in unavailable || it.id in recentIds ||
+                it.source == "hongguo" && (it.id in disliked || "${it.source}:${it.id}" in disliked) ||
                 recentTitles.isNotEmpty() && normalizedSearchText(it.title) in recentTitles ||
                 excludedCategories.isNotEmpty() && matches(it, excludedCategories)
         }.distinctBy { it.id }

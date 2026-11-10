@@ -4,14 +4,24 @@ RealDrama 是一个 Android 视频客户端，使用 Jetpack Compose、Go 原生
 
 | 项目 | 配置 |
 | --- | --- |
-| 正式版 | 2.1.5（4254） |
+| 正式版 | 2.1.10（4259） |
 | 包名 | `com.real.drama` |
 | 平台 | Android 8.0+、ARM64 Android TV |
 | ABI | `arm64-v8a` |
 
 Compose 从 2.1.5 起作为正式客户端。覆盖安装保留原包名与签名，旧 Android 本地资料由迁移逻辑读取。Flutter 版及其 Windows、iOS 工程可在 Git 历史中查看（最后一个 Flutter 主线提交 `20273fa`）。
 
-本次保留 2.1.5 候选版的首页、播放器和订阅功能。退后台恢复涉及真实设备的渲染行为，仍待真机验收。
+2.1.6 将个性化的字体粗细改为七档滑块，支持预览和重置。首页顶栏依次为刷新、清屏、弹幕和全屏，弹幕随订阅能力显示。首页“不喜欢”仅用于红果推荐。
+
+2.1.7 将首页的播放交接延后到翻页停稳。下一条尚未就绪时，页面先滑到位，再在该页显示加载状态。
+
+2.1.8 优先预读下一条视频的开头，切过去时可立即接手播放会话。当前视频按约 30% 时长设定滚动缓冲目标，最长 24 秒，缓存消耗到约一半时续读。低内存模式仍使用原缓存限额。
+
+2.1.9 将普通来源的首页预读扩展到后面最多五条，从近到远依次准备。抖音维持一条的上限，接口限流冷却期间暂停新的抖音预读。
+
+2.1.10 为首页后续页准备封面，视频纹理收到画面后再撤下封面。中途开启的弹幕从右侧入场，长按倍速及松开时保持连续移动。
+
+退后台恢复涉及真实设备的渲染行为，仍待真机验收。
 
 ## 功能
 
@@ -92,7 +102,7 @@ cd compose
 
 Windows 使用 `python` 和 `gradlew.bat`。Go 不在 PATH 时可用 `--go` 指定程序。准备脚本会编译 Go 核心，并下载和校验固定版本的 [libmpv 依赖](https://github.com/media-kit/libmpv-android-video-build/releases/tag/v1.1.7)。
 
-发布签名使用本机 `compose/key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 的 `compose/tools/build_release.py --ui-audit` 支持通过 `COMPOSE_BKS`、`COMPOSE_STORE_PASSWORD`、`COMPOSE_KEY_ALIAS`、`COMPOSE_KEY_PASSWORD`、`COMPOSE_BCPROV` 环境变量转换 BKS、签名和构建，生成 `compose/RealDrama-2.1.5-arm64-v8a.apk`。构建产物与签名配置存放在本地。
+发布签名使用本机 `compose/key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 的 `compose/tools/build_release.py --ui-audit` 支持通过 `COMPOSE_BKS`、`COMPOSE_STORE_PASSWORD`、`COMPOSE_KEY_ALIAS`、`COMPOSE_KEY_PASSWORD`、`COMPOSE_BCPROV` 环境变量转换 BKS、签名和构建，生成 `compose/RealDrama-2.1.10-arm64-v8a.apk`。构建产物与签名配置存放在本地。
 
 GitHub Actions 在 main、Pull Request 和手动触发时构建 ARM64 Android 应用，并运行订阅、加密和 Compose 回归测试。手动运行时可使用仓库的 Android 签名 Secrets 生成带原签名的构建产物。旧 Go 目录接口的历史测试仍有失败，正式版使用订阅接口的测试作为构建检查。
 

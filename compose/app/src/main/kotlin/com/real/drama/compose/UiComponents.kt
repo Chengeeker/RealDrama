@@ -1,6 +1,7 @@
 package com.real.drama.compose
 
 import android.graphics.BitmapFactory
+import android.graphics.Bitmap
 import android.os.Build
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -13,6 +14,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.TextStyle
@@ -98,9 +100,12 @@ fun DramaTheme(store: LocalStore, content: @Composable () -> Unit) {
         inverseSurface = color("inverseSurface"), inverseOnSurface = color("inverseOnSurface"), inversePrimary = color("inversePrimary"),
         surfaceDim = color("surfaceDim"), surfaceBright = color("surfaceBright"), surfaceContainerLowest = color("surfaceContainerLowest"),
         surfaceContainerLow = color("surfaceContainerLow"), surfaceContainer = color("surfaceContainer"), surfaceContainerHigh = color("surfaceContainerHigh"), surfaceContainerHighest = color("surfaceContainerHighest"))
-    val adjustment = values.text("fontWeightAdjustment", "0").toIntOrNull() ?: 0
+    val customWeight = values.text("fontWeightAdjustment").toIntOrNull()
+    val adjustment = customWeight ?: 0
     val typography = remember(adjustment) { appTypography(adjustment) }
-    CompositionLocalProvider(LocalRippleConfiguration provides null, LocalFontWeightAdjustment provides adjustment) {
+    val fontResolver = if (customWeight != null) neutralFontWeightResolver() else LocalFontFamilyResolver.current
+    CompositionLocalProvider(LocalRippleConfiguration provides null, LocalFontWeightAdjustment provides adjustment,
+        LocalFontFamilyResolver provides fontResolver) {
         MaterialTheme(colorScheme = scheme, typography = typography, shapes = Shapes(small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(20.dp), large = RoundedCornerShape(20.dp), extraLarge = RoundedCornerShape(28.dp))) { ProvideTextStyle(typography.bodyMedium, content = content) }
     }
 }
@@ -267,33 +272,55 @@ fun FlutterDialogDim() {
 }
 
 private val coverSlots = Semaphore(3)
-private val bitmaps = object : LruCache<String, android.graphics.Bitmap>(12 * 1024 * 1024) { override fun sizeOf(key: String, value: android.graphics.Bitmap) = value.byteCount }
+private val bitmaps = object : LruCache<String, Bitmap>(12 * 1024 * 1024) { override fun sizeOf(key: String, value: Bitmap) = value.byteCount }
+
+internal suspend fun loadCoverBitmap(repo: Repository, drama: Drama): Bitmap? {
+    if (drama.cover.isEmpty()) return null
+    bitmaps.get(drama.cover)?.let { return it }
+    return try {
+        coverSlots.withPermit { withContext(Dispatchers.IO) {
+            bitmaps.get(drama.cover)?.let { return@withContext it }
+            val file = repo.cover(drama)
+            val info = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file, info)
+            val sample = Integer.highestOneBit((maxOf(info.outWidth, info.outHeight) / 512).coerceAtLeast(1))
+            BitmapFactory.decodeFile(file, BitmapFactory.Options().apply { inSampleSize = sample })?.also { bitmaps.put(drama.cover, it) }
+        } }
+    } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { null }
+}
+
+@Composable
+internal fun rememberCoverBitmap(drama: Drama): State<Bitmap?> {
+    val repo = LocalRepository.current
+    val bitmap = remember(drama.cover) { mutableStateOf(bitmaps.get(drama.cover)) }
+    LaunchedEffect(repo, drama.cover) {
+        if (bitmap.value == null) bitmap.value = loadCoverBitmap(repo, drama)
+    }
+    return bitmap
+}
+
 @Composable
 fun Cover(drama: Drama, modifier: Modifier = Modifier, poster: Boolean = false, avatar: Boolean = false) {
-    val repo = LocalRepository.current
-    val bitmap by produceState<android.graphics.Bitmap?>(bitmaps.get(drama.cover), drama.cover) {
-        if (value == null && drama.cover.isNotEmpty()) try {
-            value = coverSlots.withPermit { withContext(Dispatchers.IO) {
-                val file = repo.cover(drama)
-                val info = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFile(file, info)
-                val sample = Integer.highestOneBit((maxOf(info.outWidth, info.outHeight) / 512).coerceAtLeast(1))
-                BitmapFactory.decodeFile(file, BitmapFactory.Options().apply { inSampleSize = sample })?.also { bitmaps.put(drama.cover, it) }
-            } }
-        } catch (cancel: CancellationException) { throw cancel } catch (_: Exception) { }
-    }
+    val bitmap by rememberCoverBitmap(drama)
+    CoverImage(bitmap, modifier, poster, avatar)
+}
+
+@Composable
+internal fun CoverImage(bitmap: Bitmap?, modifier: Modifier, poster: Boolean = false, avatar: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     Box(modifier.then(if (poster) Modifier.background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(colors.surfaceContainerHighest, colors.surfaceContainer))) else if (avatar) Modifier else Modifier.background(colors.surfaceContainerHighest)), contentAlignment = Alignment.Center) {
-        if (bitmap != null) Image(bitmap!!.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        if (bitmap != null) Image(bitmap.asImageBitmap(), null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
         else if (avatar) Glyph("person_rounded", size = 20)
         else Glyph(if (poster) "movie_creation_outlined" else "movie_filter_outlined", color = MaterialTheme.colorScheme.onSurfaceVariant, size = if (poster) 40 else 32)
     }
 }
 @Composable
-fun DramaCover(drama: Drama, modifier: Modifier = Modifier, radius: Int = 14) {
+fun DramaCover(drama: Drama, modifier: Modifier = Modifier, radius: Int = 14,
+    cover: @Composable (Modifier) -> Unit = { Cover(drama, it, poster = true) },
+) {
     val repo = LocalRepository.current
     Box(modifier.clip(RoundedCornerShape(radius.dp))) {
-        Cover(drama, Modifier.matchParentSize(), poster = true)
+        cover(Modifier.matchParentSize())
         Box(Modifier.matchParentSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Transparent, .5f to Color.Transparent, 1f to Color.Black.copy(alpha = .78f))))
         if ((repo.source(drama.source)?.kind ?: "drama") == "drama" && drama.json.optInt("episodes") > 0) Text("共 ${drama.json.optInt("episodes")} 集", Modifier.align(Alignment.BottomStart).padding(9.dp), color = Color.White, fontSize = 12.sp)
         if (drama.json.optBoolean("vip")) Text("VIP", Modifier.align(Alignment.TopStart).padding(8.dp).background(Color(0xFFF6C86B), RoundedCornerShape(6.dp)).padding(horizontal = 7.dp, vertical = 3.dp), color = Color(0xFF40300D), fontSize = 11.sp, fontWeight = appTextWeight(FontWeight.ExtraBold))

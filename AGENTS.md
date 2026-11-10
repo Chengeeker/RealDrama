@@ -2,7 +2,7 @@
 
 ## 项目目标
 
-维护 RealDrama 的 Android Compose 正式客户端。站源请求、解析、播放、下载与合并均在设备端完成。Android 工程在 `compose/`，共用 Go 核心在 `native/`。旧 Android 资料迁移兼容属于正式客户端的一部分。
+维护 RealDrama 的 Android Compose 正式客户端。站源请求、解析、播放、下载与合并均在设备端完成。仓库根目录是 Android Gradle 工程，应用模块在 `app/`，共用 Go 核心在 `native/`。旧 Android 资料迁移兼容属于正式客户端的一部分。
 
 ## 优先级与交付
 
@@ -19,7 +19,7 @@
 
 ## 任务收尾
 
-在 `compose/app/build.gradle.kts` 维护版本名和构建号，并同步 README。集中验证通过后再交付 APK。未验证的设备行为须标明验证边界。
+在 `app/build.gradle.kts` 维护版本名和构建号，并同步 README。集中验证通过后再交付 APK。未验证的设备行为须标明验证边界。
 
 除非用户明确要求，不生成源码压缩包；不自动将源码复制到其他目录。未经用户明确要求，不执行提交、tag、分支或推送。
 

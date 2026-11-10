@@ -2,6 +2,11 @@
 .flutter-plugins*
 .pub-cache/
 build/
+.gradle/
+.kotlin/
+.cxx/
+/local.properties
+/app/src/main/jniLibs/
 dist/
 /*.apk
 android/.gradle/

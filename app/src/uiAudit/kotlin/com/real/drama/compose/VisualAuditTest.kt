@@ -329,7 +329,7 @@ class VisualAuditTest {
             insets(24, 40)
             val settings = compose.onNodeWithContentDescription("播放设置")
             val before = settings.fetchSemanticsNode().boundsInRoot
-            org.junit.Assert.assertTrue("bar bottom ${before.bottom}, video top $videoTop", videoTop - before.bottom in 10f..20f)
+            org.junit.Assert.assertTrue("bar bottom ${before.bottom}, video top $videoTop", videoTop - before.bottom in 14f..24f)
             insets(0, 40)
             org.junit.Assert.assertEquals(before.top, settings.fetchSemanticsNode().boundsInRoot.top, .5f)
             val largeCutout = videoTop.toInt() + 18

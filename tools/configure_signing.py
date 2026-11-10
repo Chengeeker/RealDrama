@@ -9,7 +9,7 @@ parser.add_argument('--clean', action='store_true')
 options = parser.parse_args()
 runner_temp = os.environ.get('RUNNER_TEMP')
 if not runner_temp:
-    raise SystemExit('此脚本用于 GitHub Actions；本机构建请配置 compose/key.properties。')
+    raise SystemExit('此脚本用于 GitHub Actions；本机构建请配置 key.properties。')
 key_file = Path(runner_temp) / 'duanju-release.jks'
 properties_file = root / 'key.properties'
 if options.clean:

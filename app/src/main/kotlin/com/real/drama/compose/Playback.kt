@@ -97,14 +97,14 @@ internal suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectP
 @Composable
 fun LegacySlider(
     value: Float, change: (Float) -> Unit, finish: () -> Unit, maximum: Float,
-    modifier: Modifier = Modifier, buffered: Float = 0f, feed: Boolean = false,
+    modifier: Modifier = Modifier, buffered: Float = 0f, feed: Boolean = false, trackOffsetY: Dp = 0.dp,
 ) {
     val range = maximum.coerceAtLeast(1f)
     val thumbSize = if (feed) 10.dp else 12.dp
     Slider(value.coerceIn(0f, range), change, modifier, enabled = maximum > 0, onValueChangeFinished = finish, valueRange = 0f..range,
         thumb = { Spacer(Modifier.size(thumbSize)) },
         track = { slider -> Canvas(Modifier.fillMaxWidth().height(thumbSize)) {
-            val y = size.height / 2
+            val y = size.height / 2 + trackOffsetY.toPx()
             val stroke = (if (feed) 2.dp else 3.dp).toPx()
             val thumb = androidx.compose.ui.geometry.Offset(size.width * slider.value / range, y)
             drawLine(Color.White.copy(alpha = if (feed) .38f else .25f), androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = stroke)
@@ -694,7 +694,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                     .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
                 Modifier.windowInsetsPadding(insets).layout { measurable, constraints ->
                     val bar = measurable.measure(constraints)
-                    val top = maxOf(4.dp.roundToPx(), videoTop.roundToPx() - insets.getTop(this) - bar.height - 12.dp.roundToPx())
+                    val top = maxOf(2.dp.roundToPx(), videoTop.roundToPx() - insets.getTop(this) - bar.height - 16.dp.roundToPx())
                         .coerceAtMost((constraints.maxHeight - bar.height).coerceAtLeast(0))
                     layout(bar.width, bar.height + top) { bar.placeRelative(0, top) }
                 }
@@ -863,7 +863,10 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             } else {
                 val controlsWidth = maxWidth - 24.dp
                 Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().then(if (full) Modifier.navigationBarsPadding() else Modifier).padding(horizontal = 12.dp)) {
-                    LegacySlider(position, seek, finishSeek, state.duration.toFloat(), Modifier.fillMaxWidth().height(24.dp), buffered = state.buffered.toFloat())
+                    LegacySlider(
+                        position, seek, finishSeek, state.duration.toFloat(), Modifier.fillMaxWidth().height(24.dp),
+                        buffered = state.buffered.toFloat(), trackOffsetY = if (full) 0.dp else 4.dp,
+                    )
                     Row(Modifier.horizontalScroll(rememberScrollState()).widthIn(min = controlsWidth), verticalAlignment = Alignment.CenterVertically) {
                         Text("${formatPosition(position.toDouble())} / ${formatPosition(state.duration)}", Modifier.widthIn(min = 96.dp).padding(end = 8.dp), fontSize = 12.sp, maxLines = 1, color = Color.White.copy(alpha = .82f), style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
                         Spacer(Modifier.weight(1f))

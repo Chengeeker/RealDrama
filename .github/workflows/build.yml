@@ -33,29 +33,28 @@ jobs:
         working-directory: native
       - run: go test ./core -run '^Test(Subscription(HeaderPolicy|RegistrationBoundary)|CanceledSubscriptionPrefetchRetainsPlayback)$'
         working-directory: native
-      - run: python3 compose/tools/prepare_native.py
+      - run: python3 tools/prepare_native.py
       - name: Configure manual build signing
         if: github.event_name == 'workflow_dispatch'
-        run: python3 compose/tools/configure_signing.py
+        run: python3 tools/configure_signing.py
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - run: bash ./gradlew :app:assembleRelease :app:testDebugUnitTest -PuiAudit
-        working-directory: compose
       - name: Verify release certificate
-        if: github.event_name == 'workflow_dispatch' && hashFiles('compose/key.properties') != ''
+        if: github.event_name == 'workflow_dispatch' && hashFiles('key.properties') != ''
         run: |
           set -euo pipefail
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs compose/app/build/outputs/apk/release/app-release.apk |
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs app/build/outputs/apk/release/app-release.apk |
             grep -Fx 'Signer #1 certificate SHA-256 digest: 3eb0f6708904f8ef916c6a2572e394ba981ee25d64861344cf1921ca7ea17975'
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'workflow_dispatch' && hashFiles('compose/key.properties') != ''
+        if: github.event_name == 'workflow_dispatch' && hashFiles('key.properties') != ''
         with:
           name: RealDrama-arm64-v8a
-          path: compose/app/build/outputs/apk/release/app-release.apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
       - name: Remove signing files
         if: always() && github.event_name == 'workflow_dispatch'
-        run: python3 compose/tools/configure_signing.py --clean
+        run: python3 tools/configure_signing.py --clean

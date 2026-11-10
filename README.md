@@ -4,12 +4,14 @@ RealDrama 是一个 Android 视频客户端，使用 Jetpack Compose、Go 原生
 
 | 项目 | 配置 |
 | --- | --- |
-| 正式版 | 2.3.3（4266） |
+| 正式版 | 2.3.4（4267） |
 | 包名 | `com.real.drama` |
 | 平台 | Android 8.0+、ARM64 Android TV |
 | ABI | `arm64-v8a` |
 
 Compose 从 2.1.5 起作为正式客户端。覆盖安装保留原包名与签名，旧 Android 本地资料由迁移逻辑读取。Flutter 版及其 Windows、iOS 工程可在 Git 历史中查看（最后一个 Flutter 主线提交 `20273fa`）。
+
+2.3.4 补齐订阅运行时的组合 CSS 选择器解析，修复使用逗号选择器的网页目录。黄果订阅 0.2.2 配套更新 AI 搜索、JSON 详情和按集取址，以及视频分集容器适配。桌面原生链路已验证，手机连续播放仍待验收。
 
 2.1.6 将个性化的字体粗细改为七档滑块，支持预览和重置。首页顶栏依次为刷新、清屏、弹幕和全屏，弹幕随订阅能力显示。首页“不喜欢”仅用于红果推荐。
 
@@ -113,7 +115,7 @@ python3 tools/prepare_native.py
 
 Windows 使用 `python` 和 `gradlew.bat`。Go 不在 PATH 时可用 `--go` 指定程序。准备脚本会编译 Go 核心，并下载和校验固定版本的 [libmpv 依赖](https://github.com/media-kit/libmpv-android-video-build/releases/tag/v1.1.7)。
 
-发布签名使用仓库根目录的本机 `key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 的 `tools/build_release.py --ui-audit` 支持通过 `COMPOSE_BKS`、`COMPOSE_STORE_PASSWORD`、`COMPOSE_KEY_ALIAS`、`COMPOSE_KEY_PASSWORD`、`COMPOSE_BCPROV` 环境变量转换 BKS、签名和构建，在仓库根目录生成 `RealDrama-2.3.3-arm64-v8a.apk`。构建产物与签名配置存放在本地。
+发布签名使用仓库根目录的本机 `key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 的 `tools/build_release.py --ui-audit` 支持通过 `COMPOSE_BKS`、`COMPOSE_STORE_PASSWORD`、`COMPOSE_KEY_ALIAS`、`COMPOSE_KEY_PASSWORD`、`COMPOSE_BCPROV` 环境变量转换 BKS、签名和构建，在仓库根目录生成 `RealDrama-2.3.4-arm64-v8a.apk`。构建产物与签名配置存放在本地。
 
 GitHub Actions 在 main、Pull Request 和手动触发时构建 ARM64 Android 应用，并运行订阅、加密和 Compose 回归测试。手动运行时可使用仓库的 Android 签名 Secrets 生成带原签名的构建产物。旧 Go 目录接口的历史测试仍有失败，正式版使用订阅接口的测试作为构建检查。
 

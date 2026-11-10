@@ -218,7 +218,7 @@ func Request(raw string) (result string) {
 				}
 				htmlBody = body
 			}
-			matcher, err := cascadia.Parse(selector)
+			matcher, err := cascadia.ParseGroup(selector)
 			if err != nil {
 				panic(vm.NewTypeError("selector invalid"))
 			}

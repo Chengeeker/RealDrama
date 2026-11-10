@@ -38,6 +38,19 @@ func TestRequestResumesGeneratorAfterHTTP(t *testing.T) {
 	}
 }
 
+func TestHTMLSelectorGroupsPreserveOrderAndDeduplicate(t *testing.T) {
+	program := `function* execute(){var html='<a href="/video/1">one</a><a href="/series/2">two</a><a href="/other/3">three</a>';return {links:htmlSelect(html,'a[href*="/series/"],a[href*="/video/"],a[href*="/video/"]').map(function(row){return row.attributes.href;})};}`
+	id := fmt.Sprintf("selector-group-%d", time.Now().UnixNano())
+	response := requestEnvelope(t, Request(fmt.Sprintf(`{"command":"start","id":%q,"program":%q,"action":"catalog","payload":{},"state":{}}`, id, program)))
+	if response["ok"] != true {
+		t.Fatalf("selector group failed: %#v", response)
+	}
+	links := response["data"].(map[string]any)["value"].(map[string]any)["links"].([]any)
+	if len(links) != 2 || links[0] != "/video/1" || links[1] != "/series/2" {
+		t.Fatalf("unexpected grouped matches: %#v", links)
+	}
+}
+
 func TestRequestPreservesSafeHTTPStatus(t *testing.T) {
 	id := fmt.Sprintf("runtime-http-test-%d", time.Now().UnixNano())
 	program := `function* execute(){var response=yield {type:"http",url:"https://example.test/feed"};var error=new Error("private response details");error.sourceError="http";error.httpStatus=response.status;throw error;}`

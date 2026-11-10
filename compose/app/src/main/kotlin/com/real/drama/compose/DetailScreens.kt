@@ -15,6 +15,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
@@ -262,12 +263,19 @@ fun CommentsContent(drama: Drama, onTotal: (Int?) -> Unit = {}) {
 }
 @Composable
 fun CommentsScreen(drama: Drama, back: () -> Unit) { Page("评论", back) { padding -> Box(Modifier.padding(padding)) { CommentsContent(drama) } } }
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CommentsDialog(drama: Drama, back: () -> Unit) {
-    var total by remember { mutableStateOf<Int?>(null) }
-    ModalBottomSheet(scrimColor = androidx.compose.ui.graphics.Color.Black.copy(alpha = .54f), onDismissRequest = back, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) { Column(Modifier.fillMaxWidth().height((androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * .68f).dp)) {
-        Row(Modifier.padding(start = 20.dp, end = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text(if (total == null) "评论" else "评论 · $total", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge); IconAction("close_rounded", "关闭评论", action = back) }
-        Box(Modifier.weight(1f)) { CommentsContent(drama) { total = it } }
-    } }
+internal fun FeedCommentsPanel(drama: Drama, modifier: Modifier, headerModifier: Modifier = Modifier, back: () -> Unit) {
+    var total by remember(drama.id) { mutableStateOf<Int?>(null) }
+    Surface(modifier.semantics { paneTitle = "评论" }, color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp),
+    ) {
+        Column(Modifier.fillMaxSize().navigationBarsPadding()) {
+            Row(headerModifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(total?.let { "评论 · $it" } ?: "评论", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+                IconAction("close_rounded", "关闭评论", action = back)
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .42f))
+            Box(Modifier.weight(1f)) { CommentsContent(drama) { total = it } }
+        }
+    }
 }

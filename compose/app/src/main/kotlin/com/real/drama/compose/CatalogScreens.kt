@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
@@ -332,7 +333,9 @@ internal fun feedOrientationRequest(full: Boolean, aspectRatio: Double, returnOr
     }
 
 @Composable
-fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean) -> Unit, onBoost: (Boolean) -> Unit = {}, onFullScreen: (Boolean) -> Unit) {
+fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean) -> Unit, onBoost: (Boolean) -> Unit = {},
+    commentsProgress: State<Float>? = null, commentsVideoHeight: Dp = 0.dp, onComments: (Drama) -> Unit = {}, onFullScreen: (Boolean) -> Unit,
+) {
     val repo = LocalRepository.current; val nav = LocalNavigate.current; val packages by repo.subscriptions.installed.collectAsState()
     var rows by remember { mutableStateOf(emptyList<Drama>()) }
     var loading by remember { mutableStateOf(false) }
@@ -382,6 +385,7 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
     var retryAt by remember { mutableLongStateOf(0L) }
     var firstPlayback by remember { mutableStateOf(false) }
     var readyForPreload by remember(active) { mutableStateOf<String?>(null) }
+    var openedForPreload by remember(active, generation) { mutableStateOf<String?>(null) }
     var batchCursor by rememberSaveable { mutableIntStateOf(0) }
     val sessionUnavailable = remember { mutableSetOf<String>() }
     val batches = remember(enabled, rawPreference) { feedCategoryBatches(enabled.associate { it.id to feedRequestCategories(it.id, preference.optJSONObject(it.id) ?: JSONObject()) }) }
@@ -567,8 +571,7 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
         }
     }
     var retainedPlayers by remember(generation, homeQuality, lowMemory) { mutableStateOf(emptySet<String>()) }
-    var preparedNext by remember(generation, homeQuality, currentDrama?.id, canPreload) { mutableStateOf<String?>(null) }
-    val warmNext = canPreload && preparedNext != null && preparedNext == nextDrama?.id
+    val warmNext = currentDrama != null && openedForPreload == currentDrama.id && nextDrama != null && nextDrama in upcoming && canWarm(nextDrama)
     val playerIds = if (active) feedRetainedPlayers(rows.map { it.id }, pageIndex, retainedPlayers, warmNext, lowMemory) else emptySet()
     SideEffect { if (retainedPlayers != playerIds) retainedPlayers = playerIds }
     LaunchedEffect(active, generation, currentDrama?.id, upcoming.map { it.id }, previous.map { it.id }, homeQuality, readyForPreload, radius) {
@@ -583,14 +586,12 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
         nextDrama?.takeIf { it in upcoming && canWarm(it) }?.let { preparation.detail(it) }
         if (currentDrama == null || readyForPreload != currentDrama.id) return@LaunchedEffect
         for (drama in upcoming) {
-            if (drama.id in retainedPlayers || !canWarm(drama)) continue
+            if (drama.id == nextDrama?.id || drama.id in retainedPlayers || !canWarm(drama)) continue
             awaitScrollIdle()
             val detail = preparation.detail(drama).await().getOrNull() ?: continue
             val episode = detail.episodes.getOrNull(feedResumeIndex(detail.episodes, repo.store.watch(drama))) ?: continue
             awaitScrollIdle()
-            if (canWarm(drama) && preparation.warm(detail.drama, episode, homeQuality) && drama.id == nextDrama?.id) {
-                preparedNext = drama.id
-            }
+            if (canWarm(drama)) preparation.warm(detail.drama, episode, homeQuality)
         }
     }
     val danmaku by repo.danmaku.collectAsState()
@@ -612,9 +613,9 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
     val feedWidth = if (!full && maxWidth > 560.dp) 520.dp else maxWidth
     val landscape = maxWidth > maxHeight
     Column(Modifier.fillMaxSize()) {
-        if (!full) Box(Modifier.fillMaxWidth().height(56.dp).background(if (clean || boost) Color.Black else MaterialTheme.colorScheme.surfaceContainerLow), contentAlignment = Alignment.Center) {
+        if (!full) Box(Modifier.fillMaxWidth().height(56.dp).background(if (clean || boost || commentsProgress != null) Color.Black else MaterialTheme.colorScheme.surfaceContainerLow), contentAlignment = Alignment.Center) {
             if (boost) boostHint()
-            else if (!clean) {
+            else if (!clean && commentsProgress == null) {
                 Row(Modifier.width(feedWidth).fillMaxHeight().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("推荐", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp, fontWeight = appTextWeight(FontWeight.Bold))
                     IconAction("refresh_rounded", "刷新推荐") { refresh++ }
@@ -626,7 +627,9 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
                 HorizontalDivider(Modifier.align(Alignment.BottomCenter), thickness = .5.dp, color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .24f))
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Box(Modifier.weight(1f).fillMaxWidth().then(if (commentsProgress != null && !full) Modifier.graphicsLayer {
+            translationY = -56.dp.toPx() * commentsProgress.value
+        } else Modifier), contentAlignment = Alignment.Center) {
         if (rows.isEmpty()) {
             if (loading) LoadingRing(color = Color.White)
             else Column(Modifier.padding(horizontal = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -648,7 +651,9 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
                 }
             }
         }
-        else VerticalPager(pager, modifier = Modifier.width(feedWidth).fillMaxHeight(), beyondViewportPageCount = radius, key = { rows.getOrNull(it)?.id ?: it }) { index ->
+        else VerticalPager(pager, modifier = Modifier.width(feedWidth).fillMaxHeight(), beyondViewportPageCount = radius,
+            userScrollEnabled = commentsProgress == null, key = { rows.getOrNull(it)?.id ?: it },
+        ) { index ->
             val drama = rows.getOrNull(index)
             if (drama != null) {
                 var detail by remember(drama.id, generation) { mutableStateOf<Detail?>(null) }
@@ -666,8 +671,8 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
                     detail = result.getOrNull()
                     failed = result.isFailure
                 }
-                LaunchedEffect(failed, detail, pageActive) {
-                    if (pageActive && (failed || detail?.episodes?.isEmpty() == true)) {
+                LaunchedEffect(failed, detail, pageActive, commentsProgress) {
+                    if (pageActive && commentsProgress == null && (failed || detail?.episodes?.isEmpty() == true)) {
                         awaitScrollIdle()
                         if (rows.getOrNull(pager.settledPage)?.id == drama.id) unavailable(drama)
                     }
@@ -676,9 +681,16 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
                     val ready = detail
                     when {
                         ready != null && ready.episodes.isNotEmpty() && keepPlayer -> PlayerPane(ready, initialIndex = feedResumeIndex(ready.episodes, repo.store.watch(drama)), active = pageActive, feed = true, modifier = Modifier.fillMaxSize(), externalFull = full && pageActive, externalClean = clean, onClean = onClean, feedPreview = preview,
-                            takeFeedPlan = { target, episode, quality ->
-                                val playNow = { rows.getOrNull(pager.settledPage)?.id == target.id }
-                                preparation.take(target, episode, quality, playNow)
+                            commentsProgress = commentsProgress.takeIf { pageActive }, commentsVideoHeight = commentsVideoHeight,
+                            takeFeedPlan = { target, episode, quality, canOpen ->
+                                if (warmNext && index == afterCurrent && !canOpen()) {
+                                    preparation.prepare(target, episode, quality) { !canOpen() }
+                                }
+                                preparation.take(target, episode, quality, canOpen)
+                            },
+                            warmFeed = warmNext && index == afterCurrent,
+                            onMediaOpened = {
+                                if (rows.getOrNull(pager.settledPage)?.id == drama.id) openedForPreload = drama.id
                             },
                             onVideoAspectRatio = { ratio ->
                                 if (rows.getOrNull(pager.settledPage)?.id == drama.id) videoAspect = drama.id to ratio
@@ -699,7 +711,7 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
                                     consecutiveUnavailable = 0
                                     error = null
                                 }
-                            }, onComments = { nav(Route("comments", drama)) }, onCreator = { nav(Route("creator", drama)) }, onNext = {
+                            }, onComments = { if (pageActive && !pager.isScrollInProgress) onComments(drama) }, onCreator = { nav(Route("creator", drama)) }, onNext = {
                                 scope.launch {
                                     val selected = pager.settledPage
                                     if (!pager.isScrollInProgress && rows.getOrNull(selected)?.id == drama.id && selected + 1 < rows.size) {
@@ -718,7 +730,7 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
         }
         if (clean && rows.isEmpty()) FeedCleanExit { onClean(false) }
         if (full && boost) Box(Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).padding(top = 8.dp)) { boostHint() }
-        if (full && !clean && !boost) {
+        if (full && !clean && !boost && commentsProgress == null) {
             val position = Modifier.align(if (landscape) Alignment.TopStart else Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).padding(top = 8.dp, start = 8.dp, end = 12.dp)
             val cleanButton: @Composable () -> Unit = {

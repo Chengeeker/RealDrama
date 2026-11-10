@@ -115,7 +115,7 @@ internal class FeedPlaybackPreparation(private val repo: Repository, private val
         prepared.keys.filterNot(planIds::contains).forEach { discard(it) }
     }
 
-    fun prepare(drama: Drama, episode: Episode, quality: Int): Job? {
+    fun prepare(drama: Drama, episode: Episode, quality: Int, needsPrefix: () -> Boolean = { true }): Job? {
         val epoch = repo.store.epoch
         if (drama.id !in targets) return null
         matching(drama, episode, quality)?.let { return it.task }
@@ -132,7 +132,7 @@ internal class FeedPlaybackPreparation(private val repo: Repository, private val
                 check(entry.expires > now && repo.store.epoch == epoch)
                 entry.resolved.complete(Unit)
                 mediaRead.withLock {
-                    if (!entry.taken && (repo.source(drama.source)?.group != "douyin" || !repo.runtime.douyinCoolingDown)) {
+                    if (!entry.taken && needsPrefix() && (repo.source(drama.source)?.group != "douyin" || !repo.runtime.douyinCoolingDown)) {
                         val warmed = repo.warmPlayback(plan, quality)
                         if (!entry.taken) entry.plan = warmed
                     }
@@ -155,17 +155,17 @@ internal class FeedPlaybackPreparation(private val repo: Repository, private val
         return matching(drama, episode, quality)?.plan != null
     }
 
-    suspend fun take(drama: Drama, episode: Episode, quality: Int, playNow: () -> Boolean = { true }): JSONObject? {
+    suspend fun take(drama: Drama, episode: Episode, quality: Int, canOpen: () -> Boolean = { true }): JSONObject? {
         val entry = matching(drama, episode, quality) ?: return null
         entry.resolved.await()
-        if (!playNow() && !entry.finished.value) {
-            entry.finished.combine(snapshotFlow { playNow() }) { finished, active -> finished || active }.first { it }
+        if (!canOpen() && !entry.finished.value) {
+            entry.finished.combine(snapshotFlow { canOpen() }) { finished, open -> finished || open }.first { it }
         }
         if (matching(drama, episode, quality) !== entry) return null
         val plan = entry.plan ?: return null
         entry.taken = true
         prepared.remove(drama.id)
-        if (!entry.finished.value) entry.task.cancel()
+        entry.task.cancel()
         return plan
     }
 

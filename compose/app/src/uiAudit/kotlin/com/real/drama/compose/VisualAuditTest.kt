@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.statusBars
@@ -43,10 +44,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Rule
 import org.junit.Test
@@ -425,6 +426,111 @@ class VisualAuditTest {
             }
         } finally { player.close() }
     }
+    @Test fun feedCommentsLiftTheSameVideoWithoutPausingIt() {
+        val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
+        val candidate = Drama(obj("id" to "hongguo:comment-motion", "source" to "hongguo", "title" to "评论动画检查",
+            "cover" to "https://example.invalid/synthetic-comment-preview.png"))
+        val preview = File(compose.activity.cacheDir, "synthetic-comment-preview.png")
+        Bitmap.createBitmap(12, 20, Bitmap.Config.ARGB_8888).also { image ->
+            image.eraseColor(android.graphics.Color.GREEN)
+            preview.outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            image.recycle()
+        }
+        runBlocking {
+            repo.store.open()
+            repo.store.set("startupDestination", "home", true)
+            repo.store.set("homeFeedPreferences", obj("hongguo" to obj("enabled" to true, "categories" to obj("short_play" to true))))
+            repo.subscriptions.installed.value = listOf(SourcePackage(
+                obj("id" to "hongguo", "name" to "合成来源", "kind" to "video", "version" to "1", "program" to "function* main(){}",
+                    "capabilities" to org.json.JSONArray(listOf("catalog", "comments"))), "local:audit", "audit", ByteArray(0),
+            ))
+            repo.saveCatalog("hongguo", "short_play", Catalog(listOf(candidate), false, 1))
+        }
+        fun texture(view: android.view.View): FittedVideoTexture? =
+            if (view is FittedVideoTexture) view else if (view is android.view.ViewGroup) {
+                (0 until view.childCount).firstNotNullOfOrNull { texture(view.getChildAt(it)) }
+            } else null
+        fun previewBounds(): Pair<Int, Int>? = compose.runOnIdle {
+            val decor = compose.activity.window.decorView
+            val image = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
+            try {
+                decor.draw(android.graphics.Canvas(image))
+                fun isPreview(x: Int, y: Int) = android.graphics.Color.green(image.getPixel(x, y)) > 200 &&
+                    android.graphics.Color.red(image.getPixel(x, y)) < 30
+                val top = (0 until image.height).firstOrNull { isPreview(image.width / 2, it) } ?: return@runOnIdle null
+                top to (0 until image.width).count { isPreview(it, (top + 8).coerceAtMost(image.height - 1)) }
+            } finally { image.recycle() }
+        }
+        AuditNativeBridge.commands.clear()
+        AuditNativeBridge.playerCreations.set(0)
+        AuditNativeBridge.commentPreviewPath = preview.path
+        AuditNativeBridge.commentVideo = candidate.json
+        var manualTexture: android.graphics.SurfaceTexture? = null
+        try {
+            compose.setContent { CompositionLocalProvider(LocalRepository provides repo, LocalNavigate provides {}) {
+                DramaTheme(repo.store) { RootTabs(true) }
+            } }
+            val comments = compose.onNodeWithContentDescription("评论")
+            compose.waitUntil(10000) { compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("评论")).fetchSemanticsNodes().isNotEmpty() }
+            val video = compose.runOnIdle {
+                val view = checkNotNull(texture(compose.activity.window.decorView))
+                if (!view.isAvailable) {
+                    val surface = AuditedSurfaceTexture()
+                    manualTexture = surface
+                    view.surfaceTextureListener!!.onSurfaceTextureAvailable(surface, view.width, view.height)
+                }
+                view
+            }
+            compose.waitUntil(10000) {
+                AuditNativeBridge.commands.any { it == listOf("set", "pause", "no") } &&
+                    compose.runOnIdle { video.alpha == 1f } && previewBounds() != null
+            }
+            val viewport = video.width to video.height
+            val original = checkNotNull(previewBounds())
+            val creations = AuditNativeBridge.playerCreations.get()
+            val commands = AuditNativeBridge.commands.size
+            compose.mainClock.autoAdvance = false
+            comments.performClick()
+            val inMotion = List(3) {
+                compose.mainClock.advanceTimeBy(64)
+                checkNotNull(previewBounds())
+            }
+            compose.mainClock.advanceTimeBy(224)
+            val opened = checkNotNull(previewBounds())
+            compose.onNodeWithContentDescription("关闭评论").assertIsDisplayed()
+            org.junit.Assert.assertTrue("video bounds (top, width): $original → $inMotion → $opened", inMotion.any { frame ->
+                frame.first in (opened.first + 1) until original.first && frame.second in (opened.second + 1) until original.second
+            })
+            compose.mainClock.autoAdvance = true
+            fun waitForCommentsToClose() = compose.waitUntil(5000) {
+                compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("关闭评论")).fetchSemanticsNodes().isEmpty()
+            }
+            compose.onNodeWithContentDescription("关闭评论").performClick()
+            waitForCommentsToClose()
+            org.junit.Assert.assertEquals(original, previewBounds())
+            comments.performClick()
+            compose.onNodeWithContentDescription("关闭评论").assertIsDisplayed()
+            compose.runOnIdle {
+                val dispatcher = compose.activity.navigationEventDispatcher
+                val input = androidx.navigationevent.DirectNavigationEventInput()
+                dispatcher.addInput(input)
+                try { input.backCompleted() } finally { dispatcher.removeInput(input) }
+            }
+            waitForCommentsToClose()
+            org.junit.Assert.assertEquals(original, previewBounds())
+            org.junit.Assert.assertEquals(viewport, video.width to video.height)
+            org.junit.Assert.assertSame(video, texture(compose.activity.window.decorView))
+            org.junit.Assert.assertEquals(creations, AuditNativeBridge.playerCreations.get())
+            org.junit.Assert.assertFalse(AuditNativeBridge.commands.drop(commands).any { it.firstOrNull() == "loadfile" || it == listOf("set", "pause", "yes") })
+        } finally {
+            compose.mainClock.autoAdvance = true
+            compose.runOnIdle {
+                manualTexture?.let { texture(compose.activity.window.decorView)?.surfaceTextureListener?.onSurfaceTextureDestroyed(it) }
+            }
+            AuditNativeBridge.commentPreviewPath = ""
+            AuditNativeBridge.commentVideo = null
+        }
+    }
     @Test fun fullscreenSizeChangesKeepOutputAndMediaAlive() = runBlocking {
         AuditNativeBridge.commands.clear()
         AuditNativeBridge.playerCreations.set(0)
@@ -437,8 +543,11 @@ class VisualAuditTest {
                 view.setVideoAspect(16f / 9f)
                 view.surfaceTextureListener!!.onSurfaceTextureAvailable(texture, 360, 720)
             }
-            player.play(true)
             player.open(obj("url" to "/synthetic.mp4"))
+            val initial = AuditNativeBridge.commands.toList()
+            org.junit.Assert.assertTrue(initial.takeWhile { it.firstOrNull() != "loadfile" }.contains(listOf("set", "cache-secs", "2")))
+            org.junit.Assert.assertTrue(initial.contains(listOf("set", "demuxer-hysteresis-secs", "1.0")))
+            player.play(true)
             compose.runOnIdle {
                 repeat(20) {
                     for ((width, height) in listOf(720 to 360, 360 to 720)) {
@@ -452,13 +561,15 @@ class VisualAuditTest {
             org.junit.Assert.assertEquals(1, AuditNativeBridge.commands.count { it.getOrNull(1) == "android-surface-size" })
             org.junit.Assert.assertFalse(AuditNativeBridge.commands.any { it.getOrNull(1) == "vo" })
             org.junit.Assert.assertTrue(player.state.value.playing)
-            val initial = AuditNativeBridge.commands.toList()
-            org.junit.Assert.assertTrue(initial.takeWhile { it.firstOrNull() != "loadfile" }.contains(listOf("set", "cache-secs", "6")))
-            org.junit.Assert.assertTrue(initial.contains(listOf("set", "demuxer-hysteresis-secs", "3.0")))
+            AuditNativeBridge.playingSnapshot = true
             player.observe(true)
             compose.waitUntil(10000) { AuditNativeBridge.commands.contains(listOf("set", "demuxer-hysteresis-secs", "12.0")) }
             org.junit.Assert.assertTrue(AuditNativeBridge.commands.contains(listOf("set", "cache-secs", "24")))
-        } finally { player.detach(texture); player.close() }
+        } finally {
+            AuditNativeBridge.playingSnapshot = false
+            player.detach(texture)
+            player.close()
+        }
     }
     @get:Rule val compose = createAndroidComposeRule<androidx.activity.ComponentActivity>()
     @Test fun renderSettings() = render()
@@ -594,13 +705,13 @@ class VisualAuditTest {
                     preparation.prepare(drama, episode, 720)
                     preparation.prepare(drama, episode, 720)
                     check(withContext(Dispatchers.IO) { warming.await(5, java.util.concurrent.TimeUnit.SECONDS) })
-                    val active = mutableStateOf(false)
+                    val canOpen = mutableStateOf(false)
                     val taking = async(start = CoroutineStart.UNDISPATCHED) {
-                        preparation.take(drama, episode, 720) { active.value }
+                        preparation.take(drama, episode, 720) { canOpen.value }
                     }
                     org.junit.Assert.assertFalse(taking.isCompleted)
                     if (activateEarly) {
-                        active.value = true
+                        canOpen.value = true
                         androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
                     } else finish.countDown()
                     val plan = requireNotNull(withTimeout(4000) { taking.await() })
@@ -611,10 +722,60 @@ class VisualAuditTest {
                     repo.release(plan)
                 } finally { finish.countDown() }
             }
+            requireNotNull(preparation.prepare(drama, episode, 720) { false }).join()
+            val direct = requireNotNull(preparation.take(drama, episode, 720))
+            org.junit.Assert.assertEquals(0L, direct.optLong("prefetchedBytes"))
+            repo.release(direct)
             org.junit.Assert.assertEquals(2, AuditNativeBridge.feedWarmups.get())
         } finally {
             AuditNativeBridge.onFeedWarmup = {}
             preparation.retain(emptySet(), emptySet())
+        }
+    }
+
+    @Test fun feedShowsOneLoadingRingAndPreparesNextBeforeFirstFrame() {
+        val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
+        val items = (1..2).map { Drama(obj("id" to "hongguo:warm-next-$it", "source" to "hongguo", "title" to "预热 $it")) }
+        val ordered = runBlocking {
+            repo.store.open()
+            repo.store.set("homeFeedPreferences", obj("hongguo" to obj("enabled" to true, "categories" to obj("short_play" to true))))
+            repo.subscriptions.installed.value = listOf(SourcePackage(
+                obj("id" to "hongguo", "name" to "合成来源", "kind" to "video", "version" to "1", "program" to "function* main(){}",
+                    "capabilities" to org.json.JSONArray(listOf("catalog"))), "local:audit", "audit", ByteArray(0),
+            ))
+            repo.saveCatalog("hongguo", "short_play", Catalog(items, false, 1))
+            repo.recommendations.rank(items, repo.store, 0, excludeRecent = true)
+        }
+        val entered = java.util.concurrent.ConcurrentLinkedQueue<String>()
+        val releaseCurrent = java.util.concurrent.CountDownLatch(1)
+        AuditNativeBridge.feedWarmups.set(0)
+        AuditNativeBridge.onFeedResolve = { id ->
+            entered.add(id)
+            if (id == ordered.first().id) check(releaseCurrent.await(15, java.util.concurrent.TimeUnit.SECONDS))
+        }
+        try {
+            compose.setContent { CompositionLocalProvider(LocalRepository provides repo, LocalNavigate provides {}) {
+                DramaTheme(repo.store) { FeedScreen(true, false, false, {}, onFullScreen = {}) }
+            } }
+            compose.waitUntil(8000) {
+                ordered.first().id in entered &&
+                    compose.onAllNodes(androidx.compose.ui.test.hasText("正在准备播放")).fetchSemanticsNodes().isNotEmpty()
+            }
+            org.junit.Assert.assertEquals(listOf(ordered.first().id), entered.toList())
+            org.junit.Assert.assertEquals(1, compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("加载中")).fetchSemanticsNodes().size)
+            compose.mainClock.autoAdvance = false
+            compose.mainClock.advanceTimeBy(12_300)
+            compose.onNodeWithText("本条视频加载超时").assertExists()
+            compose.onNodeWithText("重试播放").assertExists()
+            compose.onNodeWithContentDescription("加载中").assertDoesNotExist()
+            compose.mainClock.autoAdvance = true
+            releaseCurrent.countDown()
+            compose.waitUntil(8000) { ordered.last().id in entered }
+            org.junit.Assert.assertTrue(AuditNativeBridge.feedWarmups.get() <= 1)
+        } finally {
+            compose.mainClock.autoAdvance = true
+            releaseCurrent.countDown()
+            AuditNativeBridge.onFeedResolve = {}
         }
     }
 
@@ -849,7 +1010,8 @@ class VisualAuditTest {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         androidx.compose.material3.TextButton({ open.value = true }) { androidx.compose.material3.Text("打开评论") }
                     }
-                    if (open.value) CommentsDialog(Drama(auditData().getJSONArray("dramas").getJSONObject(0))) { open.value = false }
+                    if (open.value) FeedCommentsPanel(Drama(auditData().getJSONArray("dramas").getJSONObject(0)),
+                        Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(.65f)) { open.value = false }
                 }
                 "settings", "about" -> SettingsScreen()
                 "creatorData" -> CreatorScreen(Drama(auditData().getJSONObject("creator").getJSONArray("items").getJSONObject(0)), {})
@@ -1039,19 +1201,25 @@ class AuditNativeBridge {
     @Implementation fun playerGet(player: Long, property: ByteArray): ByteArray = "0".toByteArray()
     @Implementation fun playerSnapshot(player: Long): DoubleArray {
         check(!snapshotFailure) { "synthetic surface loss" }
-        return doubleArrayOf(30.0, 120.0, 1920.0, 1080.0, 60.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+        val (width, height) = if (commentVideo != null) 1080.0 to 1920.0 else 1920.0 to 1080.0
+        val idle = if (playingSnapshot) 0.0 else 1.0
+        return doubleArrayOf(30.0, 120.0, width, height, 60.0, idle, 0.0, 0.0, idle, 0.0, 0.0)
     }
     @Implementation fun destroyPlayer(player: Long) {}
     companion object {
         val commands = java.util.concurrent.ConcurrentLinkedQueue<List<String>>()
         val playerCreations = java.util.concurrent.atomic.AtomicInteger()
         @Volatile var snapshotFailure = false
+        @Volatile var playingSnapshot = false
+        @Volatile var commentVideo: org.json.JSONObject? = null
+        @Volatile var commentPreviewPath = ""
         val catalogRequests = java.util.concurrent.atomic.AtomicInteger()
         var populated = false
         var longCatalog = false
         val feedWarmups = java.util.concurrent.atomic.AtomicInteger()
         @Volatile var onFeedWarmup: () -> Unit = {}
         @Volatile var onFeedDetail: (String) -> Unit = {}
+        @Volatile var onFeedResolve: (String) -> Unit = {}
         @JvmStatic @Implementation fun __staticInitializer__() {
             ReflectionHelpers.setStaticField(NativeBridge::class.java, "INSTANCE", ReflectionHelpers.callConstructor(NativeBridge::class.java))
         }
@@ -1069,11 +1237,19 @@ class AuditNativeBridge {
                     obj("drama" to drama, "chapters" to fixture.getJSONArray("chapters"))
                 }
                 "categories" -> obj("items" to org.json.JSONArray())
+                "resolve" -> {
+                    onFeedResolve(request.getJSONObject("payload").getJSONObject("drama").text("id"))
+                    org.json.JSONObject()
+                }
                 "creator" -> fixture.getJSONObject("creator")
                 "rankingBoards" -> obj("items" to fixture.getJSONArray("rankingBoards"))
                 "rankings" -> fixture.getJSONObject("rankings")
                 "comments" -> obj("items" to fixture.getJSONArray("comments"), "cursor" to "done", "total" to 2, "hasMore" to false)
-                "catalog", "search" -> obj("items" to if (longCatalog) org.json.JSONArray(auditScrollDramas()) else fixture.getJSONArray("dramas"), "page" to 1, "hasMore" to false)
+                "catalog", "search" -> {
+                    val items = commentVideo?.let { org.json.JSONArray().put(it) }
+                        ?: if (longCatalog) org.json.JSONArray(auditScrollDramas()) else fixture.getJSONArray("dramas")
+                    obj("items" to items, "page" to 1, "hasMore" to false)
+                }
                 else -> org.json.JSONObject()
             }
             return obj("ok" to true, "data" to obj("done" to true, "value" to value)).toString().toByteArray()
@@ -1084,6 +1260,7 @@ class AuditNativeBridge {
             "downloadDirectory" -> obj("directory" to RuntimeEnvironment.getApplication().cacheDir.path)
             "downloads" -> obj("jobs" to if (populated) auditData().getJSONArray("jobs") else org.json.JSONArray())
             "sourceStatus", "cancelRead" -> org.json.JSONObject()
+            "subscriptionCover" -> obj("path" to commentPreviewPath)
             "localPlayback", "release" -> org.json.JSONObject()
             "subscriptionPlan" -> obj("url" to "https://example.invalid/fixture.mp4", "session" to "feed-audit")
             "subscriptionPrefetch" -> {

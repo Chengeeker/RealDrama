@@ -11,6 +11,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
@@ -18,6 +19,10 @@ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.foundation.*
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -39,10 +44,13 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.hideFromAccessibility
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -50,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -179,9 +188,37 @@ fun RootTabs(active: Boolean) {
     val labels = listOf("首页", "发现", "收藏", "设置")
     val tabTransition = updateTransition(tab, label = "main destination")
     val layoutSign = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1f else -1f
+    var commentDrama by remember { mutableStateOf<Drama?>(null) }
+    var commentsOpen by remember { mutableStateOf(false) }
+    val commentProgress = remember { mutableFloatStateOf(0f) }
+    val commentScope = rememberCoroutineScope()
+    var commentAnimation by remember { mutableStateOf<Job?>(null) }
+    val commentsVisible = commentDrama != null && active && tab == 0
+    fun animateComments(expanded: Boolean) {
+        commentAnimation?.cancel()
+        commentsOpen = expanded
+        commentAnimation = commentScope.launch {
+            animate(commentProgress.floatValue, if (expanded) 1f else 0f,
+                animationSpec = tween(if (expanded) 300 else 260, easing = flutterEaseOutCubic),
+            ) { value, _ -> commentProgress.floatValue = value }
+            if (!expanded) commentDrama = null
+        }
+    }
+    LaunchedEffect(active, tab) {
+        if (!active || tab != 0) {
+            commentAnimation?.cancel()
+            commentsOpen = false
+            commentProgress.floatValue = 0f
+            commentDrama = null
+        }
+    }
+    val closeComments = { if (commentsOpen) animateComments(false) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val compact = !television && maxWidth < 840.dp
         val rail = !full && (television || maxWidth >= 840.dp)
+        val sheetHeight = maxHeight * if (maxHeight < 480.dp) .62f else .65f
+        val statusTop = if (full) 0.dp else WindowInsets.statusBarsIgnoringVisibility.asPaddingValues().calculateTopPadding()
+        val commentsVideoHeight = (maxHeight - sheetHeight - statusTop).coerceAtLeast(1.dp)
         val showTab: @Composable (Int, Modifier, Boolean) -> Unit = { page, bodySlide, headerVisible ->
             CompositionLocalProvider(LocalScreenActive provides (active && page == tab)) {
                 when (page) {
@@ -198,7 +235,7 @@ fun RootTabs(active: Boolean) {
                 }
             }
         }
-        Row(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxSize().then(if (commentsVisible) Modifier.semantics { hideFromAccessibility() } else Modifier)) {
             if (rail && television) {
                 Column(Modifier.width(164.dp).fillMaxHeight().padding(start = 8.dp, top = 24.dp, end = 8.dp, bottom = 12.dp)) {
                     labels.forEachIndexed { i, name -> TelevisionNavigationButton(name, listOf("play_arrow_rounded", "explore_rounded", "bookmark_rounded", "settings_rounded")[i], tab == i, i == 0) { selectTab(i) } }
@@ -222,7 +259,15 @@ fun RootTabs(active: Boolean) {
                     val feedSlide = if (compact) Modifier.graphicsLayer { translationX = -layoutSign * size.width * feedOffset.value } else Modifier
                     if (feedMounted) Box(Modifier.fillMaxSize().zIndex(if (tab == 0) 1f else 0f)
                         .retainedVisible(feedVisible).then(feedSlide)) {
-                        FeedScreen(active && tab == 0, full, clean, onClean = { clean = it }, onBoost = { boost = it }) { full = it }
+                        FeedScreen(active && tab == 0, full, clean, onClean = { clean = it }, onBoost = { boost = it },
+                            commentsProgress = commentProgress.takeIf { commentsVisible }, commentsVideoHeight = commentsVideoHeight,
+                            onComments = { drama ->
+                                if (commentDrama == null) {
+                                    commentDrama = drama
+                                    animateComments(true)
+                                }
+                            },
+                        ) { full = it }
                     }
                     if (discoverMounted) {
                         val discoverOffset = tabTransition.animateFloat(transitionSpec = {
@@ -254,7 +299,7 @@ fun RootTabs(active: Boolean) {
                 }
                 if (!full && !rail && !(tab == 1 && selecting)) {
                     val colors = MaterialTheme.colorScheme
-                    val hidden = tab == 0 && (clean || boost)
+                    val hidden = tab == 0 && (clean || boost || commentsVisible)
                     val insets = if (tab == 0) WindowInsets.navigationBarsIgnoringVisibility else WindowInsets.navigationBars
                     val indicator = animateFloatAsState(tab.toFloat(), tween(240, easing = flutterEaseOutCubic), label = "tab selection")
                     Row(Modifier.fillMaxWidth().background(if (hidden) Color.Black else colors.surfaceContainerLow)
@@ -281,6 +326,29 @@ fun RootTabs(active: Boolean) {
                     }
                 }
             }
+        }
+        BackHandler(enabled = commentsVisible, onBack = closeComments)
+        if (commentsVisible) {
+            Box(Modifier.matchParentSize().pointerInput(Unit) { detectTapGestures { closeComments() } })
+            val density = LocalDensity.current
+            val sheetHeightPx = with(density) { sheetHeight.toPx().coerceAtLeast(1f) }
+            val dismissVelocity = with(density) { 700.dp.toPx() }
+            FeedCommentsPanel(requireNotNull(commentDrama), modifier = Modifier.align(Alignment.BottomCenter)
+                .widthIn(max = 640.dp).fillMaxWidth().height(sheetHeight).graphicsLayer {
+                    translationY = size.height * (1f - commentProgress.floatValue)
+                },
+                headerModifier = Modifier.draggable(
+                    state = rememberDraggableState { delta ->
+                        commentProgress.floatValue = (commentProgress.floatValue - delta / sheetHeightPx).coerceIn(0f, 1f)
+                    },
+                    orientation = Orientation.Vertical, enabled = commentsOpen,
+                    onDragStarted = { if (commentsOpen) commentAnimation?.cancel() },
+                    onDragStopped = { velocity ->
+                        if (commentsOpen) animateComments(commentProgress.floatValue >= .80f && velocity <= dismissVelocity)
+                    },
+                ),
+                back = closeComments,
+            )
         }
     }
 }

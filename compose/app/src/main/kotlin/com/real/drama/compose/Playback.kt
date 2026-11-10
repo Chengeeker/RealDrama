@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.key.*
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -162,6 +164,7 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
     private val observing = MutableStateFlow(observeInitially)
     fun observe(value: Boolean) { observing.value = value }
     val state = MutableStateFlow(PlaybackState())
+    internal val surfaceAttached = MutableStateFlow(false)
     private fun command(vararg values: String): Int = if (handle == 0L) -1 else NativeBridge.playerCommand(handle, values.map { it.toByteArray() }.toTypedArray())
     private fun get(name: String) = NativeBridge.playerGet(handle, name.toByteArray()).toString(Charsets.UTF_8)
     fun attach(value: SurfaceTexture, width: Int, height: Int) {
@@ -181,6 +184,7 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
             val decoder = when (preferences.text("hardwareDecoder")) { "copy" -> "auto-copy"; "mediaCodec" -> "mediacodec"; "mediaCodecCopy" -> "mediacodec-copy"; else -> "auto-safe" }
             command("set", "hwdec", if (preferences.optBoolean("hardwareDecoding", true)) decoder else "no")
             command("set", "speed", playbackRate.toString())
+            surfaceAttached.value = true
             pending?.let { openLocked(it, start) }
         } } catch (cancel: CancellationException) { throw cancel } catch (error: Exception) { state.value = state.value.copy(buffering = false, error = error.message ?: "无法初始化播放器") } }
     }
@@ -199,6 +203,7 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
         } }
     }
     private fun disconnectSurface() {
+        surfaceAttached.value = false
         val previous = handle
         try { get("time-pos").toDoubleOrNull()?.let { start = it } }
         finally { handle = 0; NativeBridge.destroyPlayer(previous) }
@@ -211,14 +216,14 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
                     if (!closed && observing.value && handle != 0L && pending != null) {
                         try {
                             val snapshot = playbackSnapshot(NativeBridge.playerSnapshot(handle), intent, state.value.error)
-                            if (adaptiveCache) setFeedCache(feedCacheSeconds(snapshot.duration))
+                            if (adaptiveCache && snapshot.playing && !snapshot.buffering) setFeedCache(feedCacheSeconds(snapshot.duration))
                             state.value = snapshot.copy(positionRevision = state.value.positionRevision)
                         } catch (error: Exception) {
                             state.value = state.value.copy(playing = false, buffering = false, error = error.message ?: "无法读取播放器状态")
                         }
                     }
                 }
-                delay(if (state.value.playing || state.value.buffering) 250 else 1000)
+                delay(if (state.value.playing || state.value.buffering || adaptiveCache && state.value.width == 0.0) 250 else 1000)
             }
         }
     }
@@ -234,7 +239,7 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
         command("stop")
         if (adaptiveCache) {
             cacheWindow = 0
-            setFeedCache(feedCacheSeconds(0.0))
+            setFeedCache(if (intent) feedCacheSeconds(0.0) else 2)
         }
         val headers = plan.optJSONObject("headers") ?: JSONObject()
         val encoded = headers.keys().asSequence().map { key ->
@@ -278,6 +283,7 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
     fun close() {
         closed = true
         requestedTexture = null
+        surfaceAttached.value = false
         scope.launch {
             try { mutex.withLock {
                 try {
@@ -350,8 +356,10 @@ fun VideoSurface(player: MpvPlayer, modifier: Modifier = Modifier, onFrameReady:
 fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, feed: Boolean = false, modifier: Modifier = Modifier, initialPosition: Double? = null,
     handoff: LanPreparedPlayback? = null, localPlan: JSONObject? = null, mediaId: String = "", localOnly: Boolean = false,
     selectedIndex: Int? = null, onIndexChanged: (Int) -> Unit = {}, externalFull: Boolean? = null, externalClean: Boolean? = null,
-    takeFeedPlan: (suspend (Drama, Episode, Int) -> JSONObject?)? = null,
+    takeFeedPlan: (suspend (Drama, Episode, Int, () -> Boolean) -> JSONObject?)? = null,
     feedPreview: (@Composable (Modifier) -> Unit)? = null,
+    warmFeed: Boolean = false, onMediaOpened: () -> Unit = {},
+    commentsProgress: State<Float>? = null, commentsVideoHeight: Dp = 0.dp,
     onVideoAspectRatio: (Double) -> Unit = {},
     onControls: (PlayerActions?) -> Unit = {}, onClean: (Boolean) -> Unit = {}, onBoost: (Boolean) -> Unit = {}, onFullScreen: (Boolean) -> Unit = {}, onComments: () -> Unit = {}, onCreator: () -> Unit = {}, onNext: () -> Unit = {}, onBack: () -> Unit = {}, onUnavailable: () -> Unit = {}, onAvailable: () -> Unit = {}) {
     val repo = LocalRepository.current; val action = rememberAction(); val context = LocalContext.current; val nav = LocalNavigate.current
@@ -361,9 +369,12 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
     val player = remember(detail.drama.id) { MpvPlayer(preferences, observeInitially = active || !feed, feed = feed) }
     var videoFrameReady by remember(player) { mutableStateOf(false) }
     val state by player.state.collectAsState()
+    val surfaceAttached by player.surfaceAttached.collectAsState()
+    val canOpenFeed by rememberUpdatedState(active || surfaceAttached)
     var index by remember(detail.drama.id) { mutableIntStateOf(initialIndex.coerceIn(0, (detail.episodes.size - 1).coerceAtLeast(0))) }
     var plan by remember(detail.drama.id) { mutableStateOf<JSONObject?>(null) }
     var failure by remember(detail.drama.id) { mutableStateOf<String?>(null) }
+    var failedWhileWarming by remember(player, index) { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var loadingLabel by remember { mutableStateOf("正在准备播放") }
     var reload by remember { mutableIntStateOf(0) }
@@ -441,9 +452,29 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
     val currentState by rememberUpdatedState(state)
     var pausedByUser by remember { mutableStateOf(false) }
     var audioAllowed by remember { mutableStateOf(true) }
-    val shouldPlay = active && foreground && audioAllowed && !pausedByUser && menu != "comments"
+    val shouldPlay = active && foreground && audioAllowed && !pausedByUser
     val showBuffering = shouldPlay && state.buffering
-    fun wantsPlayback() = latestActive && foreground && audioAllowed && !pausedByUser && menu != "comments"
+    val feedWaiting = feed && active && foreground && failure == null && (loading || shouldPlay && !state.completed && state.error == null &&
+        (showBuffering || !videoFrameReady && state.width == 0.0))
+    var feedLoadingVisible by remember { mutableStateOf(false) }
+    var feedLoadingTimedOut by remember(plan, reload) { mutableStateOf(false) }
+    LaunchedEffect(feedWaiting) {
+        if (feedWaiting) {
+            delay(180)
+            feedLoadingVisible = true
+        } else {
+            feedLoadingVisible = false
+        }
+    }
+    LaunchedEffect(feedWaiting, plan, reload, state.position) {
+        feedLoadingTimedOut = false
+        if (feedWaiting) {
+            delay(12000)
+            feedLoadingTimedOut = true
+        }
+    }
+    val playbackFailure = failure ?: if (feedLoadingTimedOut) "本条视频加载超时" else null
+    fun wantsPlayback() = latestActive && foreground && audioAllowed && !pausedByUser
     var requestFocus by remember { mutableStateOf<(() -> Boolean)?>(null) }
     var feedFeedback by remember { mutableIntStateOf(0) }
     LaunchedEffect(feedFeedback) { if (feedFeedback > 0) { delay(1000); feedFeedback = 0 } }
@@ -452,7 +483,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         if (!pausedByUser) audioAllowed = requestFocus?.invoke() == true
         if (feed) feedFeedback++
         interaction++
-        action { player.play(latestActive && foreground && audioAllowed && !pausedByUser && menu != "comments") }
+        action { player.play(wantsPlayback()) }
     }
     fun togglePlayback() {
         if (currentState.completed) {
@@ -486,7 +517,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         val brightness = window?.attributes?.screenBrightness
         onDispose { if (active && window != null && brightness != null) { val attributes = window.attributes; attributes.screenBrightness = brightness; window.attributes = attributes } }
     }
-    LaunchedEffect(active, clean, menu) { if (active && menu.isEmpty() && (clean || !television)) rootFocus.requestFocus() }
+    LaunchedEffect(active, clean, menu, commentsProgress) { if (active && commentsProgress == null && menu.isEmpty() && (clean || !television)) rootFocus.requestFocus() }
     DisposableEffect(active) { onDispose { keyboardHold?.cancel(); keyboardHold = null; keyboardHeld = false; if (boost) { boost = false; action { player.rate(speed) } } } }
     DisposableEffect(active, state.playing) {
         if (active && state.playing) view.keepScreenOn = true
@@ -528,7 +559,13 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         }
     }
     LaunchedEffect(shouldPlay) { player.play(shouldPlay) }
-    LaunchedEffect(active, foreground) { player.observe(active && foreground) }
+    LaunchedEffect(active, foreground, warmFeed) {
+        player.observe(foreground && (active || warmFeed))
+        if (foreground && !active && warmFeed) {
+            withTimeoutOrNull(6500) { player.state.first { it.width > 0 && it.height > 0 || it.error != null } }
+            player.observe(false)
+        }
+    }
     LaunchedEffect(feed, active, preferences.optInt("homeQuality")) {
         if (feed && active) {
             quality = preferences.optInt("homeQuality")
@@ -542,7 +579,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
     LaunchedEffect(full) { if (!full) locked = false }
     LaunchedEffect(active) { if (!active) { dragging = null; adjusting = false } }
     LaunchedEffect(detail.drama.id, index, playbackQuality, reload) {
-        loading = true; failure = null
+        loading = true; failure = null; failedWhileWarming = false
         if (episode == null) { loading = false; failure = "没有可播放的分集"; return@LaunchedEffect }
         try {
             val continuingPosition = openedEpisode?.takeIf { it.number == episode.number }?.let { player.state.value.position }
@@ -551,7 +588,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             val saved = if (mediaId.isEmpty()) repo.store.watch(detail.drama) else repo.store.json("mediaHistory").optJSONObject(mediaId)
             val position = continuingPosition ?: if (!initialPositionApplied && initialPosition != null) initialPosition else if (saved?.optInt("episode") == episode.number && !(saved.optDouble("duration") > 1 && saved.optDouble("position") >= saved.optDouble("duration") - 1)) saved.optDouble("position") else 0.0
             val prepared = handoff?.takeIf { !it.consumed && !it.cancelled && it.epoch == repo.store.epoch && it.index == index }
-            val resolved = localPlan ?: prepared?.plan ?: if (localOnly) NativeBridge.call(obj("action" to "localPlayback", "drama" to detail.drama.json, "index" to episode.number)).also { require(it.optBoolean("local") && it.text("url").isNotEmpty()) { "本地视频不可用，请检查已下载文件" } } else (if (reload == 0) takeFeedPlan?.invoke(detail.drama, episode, playbackQuality) ?: preloader.take(detail.drama, episode, playbackQuality) else null) ?: repo.resolve(detail.drama, episode, playbackQuality, online = reload > 0)
+            val resolved = localPlan ?: prepared?.plan ?: if (localOnly) NativeBridge.call(obj("action" to "localPlayback", "drama" to detail.drama.json, "index" to episode.number)).also { require(it.optBoolean("local") && it.text("url").isNotEmpty()) { "本地视频不可用，请检查已下载文件" } } else (if (reload == 0) takeFeedPlan?.invoke(detail.drama, episode, playbackQuality) { canOpenFeed } ?: preloader.take(detail.drama, episode, playbackQuality) else null) ?: repo.resolve(detail.drama, episode, playbackQuality, online = reload > 0)
             try {
                 ensureActive(); plan = resolved
                 if (prepared != null) { prepared.consumed = true; prepared.stop = { player.play(false) } }
@@ -562,7 +599,10 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             }
             catch (error: Throwable) { repo.release(resolved); throw error }
         } catch (cancel: CancellationException) { throw cancel }
-        catch (error: Exception) { failure = error.message ?: "播放失败" }
+        catch (error: Exception) {
+            failedWhileWarming = feed && !latestActive
+            failure = error.message ?: "播放失败"
+        }
         finally { loading = false; loadingLabel = "正在准备播放" }
     }
     LaunchedEffect(player, index) {
@@ -584,13 +624,27 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             }
         }
     }
-    LaunchedEffect(state.completed) { if (state.completed && active && preferences.optBoolean("autoAdvance", true)) { if (index + 1 < detail.episodes.size) index++ else if (feed) onNext() } }
-    LaunchedEffect(failure, active) { if (feed && active && failure != null) onUnavailable() }
+    LaunchedEffect(state.completed, commentsProgress) {
+        if (state.completed && active && commentsProgress == null && preferences.optBoolean("autoAdvance", true)) {
+            if (index + 1 < detail.episodes.size) index++ else if (feed) onNext()
+        }
+    }
+    LaunchedEffect(feed, active, openedEpisode, loading, failure) {
+        if (feed && active && openedEpisode != null && !loading && failure == null) onMediaOpened()
+    }
+    LaunchedEffect(failure, active) {
+        if (feed && active && failure != null) {
+            if (failedWhileWarming) {
+                failure = null
+                reload++
+            } else onUnavailable()
+        }
+    }
     LaunchedEffect(active, state.playing, state.buffering, aspectRatio > 0) {
         if (feed && active && !state.buffering && (state.playing || aspectRatio > 0)) onAvailable()
     }
-    LaunchedEffect(state.error) {
-        if (state.error != null && plan != null) {
+    LaunchedEffect(state.error, !feed || active) {
+        if ((!feed || active) && state.error != null && plan != null) {
             val current = plan!!
             if (current.optInt("routeIndex") + 1 < current.optInt("routeCount")) {
                 try {
@@ -610,7 +664,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         if (locked) { locked = false; setClean(false) } else toggleFullscreen()
     }
     BoxWithConstraints(modifier.background(Color.Black).onPreviewKeyEvent { event ->
-        if (!active || event.isAltPressed || event.isMetaPressed || event.isShiftPressed || event.isCtrlPressed) false
+        if (!active || commentsProgress != null || event.isAltPressed || event.isMetaPressed || event.isShiftPressed || event.isCtrlPressed) false
         else if (!television && event.key == Key.DirectionRight) {
             if (event.type == KeyEventType.KeyDown && !keyboardHeld) {
                 keyboardHeld = true; keyboardHold = scope.launch { delay(350); if (currentState.playing) { boost = true; player.rate(holdSpeed) } }
@@ -631,13 +685,24 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             else -> false
         }
     }.focusRequester(rootFocus).focusable()) {
-        VideoSurface(player, Modifier.fillMaxSize(), if (feedPreview == null) null else { ready -> videoFrameReady = ready })
-        if (!videoFrameReady) feedPreview?.invoke(Modifier.matchParentSize())
-        if (active && danmaku && episode != null && "danmaku" in source?.capabilities.orEmpty() && !localOnly && plan?.optBoolean("local") == false && !loading && failure == null && (!feed || !clean)) DanmakuOverlay(detail.drama, episode, state, if (boost) holdSpeed else speed)
-        Box(Modifier.fillMaxSize().pointerInput(player, speed, feed, holdSpeed, active, loading, failure, externalClean, locked) {
-            if (!active) return@pointerInput
+        Box(Modifier.matchParentSize().then(if (commentsProgress == null) Modifier else Modifier.graphicsLayer {
+            val progress = commentsProgress.value
+            val targetHeight = commentsVideoHeight.toPx().coerceAtMost(size.height)
+            val fittedHeight = if (aspectRatio > 0.0) minOf(size.height, size.width / aspectRatio.toFloat()) else size.height
+            val targetScale = if (fittedHeight > 0f) (targetHeight / fittedHeight).coerceAtMost(1f) else 1f
+            val scale = 1f + (targetScale - 1f) * progress
+            scaleX = scale
+            scaleY = scale
+            translationY = (targetHeight - size.height) * .5f * progress
+        })) {
+            VideoSurface(player, Modifier.fillMaxSize(), if (feedPreview == null) null else { ready -> videoFrameReady = ready })
+            if (!videoFrameReady) feedPreview?.invoke(Modifier.matchParentSize())
+            if (active && danmaku && episode != null && "danmaku" in source?.capabilities.orEmpty() && !localOnly && plan?.optBoolean("local") == false && !loading && failure == null && (!feed || !clean)) DanmakuOverlay(detail.drama, episode, state, if (boost) holdSpeed else speed)
+        }
+        Box(Modifier.fillMaxSize().pointerInput(player, speed, feed, holdSpeed, active, loading, playbackFailure, externalClean, locked, commentsProgress) {
+            if (!active || commentsProgress != null) return@pointerInput
             if (locked) { detectTapGestures { lockVisible = true; interaction++ }; return@pointerInput }
-            if (loading || failure != null || feed && externalClean == true) return@pointerInput
+            if (loading || playbackFailure != null || feed && externalClean == true) return@pointerInput
             val press: suspend PressGestureScope.(androidx.compose.ui.geometry.Offset) -> Unit = {
                 val hold = scope.launch { delay(350); if (currentState.playing && !pausedByUser) { boost = true; player.rate(holdSpeed) } }
                 try { tryAwaitRelease() } finally { hold.cancel(); if (boost) { suppressTapUntil = android.os.SystemClock.uptimeMillis() + 300; boost = false; action { player.rate(speed) } } }
@@ -701,9 +766,6 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                 } else { volume = (volume - amount / size.height * 100).coerceIn(0.0, 100.0); hint = "音量 ${volume.toInt()}%"; action { player.volume(volume) } }
             }) } finally { adjusting = false }
         }))
-        if ((active && loading && feedPreview != null && !videoFrameReady || !loading && showBuffering) && failure == null && !state.completed) {
-            LoadingRing(Modifier.align(Alignment.Center))
-        }
         val playbackTitle = buildString {
             append(detail.drama.title)
             if (episodic) append(" · 第 ${episode?.number ?: 1} 集")
@@ -712,12 +774,12 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             val route = plan?.optInt("routeIndex") ?: 0
             if (route > 0) append(" · 线路 ${route + 1}")
         }
-        val enabled = !loading && failure == null
+        val enabled = !loading && playbackFailure == null
 
         val controlsVisible = (!clean || !shouldPlay || state.completed || menu.isNotEmpty()) && !boost && !locked
         if (controlsVisible && television) TelevisionPlayerControls(playbackTitle, state.copy(playing = shouldPlay && !state.completed, buffering = showBuffering), index > 0, index + 1 < detail.episodes.size, episodic,
             onBack = onBack, onToggle = { togglePlayback() }, onPrevious = { index-- }, onNext = { index++ }, onEpisodes = { menu = "episodes" }, onSettings = { menu = "settings" }, onSeek = { target -> action { player.seek(target) } })
-        if ((if (feed) !clean && !boost else controlsVisible) && !television) CompositionLocalProvider(LocalContentColor provides Color.White) {
+        if ((if (feed) !clean && !boost && commentsProgress == null else controlsVisible) && !television) CompositionLocalProvider(LocalContentColor provides Color.White) {
             if (!feed) {
                 Box(Modifier.matchParentSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
                     0f to Color(0xaa000000), .45f to Color.Transparent, 1f to Color(0xe6000000),
@@ -760,7 +822,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                 }
                 Column(Modifier.align(Alignment.BottomEnd).padding(end = 8.dp, bottom = if (compact) 48.dp else 34.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     FeedAction(if (liked) "favorite_rounded" else "favorite_border_rounded", "喜欢", liked, compact) { repo.recommendations.like(detail.drama); liked = !liked }
-                    if (source?.capabilities?.contains("comments") == true) FeedAction("chat_bubble_outline_rounded", "评论", compact = compact) { menu = "comments" }
+                    if (source?.capabilities?.contains("comments") == true) FeedAction("chat_bubble_outline_rounded", "评论", compact = compact, action = onComments)
                     val saved = repo.store.favorites().any { it.id == detail.drama.id }
                     FeedAction(if (saved) "bookmark_rounded" else "bookmark_border_rounded", if (source?.kind == "drama") "追剧" else "收藏", saved, compact) { action { repo.store.favorite(detail.drama) } }
                     if (detail.drama.source == "hongguo") FeedAction("not_interested_rounded", "不喜欢", compact = compact) {
@@ -837,20 +899,26 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                 Text(feedback, Modifier.background(Color.Black.copy(alpha = if (boost) .18f else .87f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(horizontal = 16.dp, vertical = 10.dp), color = Color.White)
             }
         }
-        if (loading) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .78f)), contentAlignment = Alignment.Center) {
+        val showLoading = if (feed) feedWaiting && feedLoadingVisible else loading || showBuffering && !state.completed
+        if (showLoading && commentsProgress == null && playbackFailure == null) Box(
+            Modifier.matchParentSize().then(if (!feed && loading) Modifier.background(Color.Black.copy(alpha = .78f)) else Modifier),
+            contentAlignment = Alignment.Center,
+        ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 LoadingRing()
-                Spacer(Modifier.height(16.dp))
-                Text(loadingLabel, color = Color.White)
+                if (loading) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(loadingLabel, color = Color.White)
+                }
             }
         }
-        if (failure != null) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .9f))) {
+        if (playbackFailure != null && commentsProgress == null) Box(Modifier.matchParentSize().background(Color.Black.copy(alpha = .9f))) {
             CompositionLocalProvider(LocalContentColor provides Color.White) {
-                StatusPanel("暂时无法播放", failure!!, if (localOnly || localPlan != null) "重试本地播放" else "重试播放",
+                StatusPanel("暂时无法播放", playbackFailure, if (localOnly || localPlan != null) "重试本地播放" else "重试播放",
                     { loadingLabel = "正在准备播放"; reload++ }, icon = "play_disabled_rounded")
             }
         }
-        if (showLike && !clean && !boost) Glyph("favorite_rounded", modifier = Modifier.align(Alignment.Center).scale(likeScale.value),
+        if (showLike && !clean && !boost && commentsProgress == null) Glyph("favorite_rounded", modifier = Modifier.align(Alignment.Center).scale(likeScale.value),
             color = Color(0xffff4081).copy(alpha = .92f), size = 104)
         if ((loading || failure != null) && full && !television && !feed) {
             Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
@@ -885,7 +953,6 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         )
     }
     if (menu == "devices") LanDevicesDialog(onDismiss = { menu = "" }, onConnected = { action { repo.lan.playback?.let { repo.lan.sendPlayback(it, false) }; menu = "" } })
-    if (menu == "comments") CommentsDialog(detail.drama) { menu = "" }
 }
 
 internal fun danmakuPosition(position: Double, elapsedSeconds: Double, playing: Boolean, speed: Double): Double =

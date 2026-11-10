@@ -1,130 +1,14 @@
 # RealDrama
 
-RealDrama 是一个 Android 视频客户端，使用 Jetpack Compose、Go 原生核心和 libmpv。应用支持内容浏览、播放、下载、本地资料与订阅管理。内容源由独立项目维护，通过订阅导入。
+An Android video app built with Jetpack Compose, a Go core, and libmpv.
 
-| 项目 | 配置 |
-| --- | --- |
-| 正式版 | 2.3.4（4267） |
-| 包名 | `com.real.drama` |
-| 平台 | Android 8.0+、ARM64 Android TV |
-| ABI | `arm64-v8a` |
+- Content browsing, search, episodes, and full-screen playback.
+- Downloads, favorites, viewing history, and WebDAV backup.
+- Themes, dynamic colors, and font controls.
+- Independently updatable content subscriptions.
 
-Compose 从 2.1.5 起作为正式客户端。覆盖安装保留原包名与签名，旧 Android 本地资料由迁移逻辑读取。Flutter 版及其 Windows、iOS 工程可在 Git 历史中查看（最后一个 Flutter 主线提交 `20273fa`）。
+Android 8.0+ · ARM64 · Android TV support
 
-2.3.4 补齐订阅运行时的组合 CSS 选择器解析，修复使用逗号选择器的网页目录。黄果订阅 0.2.2 配套更新 AI 搜索、JSON 详情和按集取址，以及视频分集容器适配。桌面原生链路已验证，手机连续播放仍待验收。
+Content sources are imported separately. Available features and playback depend on the imported subscriptions and their services.
 
-2.1.6 将个性化的字体粗细改为七档滑块，支持预览和重置。首页顶栏依次为刷新、清屏、弹幕和全屏，弹幕随订阅能力显示。首页“不喜欢”仅用于红果推荐。
-
-2.1.7 将首页的播放交接延后到翻页停稳。下一条尚未就绪时，页面先滑到位，再在该页显示加载状态。
-
-2.1.8 优先预读下一条视频的开头，切过去时可立即接手播放会话。当前视频按约 30% 时长设定滚动缓冲目标，最长 24 秒，缓存消耗到约一半时续读。低内存模式仍使用原缓存限额。
-
-2.1.9 将普通来源的首页预读扩展到后面最多五条，从近到远依次准备。抖音维持一条的上限，接口限流冷却期间暂停新的抖音预读。
-
-2.1.10 为首页后续页准备封面，视频纹理收到画面后再撤下封面。中途开启的弹幕从右侧入场，长按倍速及松开时保持连续移动。
-
-2.1.11 在首页打开评论时保留当前播放状态。面板从底部升起，视频等比缩小并上移，关闭后同步复位。
-
-2.1.12 合并首页加载提示，下一条可在当前视频提交播放后直接由播放器预热。长时间无进展时可在当前页重试。
-
-2.2.0 支持按订阅声明为点播和剧集开启首页进度拖动，并读取站源的弹幕分段时长。
-
-2.3.0 在设置的个性化页新增全局字体大小。默认 100%，可在 85% 至 150% 之间调节，并与系统字号一起生效。
-
-2.3.1 修复详情播放器单击反馈延迟，全屏顶栏按视频上缘和屏幕挖孔安全区定位。
-
-2.3.3 将详情页内嵌播放器的进度条略微下移，全屏详情顶栏略微上移并避开屏幕挖孔。
-
-退后台恢复涉及真实设备的渲染行为，仍待真机验收。
-
-## 功能
-
-### 首页与内容浏览
-
-- 竖屏视频流，支持上下切换、播放控制、喜欢、收藏和不感兴趣。
-- 当前队列保持稳定：返回上一部会恢复播放进度，后续队列不会因每次滑动而重新抽取。
-- 首页候选消耗约一半时会提前后台续载下一页；抖音请求统一排队并留出间隔，遇到限频会按冷却时间暂停续载。
-- 首页偏好可按导入的内容源和题材筛选；关闭的分类会过滤命中该分类的内容。
-- 推荐根据本地行为信号调整候选顺序，可调整题材权重或切换随机模式。行为保存在本机，不上传推荐服务。
-- 支持设置首页画质；当内容源不提供所选档位时，播放器使用可用档位。
-- 首页弹幕开关按订阅声明的能力显示，普通与全屏播放均可控制抖音短视频弹幕。
-- 视频流可展示作者资料与内容文字，并提供适用的只读互动信息。
-- 评论区表情短码在客户端转换为 Unicode Emoji，不依赖表情图片地址。
-- “站源管理”分为“订阅与更新”和“启用与维护”；首页偏好、画质与猜你喜欢移至独立的“首页与推荐”。
-
-### 发现与搜索
-
-- 依据已导入的订阅浏览目录和分类；不同来源仅展示其声明支持的筛选与搜索能力。
-- 分类按订阅定义展示，支持分层分类、排序和筛选。
-- 下拉刷新重新请求当前目录，已有缓存保留到手动刷新。站源程序更新通过单独入口触发。
-- 支持内容详情、章节列表、收藏及下载入口；具体能力由订阅声明。
-
-### 详情播放器
-
-- 独立的常规播放器操作：选集、进度、倍速、画质与全屏切换。
-- 可选的播放器叠加信息由订阅能力声明控制；实际支持情况取决于导入内容源。
-- 支持长按临时 2 倍速、播放进度保存和集间切换。
-- 详情全屏暂停时可单击空白区域隐藏或显示控件；长按倍速期间隐藏控制栏及渐变遮罩。
-- 竖屏详情全屏长按倍速时，提示居中显示在视频上方的黑边内；黑边空间不足时隐藏提示，避免遮住画面。
-- 播放设置支持硬件解码、平台解码器选择和低内存模式，作用于首页与详情播放。低内存模式把每个播放器的前向缓存降至 2 MiB、关闭后向缓存和额外预取，不保留首页前后播放器；滑回时可能重新加载。
-- 视频画面按原始比例完整显示；首页清屏模式使用完整视口铺满。
-- 实际播放能力取决于订阅返回的媒体地址、网络状况和内容授权状态。
-
-### 资料管理与设置
-
-- 底栏“收藏”按剧集、视频、作者与直播分组；只在有数据的类别显示入口。
-- 剧集收藏保留想看/在看/已看和更新提醒；视频与直播按作品收藏，不显示剧集状态。
-- 作者关注作为独立的本地关系保存，不会调用源站账号关注接口；观看进度与收藏分别保存。
-- 最近观看、下载任务和本地用户资料保存在设备上；配置备份包含收藏、作者关注和观看记录。
-- 可配置主题、Material You 动态取色、字体粗细、震动反馈和启动页面。
-- 网络设置支持自动、直连和手动 HTTP(S) / SOCKS5 代理，并提供连接诊断。
-- 抖音订阅的接口和媒体请求固定绕过应用代理；系统 VPN/TUN 接管的流量仍需在代理软件中设置直连或排除本应用。
-- 支持本地配置导出/恢复与 WebDAV 手动备份；WebDAV 口令保存在设备安全存储中，代理地址等敏感本地设置不写入配置备份。
-
-## 内容源订阅
-
-此客户端版本是通用播放与订阅客户端，不随安装包预置或启用具体内容源。目录、分类、详情、媒体解析等源程序由独立的[订阅项目](https://github.com/Chengeeker/RealDrama-Subscription)维护；用户可在“站源管理 → 站源订阅”导入仓库或订阅包，并在“当前站源”中管理启用状态。
-
-订阅可独立检查、更新或回退，不要求每次源程序调整都重新安装客户端。登录资料保存在设备本地安全存储，不放入公开订阅包。客户端提供通用请求、媒体播放与资源管理能力；实际内容、栏目和播放结果由已导入的订阅及其上游服务决定。
-
-红果的可用能力取决于已导入订阅的版本及上游服务。
-
-Hanime（18+）订阅已从当前订阅目录移除。曾经导入的本地包不会随目录更新自动卸载，请在“站源管理 → 站源订阅”中手动删除；其他来源的 Cookie 配置仍按各自的订阅说明使用。
-
-### 可选：使用 Cookie-Editor 导出浏览器 Cookie
-
-部分订阅需要用户手动提供登录 Cookie。可在 Chrome 中安装 [Cookie-Editor](https://chromewebstore.google.com/detail/cookie-editor/hlkenndednhfkekhgcdicdfddnkalmdm)；扩展源码见 [Moustachauve/cookie-editor](https://github.com/Moustachauve/cookie-editor)。安装时请核对扩展名称和商店页面，谨慎授予网站访问权限。Chrome 读取 Cookie 需要扩展获得 Cookie 权限及对应网站权限，详情见 [Chrome 官方文档](https://developer.chrome.com/docs/extensions/reference/api/cookies?hl=zh-CN)。
-
-1. 在 Chrome 的同一浏览器配置文件中登录目标网站，并打开该网站的页面。
-2. 点击工具栏里的 Cookie-Editor。如果没有显示该网站的 Cookie，在 Chrome“扩展程序 → Cookie-Editor → 网站访问权限”中允许它访问当前网站，然后重新加载网页。
-3. 在扩展中选择导出或复制，并选择 **Header string** 格式。它通常是 `key1=value1; key2=value2` 这样的单行文本；不要选 JSON 或 Netscape 格式，除非订阅设置明确要求该格式。
-4. 回到应用中需要登录资料的订阅设置，把文本直接粘贴到对应的 Cookie 输入框并保存。不要把 Cookie 粘贴到 README、公开仓库、问题反馈、截图或聊天中。
-
-Cookie 等同于登录凭据，拿到它的人可能访问对应账号。Chrome 商店页面称扩展数据保持离线，并披露不收集或使用用户数据；这是开发者声明，不是独立安全审计。导出前请确认是官方商店中的对应扩展，只授予必要的网站访问权限，并仅在本机应用内使用。Cookie 过期或网站要求额外的请求签名、设备状态时，单独导出 Cookie 仍可能无法登录或播放；这不代表导出的格式错误。
-
-## 构建 Android
-
-需要 JDK 17、Go 1.25+、Python 3.10+，以及 Android SDK Platform 36、NDK 28.2.13676358、CMake 3.22.1。设置 `ANDROID_HOME` 指向 SDK。
-
-从仓库根目录准备 ARM64 库，然后在 Compose 工程构建。
-
-```sh
-python3 tools/prepare_native.py
-./gradlew :app:assembleRelease :app:testDebugUnitTest -PuiAudit
-```
-
-Windows 使用 `python` 和 `gradlew.bat`。Go 不在 PATH 时可用 `--go` 指定程序。准备脚本会编译 Go 核心，并下载和校验固定版本的 [libmpv 依赖](https://github.com/media-kit/libmpv-android-video-build/releases/tag/v1.1.7)。
-
-发布签名使用仓库根目录的本机 `key.properties`，包含 `storeFile`、`storePassword`、`keyAlias` 和 `keyPassword`。Windows 的 `tools/build_release.py --ui-audit` 支持通过 `COMPOSE_BKS`、`COMPOSE_STORE_PASSWORD`、`COMPOSE_KEY_ALIAS`、`COMPOSE_KEY_PASSWORD`、`COMPOSE_BCPROV` 环境变量转换 BKS、签名和构建，在仓库根目录生成 `RealDrama-2.3.4-arm64-v8a.apk`。构建产物与签名配置存放在本地。
-
-GitHub Actions 在 main、Pull Request 和手动触发时构建 ARM64 Android 应用，并运行订阅、加密和 Compose 回归测试。手动运行时可使用仓库的 Android 签名 Secrets 生成带原签名的构建产物。旧 Go 目录接口的历史测试仍有失败，正式版使用订阅接口的测试作为构建检查。
-
-## 目录结构
-
-| 目录 | 内容 |
-| --- | --- |
-| `app/` | 正式 Android 应用与 Android 测试 |
-| `tools/` | Android 原生库准备与发行构建脚本 |
-| `native/` | Go 媒体核心、订阅运行时与 C 接口 |
-| `assets/` | 品牌原图与第三方许可 |
-| `.github/workflows/` | Android 构建与检查 |
+[Subscription guide](https://github.com/Chengeeker/RealDrama-Subscription#usage) · [Build script](tools/build_release.py)

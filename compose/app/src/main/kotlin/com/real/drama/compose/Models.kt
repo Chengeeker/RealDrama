@@ -57,6 +57,9 @@ data class SourcePackage(val document: JSONObject, val origin: String, val diges
     val domains get() = document.array("domains").strings()
     val credentials get() = document.array("credentialDomains").strings()
     val capabilities get() = document.array("capabilities").strings().toSet()
+    internal val feedSeek get() = kind != "live" && (kind == "video" || "feedSeek" in capabilities)
+    internal val danmakuWindowMs get() = document.optInt("danmakuWindowMs").takeIf { it in 1_000..600_000 }
+        ?: if (group == "bilibili") 360_000 else 32_000
     val sources: List<SourcePackage> get() = if (!document.has("children")) listOf(this) else
         document.array("children").objects().map { child ->
             SourcePackage(document.merge(child).apply { remove("children"); put("api", 1) }, origin, digest, bytes)

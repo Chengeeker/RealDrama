@@ -65,6 +65,11 @@ import java.io.File
 @Config(sdk = [35], qualifiers = "w390dp-h844dp-mdpi", application = DramaApplication::class, shadows = [AuditNativeBridge::class], instrumentedPackages = ["com.real.drama.compose.NativeBridge"])
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class VisualAuditTest {
+    private fun videoTexture(view: android.view.View): FittedVideoTexture? =
+        if (view is FittedVideoTexture) view else if (view is android.view.ViewGroup) {
+            (0 until view.childCount).firstNotNullOfOrNull { videoTexture(view.getChildAt(it)) }
+        } else null
+
     private class AuditedSurfaceTexture : android.graphics.SurfaceTexture(0) {
         @Volatile var releasedOn: android.os.Looper? = null
         override fun release() {
@@ -110,6 +115,31 @@ class VisualAuditTest {
         compose.runOnIdle { source.value = "hongguo" }
         compose.waitUntil(10000) { compose.onAllNodes(androidx.compose.ui.test.hasText("不喜欢")).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("不喜欢").assertIsDisplayed()
+    }
+
+    @Test fun fontSizeStartsAt100AndScalesTheThemeWhenCommitted() {
+        val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
+        runBlocking { repo.store.open() }
+        val systemDensity = Density(1f, 1.2f)
+        val systemSize = with(systemDensity) { 16.sp.toPx() }
+        compose.setContent {
+            CompositionLocalProvider(LocalRepository provides repo, LocalNavigate provides {}, LocalDensity provides systemDensity) {
+                DramaTheme(repo.store) {
+                    val ratio = with(LocalDensity.current) { 16.sp.toPx() } / systemSize
+                    androidx.compose.foundation.layout.Column {
+                        androidx.compose.material3.Text("字号测量 ${"%.2f".format(java.util.Locale.ROOT, ratio)}")
+                        SettingsPage("personalization", {})
+                    }
+                }
+            }
+        }
+        val slider = compose.onNodeWithContentDescription("字体大小").performScrollTo()
+        compose.onNodeWithText("100%").assertIsDisplayed()
+        compose.onNodeWithText("字号测量 1.00").assertExists()
+        slider.performSemanticsAction(SemanticsActions.SetProgress) { it(1.25f) }
+        compose.waitUntil(10000) { repo.store.fontSizePercent == 125 }
+        compose.onNodeWithText("125%").assertExists()
+        compose.onNodeWithText("字号测量 1.25").assertExists()
     }
 
     @Test fun fontWeightSliderSavesSevenStepsAndResetFollowsSystem() {
@@ -255,6 +285,79 @@ class VisualAuditTest {
         val hidden = compose.onNodeWithContentDescription("退出全屏").fetchSemanticsNode().boundsInRoot.top
         org.junit.Assert.assertEquals(initial, hidden, .5f)
         org.junit.Assert.assertTrue(initial < 56f)
+    }
+
+    @Test fun detailPlayerTapAndFullscreenToolbarUsePlaybackBounds() {
+        val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
+        runBlocking { repo.store.open() }
+        lateinit var hapticView: android.view.View
+        val detail = Detail(Drama(obj("id" to "synthetic:detail-input", "title" to "详情播放器合成视频")), listOf(Episode(obj("id" to "1"), 1)))
+        AuditNativeBridge.snapshotDimensions = 900.0 to 1200.0
+        AuditNativeBridge.commands.clear()
+        var manualTexture: AuditedSurfaceTexture? = null
+        try {
+            compose.setContent {
+                val owner = androidx.compose.ui.platform.LocalView.current
+                androidx.compose.runtime.SideEffect { hapticView = owner }
+                CompositionLocalProvider(LocalRepository provides repo, LocalNavigate provides {}) {
+                    DramaTheme(repo.store) {
+                        PlayerPane(detail, localOnly = true, localPlan = obj("url" to "/synthetic.mp4", "local" to true),
+                            externalFull = true, modifier = Modifier.fillMaxSize())
+                    }
+                }
+            }
+            val video = compose.runOnIdle {
+                val view = checkNotNull(videoTexture(compose.activity.window.decorView))
+                if (!view.isAvailable) {
+                    val surface = AuditedSurfaceTexture()
+                    manualTexture = surface
+                    view.surfaceTextureListener!!.onSurfaceTextureAvailable(surface, view.width, view.height)
+                }
+                view
+            }
+            compose.waitUntil(10000) { compose.runOnIdle { video.alpha == 1f } }
+            val videoTop = (video.height - video.width * 4f / 3f) / 2
+            fun insets(status: Int, cutout: Int) = compose.runOnIdle {
+                val bars = androidx.core.view.WindowInsetsCompat.Type.statusBars()
+                val builder = androidx.core.view.WindowInsetsCompat.Builder()
+                    .setInsets(bars, androidx.core.graphics.Insets.of(0, status, 0, 0))
+                    .setInsetsIgnoringVisibility(bars, androidx.core.graphics.Insets.of(0, 24, 0, 0))
+                    .setVisible(bars, status != 0)
+                    .setInsets(androidx.core.view.WindowInsetsCompat.Type.displayCutout(), androidx.core.graphics.Insets.of(24, cutout, 0, 0))
+                androidx.core.view.ViewCompat.dispatchApplyWindowInsets(compose.activity.window.decorView, builder.build())
+            }
+            insets(24, 40)
+            val settings = compose.onNodeWithContentDescription("播放设置")
+            val before = settings.fetchSemanticsNode().boundsInRoot
+            org.junit.Assert.assertTrue("bar bottom ${before.bottom}, video top $videoTop", videoTop - before.bottom in 10f..20f)
+            insets(0, 40)
+            org.junit.Assert.assertEquals(before.top, settings.fetchSemanticsNode().boundsInRoot.top, .5f)
+            val largeCutout = videoTop.toInt() + 18
+            insets(0, largeCutout)
+            val exit = compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("退出全屏")).fetchSemanticsNodes()
+                .minBy { it.boundsInRoot.top }.boundsInRoot
+            org.junit.Assert.assertTrue(exit.top >= largeCutout && exit.left >= 24f)
+            compose.mainClock.autoAdvance = false
+            val root = compose.onRoot()
+            root.performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .25f, height * .52f)) }
+            compose.runOnIdle {
+                val shadow = org.robolectric.Shadows.shadowOf(hapticView)
+                org.junit.Assert.assertEquals(android.view.HapticFeedbackConstants.VIRTUAL_KEY, shadow.lastHapticFeedbackPerformed())
+                hapticView.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            }
+            root.performTouchInput { advanceEventTime(60); click(androidx.compose.ui.geometry.Offset(width * .25f, height * .52f)) }
+            compose.runOnIdle {
+                org.junit.Assert.assertEquals(android.view.HapticFeedbackConstants.LONG_PRESS, org.robolectric.Shadows.shadowOf(hapticView).lastHapticFeedbackPerformed())
+            }
+            compose.mainClock.autoAdvance = true
+            compose.waitUntil(5000) { AuditNativeBridge.commands.any { it.firstOrNull() == "seek" && it.getOrNull(1) == "20.0" } }
+        } finally {
+            compose.mainClock.autoAdvance = true
+            compose.runOnIdle {
+                manualTexture?.let { videoTexture(compose.activity.window.decorView)?.surfaceTextureListener?.onSurfaceTextureDestroyed(it) }
+            }
+            AuditNativeBridge.snapshotDimensions = null
+        }
     }
 
     @Test fun playerGlassKeepsBackdropVisible() {
@@ -446,10 +549,6 @@ class VisualAuditTest {
             ))
             repo.saveCatalog("hongguo", "short_play", Catalog(listOf(candidate), false, 1))
         }
-        fun texture(view: android.view.View): FittedVideoTexture? =
-            if (view is FittedVideoTexture) view else if (view is android.view.ViewGroup) {
-                (0 until view.childCount).firstNotNullOfOrNull { texture(view.getChildAt(it)) }
-            } else null
         fun previewBounds(): Pair<Int, Int>? = compose.runOnIdle {
             val decor = compose.activity.window.decorView
             val image = Bitmap.createBitmap(decor.width, decor.height, Bitmap.Config.ARGB_8888)
@@ -473,7 +572,7 @@ class VisualAuditTest {
             val comments = compose.onNodeWithContentDescription("评论")
             compose.waitUntil(10000) { compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("评论")).fetchSemanticsNodes().isNotEmpty() }
             val video = compose.runOnIdle {
-                val view = checkNotNull(texture(compose.activity.window.decorView))
+                val view = checkNotNull(videoTexture(compose.activity.window.decorView))
                 if (!view.isAvailable) {
                     val surface = AuditedSurfaceTexture()
                     manualTexture = surface
@@ -519,13 +618,13 @@ class VisualAuditTest {
             waitForCommentsToClose()
             org.junit.Assert.assertEquals(original, previewBounds())
             org.junit.Assert.assertEquals(viewport, video.width to video.height)
-            org.junit.Assert.assertSame(video, texture(compose.activity.window.decorView))
+            org.junit.Assert.assertSame(video, videoTexture(compose.activity.window.decorView))
             org.junit.Assert.assertEquals(creations, AuditNativeBridge.playerCreations.get())
             org.junit.Assert.assertFalse(AuditNativeBridge.commands.drop(commands).any { it.firstOrNull() == "loadfile" || it == listOf("set", "pause", "yes") })
         } finally {
             compose.mainClock.autoAdvance = true
             compose.runOnIdle {
-                manualTexture?.let { texture(compose.activity.window.decorView)?.surfaceTextureListener?.onSurfaceTextureDestroyed(it) }
+                manualTexture?.let { videoTexture(compose.activity.window.decorView)?.surfaceTextureListener?.onSurfaceTextureDestroyed(it) }
             }
             AuditNativeBridge.commentPreviewPath = ""
             AuditNativeBridge.commentVideo = null
@@ -642,7 +741,7 @@ class VisualAuditTest {
         var likes = 0
         compose.setContent {
             Box(Modifier.fillMaxSize().pointerInput(Unit) {
-                detectFeedTaps(100f, onTap = { paused = !paused; true }, onDoubleTap = { paused = !paused; likes++ })
+                detectPlaybackTaps(100f, onTap = { paused = !paused; true }, onDoubleTap = { paused = !paused; likes++ })
             })
         }
         compose.onRoot().performTouchInput { click() }
@@ -661,7 +760,7 @@ class VisualAuditTest {
         val events = mutableListOf<String>()
         compose.setContent {
             Box(Modifier.fillMaxSize().pointerInput(Unit) {
-                detectFeedTaps(
+                detectPlaybackTaps(
                     100f,
                     onHold = {
                         events.add("boost")
@@ -1201,7 +1300,7 @@ class AuditNativeBridge {
     @Implementation fun playerGet(player: Long, property: ByteArray): ByteArray = "0".toByteArray()
     @Implementation fun playerSnapshot(player: Long): DoubleArray {
         check(!snapshotFailure) { "synthetic surface loss" }
-        val (width, height) = if (commentVideo != null) 1080.0 to 1920.0 else 1920.0 to 1080.0
+        val (width, height) = snapshotDimensions ?: if (commentVideo != null) 1080.0 to 1920.0 else 1920.0 to 1080.0
         val idle = if (playingSnapshot) 0.0 else 1.0
         return doubleArrayOf(30.0, 120.0, width, height, 60.0, idle, 0.0, 0.0, idle, 0.0, 0.0)
     }
@@ -1211,6 +1310,7 @@ class AuditNativeBridge {
         val playerCreations = java.util.concurrent.atomic.AtomicInteger()
         @Volatile var snapshotFailure = false
         @Volatile var playingSnapshot = false
+        @Volatile var snapshotDimensions: Pair<Double, Double>? = null
         @Volatile var commentVideo: org.json.JSONObject? = null
         @Volatile var commentPreviewPath = ""
         val catalogRequests = java.util.concurrent.atomic.AtomicInteger()

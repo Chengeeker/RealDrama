@@ -14,6 +14,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.*
@@ -77,6 +78,13 @@ fun ImmersiveBars(enabled: Boolean) {
     }
 }
 
+private class DramaFontDensity(val system: Density, private val scale: Float) : Density {
+    override val density = system.density
+    override val fontScale = system.fontScale * scale
+    override fun TextUnit.toDp(): Dp = with(system) { this@toDp.toDp() } * scale
+    override fun Dp.toSp(): TextUnit = with(system) { (this@toSp / scale).toSp() }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DramaTheme(store: LocalStore, content: @Composable () -> Unit) {
@@ -104,8 +112,13 @@ fun DramaTheme(store: LocalStore, content: @Composable () -> Unit) {
     val adjustment = customWeight ?: 0
     val typography = remember(adjustment) { appTypography(adjustment) }
     val fontResolver = if (customWeight != null) neutralFontWeightResolver() else LocalFontFamilyResolver.current
+    val systemDensity = LocalDensity.current
+    val percent = store.fontSizePercent
+    val density = remember(systemDensity, percent) {
+        if (percent == 100) systemDensity else DramaFontDensity(systemDensity, percent / 100f)
+    }
     CompositionLocalProvider(LocalRippleConfiguration provides null, LocalFontWeightAdjustment provides adjustment,
-        LocalFontFamilyResolver provides fontResolver) {
+        LocalFontFamilyResolver provides fontResolver, LocalDensity provides density) {
         MaterialTheme(colorScheme = scheme, typography = typography, shapes = Shapes(small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(20.dp), large = RoundedCornerShape(20.dp), extraLarge = RoundedCornerShape(28.dp))) { ProvideTextStyle(typography.bodyMedium, content = content) }
     }
 }
@@ -160,8 +173,13 @@ fun LegacyCard(modifier: Modifier = Modifier, colors: CardColors = CardDefaults.
 @Composable
 fun Glyph(name: String, label: String? = null, modifier: Modifier = Modifier, color: Color = LocalContentColor.current, size: Int = 24) {
     val code = iconCodes[name] ?: iconCodes["help_outline_rounded"] ?: 0xe887
+    val density = LocalDensity.current
+    val glyphSize = if (density is DramaFontDensity) {
+        val systemSize = with(density.system) { size.sp.toDp() }
+        with(density) { systemSize.toSp() }
+    } else size.sp
     Text(String(Character.toChars(code)), modifier.then(if (label == null) Modifier.clearAndSetSemantics {} else Modifier.semantics { contentDescription = label }),
-        color = color, fontSize = size.sp, lineHeight = size.sp, fontWeight = FontWeight.Normal, letterSpacing = 0.sp, fontFamily = FontFamily(Font(R.font.material_icons)))
+        color = color, fontSize = glyphSize, lineHeight = glyphSize, fontWeight = FontWeight.Normal, letterSpacing = 0.sp, fontFamily = FontFamily(Font(R.font.material_icons)))
 }
 @Composable
 fun IconAction(name: String, label: String, enabled: Boolean = true, action: () -> Unit) {

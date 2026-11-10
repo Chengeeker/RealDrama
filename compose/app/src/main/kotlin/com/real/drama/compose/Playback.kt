@@ -5,7 +5,6 @@ import android.view.Surface
 import android.view.TextureView
 import androidx.compose.foundation.*
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.PressGestureScope
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -23,6 +22,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.semantics.contentDescription
@@ -298,11 +298,11 @@ class MpvPlayer(private val preferences: JSONObject, observeInitially: Boolean =
 }
 data class PlayerActions(val episode: Int, val episodes: () -> Unit)
 
-internal suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectFeedTaps(
+internal suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPlaybackTaps(
     doubleTapSlop: Float,
     onHold: () -> (() -> Unit)? = { null },
     onTap: () -> Boolean,
-    onDoubleTap: () -> Unit,
+    onDoubleTap: (androidx.compose.ui.geometry.Offset) -> Unit,
 ) {
     var firstTap: androidx.compose.ui.geometry.Offset? = null
     var firstTime = 0L
@@ -334,7 +334,7 @@ internal suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectF
             (position - first).getDistance() <= doubleTapSlop
         ) {
             firstTap = null
-            onDoubleTap()
+            onDoubleTap(position)
         } else {
             firstTap = position.takeIf { onTap() }
             firstTime = now
@@ -352,6 +352,7 @@ fun VideoSurface(player: MpvPlayer, modifier: Modifier = Modifier, onFrameReady:
         update = { it.setVideoAspect(if (state.width > 0 && state.height > 0) (state.width / state.height).toFloat() else 0f) })
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, feed: Boolean = false, modifier: Modifier = Modifier, initialPosition: Double? = null,
     handoff: LanPreparedPlayback? = null, localPlan: JSONObject? = null, mediaId: String = "", localOnly: Boolean = false,
@@ -491,7 +492,6 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             action { player.seek(0.0); player.play(wantsPlayback()) }
         } else setPaused(!pausedByUser && (audioAllowed || currentState.playing))
     }
-    var suppressTapUntil by remember { mutableLongStateOf(0) }
     DisposableEffect(active, foreground, player) {
         val manager = context.getSystemService(android.media.AudioManager::class.java)
         val focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
@@ -685,6 +685,21 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             else -> false
         }
     }.focusRequester(rootFocus).focusable()) {
+        val videoTop = if (aspectRatio > 0.0 && aspectRatio.isFinite()) {
+            ((maxHeight - maxWidth / aspectRatio.toFloat()) / 2).coerceAtLeast(0.dp)
+        } else 0.dp
+        val detailToolbar = Modifier.align(Alignment.TopCenter).fillMaxWidth().then(
+            if (!feed && full && !television) {
+                val insets = WindowInsets.displayCutout.union(WindowInsets.statusBarsIgnoringVisibility)
+                    .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+                Modifier.windowInsetsPadding(insets).layout { measurable, constraints ->
+                    val bar = measurable.measure(constraints)
+                    val top = maxOf(4.dp.roundToPx(), videoTop.roundToPx() - insets.getTop(this) - bar.height - 12.dp.roundToPx())
+                        .coerceAtMost((constraints.maxHeight - bar.height).coerceAtLeast(0))
+                    layout(bar.width, bar.height + top) { bar.placeRelative(0, top) }
+                }
+            } else Modifier,
+        ).padding(horizontal = 8.dp)
         Box(Modifier.matchParentSize().then(if (commentsProgress == null) Modifier else Modifier.graphicsLayer {
             val progress = commentsProgress.value
             val targetHeight = commentsVideoHeight.toPx().coerceAtMost(size.height)
@@ -703,57 +718,47 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             if (!active || commentsProgress != null) return@pointerInput
             if (locked) { detectTapGestures { lockVisible = true; interaction++ }; return@pointerInput }
             if (loading || playbackFailure != null || feed && externalClean == true) return@pointerInput
-            val press: suspend PressGestureScope.(androidx.compose.ui.geometry.Offset) -> Unit = {
-                val hold = scope.launch { delay(350); if (currentState.playing && !pausedByUser) { boost = true; player.rate(holdSpeed) } }
-                try { tryAwaitRelease() } finally { hold.cancel(); if (boost) { suppressTapUntil = android.os.SystemClock.uptimeMillis() + 300; boost = false; action { player.rate(speed) } } }
-            }
-            if (feed) {
-                if (!active) return@pointerInput
-                var wasPaused = false
-                detectFeedTaps(android.view.ViewConfiguration.get(context).scaledDoubleTapSlop.toFloat(),
-                    onHold = {
-                        if (!currentState.playing || currentState.completed || pausedByUser) null else {
-                            boost = true
-                            action { player.rate(if (boost) holdSpeed else speed) }
-                            val restore: () -> Unit = {
-                                boost = false
-                                action { player.rate(speed) }
-                            }
-                            restore
+            var wasPaused = false
+            detectPlaybackTaps(android.view.ViewConfiguration.get(context).scaledDoubleTapSlop.toFloat(),
+                onHold = {
+                    if (!currentState.playing || currentState.completed || pausedByUser) null else {
+                        boost = true
+                        action { player.rate(if (boost) holdSpeed else speed) }
+                        val restore: () -> Unit = {
+                            boost = false
+                            action { player.rate(speed) }
                         }
-                    },
-                    onTap = {
-                        (android.os.SystemClock.uptimeMillis() >= suppressTapUntil).also { accepted ->
-                            if (accepted) {
-                                wasPaused = pausedByUser
-                                touchFeedback()
-                                togglePlayback()
-                            }
+                        restore
+                    }
+                },
+                onTap = {
+                    if (boost) false else {
+                        touchFeedback()
+                        if (feed) {
+                            wasPaused = pausedByUser
+                            togglePlayback()
+                        } else {
+                            setClean(!currentClean)
+                            interaction++
                         }
-                    },
-                    onDoubleTap = {
+                        true
+                    }
+                },
+                onDoubleTap = { position ->
+                    if (feed) {
                         setPaused(wasPaused)
                         if (!liked) { repo.recommendations.like(detail.drama); liked = true }
                         likePulse++
-                    })
-                return@pointerInput
-            }
-            detectTapGestures(onTap = {
-                if (!boost && android.os.SystemClock.uptimeMillis() >= suppressTapUntil) {
-                    touchFeedback()
-                    setClean(!currentClean); interaction++
-                }
-            }, onDoubleTap = { position ->
-                if (!boost && android.os.SystemClock.uptimeMillis() >= suppressTapUntil) {
-                    touchFeedback()
-                    setClean(false)
-                    if (position.x < size.width * .35f || position.x > size.width * .65f) {
-                        val delta = if (position.x < size.width * .35f) -10 else 10
-                        action { player.seek((currentState.position + delta).coerceIn(0.0, currentState.duration.coerceAtLeast(0.0))) }
-                        hint = if (delta < 0) "后退 10 秒" else "前进 10 秒"
-                    } else togglePlayback()
-                }
-            }, onPress = press)
+                    } else if (!boost) {
+                        setClean(false)
+                        if (position.x < size.width * .35f || position.x > size.width * .65f) {
+                            val delta = if (position.x < size.width * .35f) -10 else 10
+                            action { player.seek((currentState.position + delta).coerceIn(0.0, currentState.duration.coerceAtLeast(0.0))) }
+                            hint = if (delta < 0) "后退 10 秒" else "前进 10 秒"
+                        } else togglePlayback()
+                    }
+                },
+            )
         }.then(if (feed || locked || !active || loading || failure != null) Modifier else Modifier.pointerInput(player) {
             detectPlaybackScrub({ currentState }, { dragging = it }, { target -> interaction++; action { player.seek(target) } })
         }.pointerInput(player) {
@@ -784,7 +789,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                 Box(Modifier.matchParentSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(
                     0f to Color(0xaa000000), .45f to Color.Transparent, 1f to Color(0xe6000000),
                 )))
-                Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().then(if (full) Modifier.statusBarsPadding() else Modifier).padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!full || !loading && failure == null) Row(detailToolbar, verticalAlignment = Alignment.CenterVertically) {
                     val exitLabel = if (full) "退出全屏" else "返回"
                     IconButton(hapticClick { if (full) toggleFullscreen() else onBack() }, Modifier.size(48.dp)) {
                         Glyph(if (full) "arrow_back_rounded" else "arrow_back_ios_new_rounded", exitLabel)
@@ -836,7 +841,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                     }
                 }
                 if (state.duration > 0 && source?.kind != "live") {
-                    if (source?.kind == "video") {
+                    if (source?.feedSeek == true) {
                         LegacySlider(position, seek, finishSeek, state.duration.toFloat(), Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp).fillMaxWidth().height(30.dp), feed = true)
                         if (dragging != null) Text("${formatPosition(position.toDouble())} / ${formatPosition(state.duration)}",
                             Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp).background(Color.Black.copy(alpha = .72f), androidx.compose.foundation.shape.RoundedCornerShape(16.dp)).padding(horizontal = 10.dp, vertical = 5.dp),
@@ -888,7 +893,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             }
         }
         val portraitBoost = boost && full && state.width > 0 && state.width < state.height
-        val topLetterbox = if (portraitBoost) (maxHeight - maxWidth * (state.height / state.width).toFloat()) / 2 else 0.dp
+        val topLetterbox = if (portraitBoost) videoTop else 0.dp
         val feedback = if (boost) "${holdSpeed.toInt()} 倍速 · 松开恢复" else hint
         if (feedback.isNotEmpty() && !(boost && feed) && (!portraitBoost || topLetterbox >= 48.dp)) {
             Box(
@@ -921,7 +926,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         if (showLike && !clean && !boost && commentsProgress == null) Glyph("favorite_rounded", modifier = Modifier.align(Alignment.Center).scale(likeScale.value),
             color = Color(0xffff4081).copy(alpha = .92f), size = 104)
         if ((loading || failure != null) && full && !television && !feed) {
-            Row(Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding(), verticalAlignment = Alignment.CenterVertically) {
+            Row(detailToolbar, verticalAlignment = Alignment.CenterVertically) {
                 CompositionLocalProvider(LocalContentColor provides Color.White) {
                     IconAction("arrow_back_rounded", "退出全屏", action = toggleFullscreen)
                     Spacer(Modifier.weight(1f))
@@ -1000,7 +1005,7 @@ internal class DanmakuFlight {
 @Composable
 fun DanmakuOverlay(drama: Drama, episode: Episode, state: PlaybackState, speed: Double = 1.0) {
     val repo = LocalRepository.current
-    val window = if (repo.source(drama.source)?.group == "bilibili") 360000 else 32000
+    val window = repo.source(drama.source)?.danmakuWindowMs ?: 32_000
     val page = ((state.position * 1000).toLong() / window) * window
     var rows by remember(drama.id, episode.id) { mutableStateOf(emptyList<Pair<Double, String>>()) }
     val message = LocalMessage.current

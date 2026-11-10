@@ -10,6 +10,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsDropdown(value: String, options: List<Pair<String, String>>, enabled: Boolean = true, filled: Boolean = true, label: String? = null, formField: Boolean = false, onChange: (String) -> Unit) {
@@ -50,6 +51,10 @@ fun PersonalizationSettings() {
     Spacer(Modifier.height(16.dp))
     AppearanceSection("交互与排版") {
         SwitchRow("震动反馈", repo.store.bool("hapticFeedback", true, true)) { save("hapticFeedback", it) }
+    }
+    Spacer(Modifier.height(16.dp))
+    FontSizeSetting(repo.store.fontSizePercent / 100f) {
+        save(FONT_SIZE_PERCENT, (it * 100).roundToInt().toString())
     }
     Spacer(Modifier.height(16.dp))
     FontWeightSetting(repo.store.text("fontWeightAdjustment", "", true).toIntOrNull()) {

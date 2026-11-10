@@ -6,6 +6,24 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MigrationTest {
+    @Test fun subscriptionControlsFeedSeekingAndDanmakuWindow() {
+        fun source(id: String = "sample", kind: String = "drama", feedSeek: Boolean = false, window: Int? = null): SourcePackage {
+            val capabilities = JSONArray().apply { if (feedSeek) put("feedSeek") }
+            val document = obj("schema" to 1, "api" to 1, "engine" to "javascript-generator-v1",
+                "id" to id, "name" to "合成站源", "version" to "1.0.0", "program" to "function* main() {}",
+                "kind" to kind, "domains" to JSONArray().put("example.com"), "capabilities" to capabilities)
+            if (window != null) document.put("danmakuWindowMs", window)
+            return SourcePackage.parse(document.toString().toByteArray(), "test")
+        }
+        assertTrue(source(kind = "video").feedSeek)
+        assertFalse(source().feedSeek)
+        assertTrue(source(feedSeek = true).feedSeek)
+        assertFalse(source(kind = "live", feedSeek = true).feedSeek)
+        assertEquals(45_000, source(window = 45_000).danmakuWindowMs)
+        assertEquals(32_000, source(window = 0).danmakuWindowMs)
+        assertEquals(360_000, source(id = "bilibili").danmakuWindowMs)
+    }
+
     @Test fun feedLookaheadCapsOrdinaryAndDouyinCandidates() {
         val regular = (1..8).map { number -> Drama(obj("id" to "hongguo:$number", "source" to "hongguo")) }
         val douyin = Drama(obj("id" to "douyin:1", "source" to "douyin"))

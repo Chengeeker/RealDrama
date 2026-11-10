@@ -35,6 +35,8 @@ fun randomToken() = ByteArray(16).also { SecureRandom().nextBytes(it) }.joinToSt
 fun pinHash(pin: String, salt: String): String = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
     .generateSecret(PBEKeySpec(pin.toCharArray(), salt.toByteArray(), 120000, 256)).encoded.joinToString("") { "%02x".format(it) }
 
+internal const val FONT_SIZE_PERCENT = "fontSizePercent"
+
 class LocalStore(private val context: Context) {
     val directory = File(context.filesDir, "compose-data")
     private val file = File(directory, "snapshot.json")
@@ -54,6 +56,7 @@ class LocalStore(private val context: Context) {
     private var failures = 0
     private var retryAt = 0L
     val values get() = snapshotState.value
+    internal val fontSizePercent get() = values.text(FONT_SIZE_PERCENT).toIntOrNull() ?: 100
     val active get() = values.text("activeProfile", "default")
     val profiles get() = JSONArray(values.text("profiles", "[]")).objects()
     val profile get() = profiles.firstOrNull { it.text("id") == active } ?: JSONObject()
@@ -74,7 +77,11 @@ class LocalStore(private val context: Context) {
             directory.mkdirs()
             val snapshot = if (file.exists()) {
                 require(file.length() <= 16 * 1024 * 1024) { "本地资料过大" }
-                JSONObject(file.readText()).also { require(it.optInt("version") == 1) }.getJSONObject("values")
+                val envelope = JSONObject(file.readText())
+                require(envelope.optInt("version") == 1)
+                envelope.getJSONObject("values").apply {
+                    if (envelope.has(FONT_SIZE_PERCENT)) put(FONT_SIZE_PERCENT, envelope.get(FONT_SIZE_PERCENT))
+                }
             } else {
                 val preferences = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
                 val raw = preferences.getString("flutter.localSnapshot.v1", null)
@@ -102,7 +109,16 @@ class LocalStore(private val context: Context) {
             lockedState.value = true
         }
     }
-    private fun persist(next: JSONObject) = atomicWrite(file, obj("version" to 1, "values" to next).toString().toByteArray())
+    private fun snapshotBytes(next: JSONObject): ByteArray {
+        val envelope = obj("version" to 1, "values" to next)
+        if (next.has(FONT_SIZE_PERCENT)) {
+            val fields = JSONObject()
+            next.keys().forEach { if (it != FONT_SIZE_PERCENT) fields.put(it, next.get(it)) }
+            envelope.put("values", fields).put(FONT_SIZE_PERCENT, next.get(FONT_SIZE_PERCENT))
+        }
+        return envelope.toString().toByteArray()
+    }
+    private fun persist(next: JSONObject) = atomicWrite(file, snapshotBytes(next))
     suspend fun update(change: (JSONObject) -> Unit) = lock.withLock {
         withContext(Dispatchers.IO) {
             check(readError == null) { "请先恢复损坏的本地资料" }
@@ -117,7 +133,7 @@ class LocalStore(private val context: Context) {
     suspend fun set(name: String, value: Any?, global: Boolean = false) {
         val expectedEpoch = epoch
         check(!locked.value)
-        val protected = global && name !in setOf("displayMode", "themeMode", "dynamicColor", "themeSeed", "fontWeightAdjustment", "navigationStyle", "hapticFeedback", "startupDestination")
+        val protected = global && name !in setOf("displayMode", "themeMode", "dynamicColor", "themeSeed", "fontWeightAdjustment", FONT_SIZE_PERCENT, "navigationStyle", "hapticFeedback", "startupDestination")
         if (protected) requireAdmin()
         val target = if (global) name else key(name)
         update { check(epoch == expectedEpoch && !locked.value && (!protected || admin)) { "当前用户已变更" }; it.put(target, if (value is JSONObject || value is JSONArray) value.toString() else value) }
@@ -268,6 +284,7 @@ class LocalStore(private val context: Context) {
             if (values.has(name)) backup.put(name, values.get(name))
         }
         values.text("fontWeightAdjustment").toIntOrNull()?.let { backup.put("fontWeightAdjustment", it) }
+        if (values.has(FONT_SIZE_PERCENT)) backup.put(FONT_SIZE_PERCENT, fontSizePercent)
         val libraries = JSONObject()
         for (p in profiles) {
             val library = JSONObject()
@@ -292,7 +309,7 @@ class LocalStore(private val context: Context) {
     suspend fun importBackup(bytes: ByteArray) {
         requireAdmin()
         val next = decodeBackup(bytes)
-        atomicWrite(File(directory, "before-restore.json"), obj("version" to 1, "values" to values).toString().toByteArray())
+        atomicWrite(File(directory, "before-restore.json"), snapshotBytes(values))
         update { current -> current.keys().asSequence().toList().forEach(current::remove); next.keys().forEach { current.put(it, next.get(it)) } }
         epoch++; lockedState.value = profile.text("pinHash").isNotEmpty()
     }
@@ -324,8 +341,12 @@ class LocalStore(private val context: Context) {
     }
     companion object {
         val libraryKeys = setOf("history", "favorites", "followStates", "followedCreators", "seriesCandidates", "mediaHistory", "source", "hiddenSources", "knownSources", "sourceFamilySelections", "hideVip", "playback", "downloadPreferences", "catalogView", "recentSearches", "feedNotInterested", "unavailableFeedDramas", "homeFeedPreferences", "feedRecommendation", "lanRecords", "lanSettings", "lanReceipts")
-        val globalKeys = setOf("profiles", "activeProfile", "displayMode", "themeMode", "dynamicColor", "themeSeed", "fontWeightAdjustment", "navigationStyle", "hapticFeedback", "startupDestination", "autoExport", "exportPosters", "sourceGateEnabled", "sourceGateOff", "sourceGateSalt", "sourceGateHash", "forceLogin")
+        val globalKeys = setOf("profiles", "activeProfile", "displayMode", "themeMode", "dynamicColor", "themeSeed", "fontWeightAdjustment", FONT_SIZE_PERCENT, "navigationStyle", "hapticFeedback", "startupDestination", "autoExport", "exportPosters", "sourceGateEnabled", "sourceGateOff", "sourceGateSalt", "sourceGateHash", "forceLogin")
         fun validate(values: JSONObject) {
+            if (values.has(FONT_SIZE_PERCENT)) {
+                val percent = values.text(FONT_SIZE_PERCENT).toIntOrNull()
+                require(percent != null && percent in 85..150 && percent % 5 == 0) { "字体大小无效" }
+            }
             val booleanKeys = setOf("hideVip", "autoExport", "exportPosters", "sourceGateEnabled", "sourceGateOff", "forceLogin", "dynamicColor", "hapticFeedback")
             values.keys().forEach { key ->
                 val name = key.substringAfterLast('.')
@@ -401,6 +422,11 @@ class LocalStore(private val context: Context) {
             require(data.optInt("schema") == 1 && data.text("app") == "zhenguojian") { "备份格式不兼容" }
             val next = obj("profiles" to data.getJSONArray("profiles").toString(), "activeProfile" to "default")
             globalKeys.filterNot { it in setOf("profiles", "activeProfile", "sourceGateSalt", "sourceGateHash") }.forEach { if (data.has(it)) next.put(it, data.get(it)) }
+            if (data.has(FONT_SIZE_PERCENT)) {
+                val percent = data.get(FONT_SIZE_PERCENT)
+                require(integral(percent)) { "字体大小无效" }
+                next.put(FONT_SIZE_PERCENT, percent.toString())
+            }
             if (data.has("fontWeightAdjustment")) {
                 val weight = data.optInt("fontWeightAdjustment")
                 require(integral(data.opt("fontWeightAdjustment")) && weight in -300..300 && weight % 100 == 0)

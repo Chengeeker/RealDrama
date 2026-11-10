@@ -101,6 +101,34 @@ class LocalStoreUpgradeTest {
         assertEquals(utcTime, org.json.JSONObject(values.getString("mediaHistory")).getJSONObject("video").getString("updatedAt"))
     }
 
+    @Test fun fontSizeRoundTripsAndKeepsTheLegacySnapshotReadable() = runBlocking {
+        val store = LocalStore(context)
+        store.open()
+        assertEquals(100, store.fontSizePercent)
+        store.set(FONT_SIZE_PERCENT, "125", global = true)
+        // Robolectric runs Android's File.renameTo on Windows, where it cannot replace the existing snapshot.
+        val pending = File(store.directory, "snapshot.json.new")
+        if (File.separatorChar == '\\' && pending.isFile) {
+            java.nio.file.Files.move(pending.toPath(), File(store.directory, "snapshot.json").toPath(),
+                java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        }
+        val raw = org.json.JSONObject(store.rawConfiguration().toString(Charsets.UTF_8))
+        assertFalse(raw.getJSONObject("values").has(FONT_SIZE_PERCENT))
+        assertEquals("125", raw.getString(FONT_SIZE_PERCENT))
+        val reopened = LocalStore(context)
+        reopened.open()
+        assertNull(reopened.readError)
+        assertEquals(125, reopened.fontSizePercent)
+        val backup = reopened.exportBackup()
+        val invalid = org.json.JSONObject(backup.toString(Charsets.UTF_8)).put(FONT_SIZE_PERCENT, 126)
+        assertThrows(IllegalArgumentException::class.java) {
+            LocalStore.decodeBackup(invalid.toString().toByteArray())
+        }
+        reopened.set(FONT_SIZE_PERCENT, "95", global = true)
+        reopened.importBackup(backup)
+        assertEquals(125, reopened.fontSizePercent)
+    }
+
     @Test fun recentWatchIndexReusesRowsAndReflectsNewProgressAndHiddenSources() = runBlocking {
         val store = LocalStore(context)
         store.open()

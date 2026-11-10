@@ -374,11 +374,9 @@ class _FeedRecommendationSettingsScreenState
               ],
             ),
           ),
-          Divider(
-            height: 1,
-            color: colors.outlineVariant.withValues(alpha: .7),
-          ),
           ExpansionTile(
+            shape: const Border(),
+            collapsedShape: const Border(),
             key: ValueKey('feed-topic-group-${group.id}-$_query'),
             initiallyExpanded: _query.isNotEmpty,
             tilePadding: const EdgeInsets.symmetric(horizontal: 16),

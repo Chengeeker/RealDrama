@@ -371,7 +371,6 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
                       ),
                     ),
                   ),
-                  const Divider(height: 1),
                   Expanded(
                     child: ListView.builder(
                       itemCount: categories.length,
@@ -729,12 +728,6 @@ class _HomeFeedPreferencesScreenState extends State<HomeFeedPreferencesScreen> {
             ),
           ),
           if (enabled && !liveSource && expanded) ...[
-            Divider(
-              height: 1,
-              indent: 20,
-              endIndent: 20,
-              color: colors.outlineVariant.withValues(alpha: .45),
-            ),
             AnimatedSize(
               duration: const Duration(milliseconds: 180),
               curve: Curves.easeOutCubic,

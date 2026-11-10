@@ -288,6 +288,11 @@ func hongguoDeviceProto(device string) []byte {
 }
 
 func hongguoMessage(query, device string, stamp, nonce uint32, queryHash [32]byte, bodyHash [16]byte, proof []byte) []byte {
+	params, _ := url.ParseQuery(query)
+	version := params.Get("version_name")
+	if version == "" {
+		version = "7.3.5.32"
+	}
 	var clock, environment, counters, p hongguoProto
 	clock.integer(1, int64(stamp))
 	clock.integer(2, -2)
@@ -300,7 +305,7 @@ func hongguoMessage(query, device string, stamp, nonce uint32, queryHash [32]byt
 	environment.integer(7, 11001)
 	environment.bytes(12, hongguoDeviceProto(device))
 	environment.bytes(13, clock)
-	environment.text(14, "7.3.5.32")
+	environment.text(14, version)
 	counters.integer(1, 111)
 	counters.integer(2, 10)
 	counters.integer(3, 694367)
@@ -311,7 +316,7 @@ func hongguoMessage(query, device string, stamp, nonce uint32, queryHash [32]byt
 	p.text(4, "8662")
 	p.text(5, device)
 	p.text(6, "1588093228")
-	p.text(7, "7.3.5.32")
+	p.text(7, version)
 	p.text(8, "v04.06.04-ml-android")
 	p.integer(9, 67503104)
 	p.bytes(10, []byte{64, 1, 0, 0, 0, 0, 0, 0})

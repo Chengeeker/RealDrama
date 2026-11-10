@@ -238,13 +238,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ListTile(
                 key: const ValueKey('source-management-settings'),
                 leading: const Icon(Icons.dns_outlined),
-                title: const Text('站源与首页信息流'),
+                title: const Text('站源管理'),
+                subtitle: const Text('订阅与更新、启用与维护'),
 
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => Navigator.push<void>(
                   context,
                   MaterialPageRoute<void>(
                     builder: (_) => SourceManagementSettingsScreen(
+                      repository: widget.repository,
+                      store: widget.store,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SettingsSection(
+            title: '首页与推荐',
+            children: [
+              ListTile(
+                key: const ValueKey('home-feed-settings'),
+                leading: const Icon(Icons.tune_rounded),
+                title: const Text('首页与推荐'),
+                subtitle: const Text('首页偏好、画质和猜你喜欢'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.push<void>(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => HomeFeedSettingsScreen(
                       repository: widget.repository,
                       store: widget.store,
                     ),
@@ -426,7 +448,8 @@ class SourceManagementSettingsScreen extends StatelessWidget {
                   ListTile(
                     key: const ValueKey('source-subscriptions-settings'),
                     leading: const Icon(Icons.extension_outlined),
-                    title: const Text('站源订阅'),
+                    title: const Text('订阅与更新'),
+                    subtitle: const Text('添加站源、更新程序和管理订阅版本'),
 
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () =>
@@ -435,7 +458,8 @@ class SourceManagementSettingsScreen extends StatelessWidget {
                   ListTile(
                     key: const ValueKey('current-sources-settings'),
                     leading: const Icon(Icons.dns_outlined),
-                    title: const Text('当前站源'),
+                    title: const Text('启用与维护'),
+                    subtitle: const Text('开关站源、刷新内容目录和检测可用性'),
 
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => _open(
@@ -445,37 +469,6 @@ class SourceManagementSettingsScreen extends StatelessWidget {
                   ),
                 ],
               ),
-            SettingsSection(
-              title: '首页信息流',
-              children: [
-                ListTile(
-                  key: const ValueKey('home-feed-preferences'),
-                  leading: const Icon(Icons.tune_rounded),
-                  title: const Text('首页偏好'),
-
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => _open(
-                    context,
-                    HomeFeedPreferencesScreen(
-                      repository: repository,
-                      store: store,
-                    ),
-                  ),
-                ),
-                _HomePlaybackQualityTile(store: store),
-                ListTile(
-                  key: const ValueKey('playback-feed-recommendations'),
-                  leading: const Icon(Icons.auto_awesome_rounded),
-                  title: const Text('猜你喜欢'),
-
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => _open(
-                    context,
-                    FeedRecommendationSettingsScreen(store: store),
-                  ),
-                ),
-              ],
-            ),
           ],
         ),
       ),
@@ -681,12 +674,6 @@ class _StorageScreenState extends State<StorageScreen> {
                               ),
                         ),
                         const SizedBox(height: 16),
-                        Divider(
-                          height: 1,
-                          color: Theme.of(
-                            context,
-                          ).colorScheme.outlineVariant.withValues(alpha: .55),
-                        ),
                         const SizedBox(height: 16),
                         Text(
                           '当前下载目录',
@@ -745,6 +732,69 @@ class _StorageScreenState extends State<StorageScreen> {
               ),
             ],
           ),
+        ),
+      ),
+    ),
+  );
+}
+
+class HomeFeedSettingsScreen extends StatelessWidget {
+  const HomeFeedSettingsScreen({
+    super.key,
+    required this.repository,
+    required this.store,
+  });
+  final AppRepository repository;
+  final LocalStore store;
+
+  void _open(BuildContext context, Widget page) {
+    Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => page),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('首页与推荐')),
+    body: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 720),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            SettingsSection(
+              title: '首页信息流',
+              children: [
+                ListTile(
+                  key: const ValueKey('home-feed-preferences'),
+                  leading: const Icon(Icons.tune_rounded),
+                  title: const Text('首页偏好'),
+
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _open(
+                    context,
+                    HomeFeedPreferencesScreen(
+                      repository: repository,
+                      store: store,
+                    ),
+                  ),
+                ),
+                _HomePlaybackQualityTile(store: store),
+                ListTile(
+                  key: const ValueKey('playback-feed-recommendations'),
+                  leading: const Icon(Icons.auto_awesome_rounded),
+                  title: const Text('猜你喜欢'),
+
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _open(
+                    context,
+                    FeedRecommendationSettingsScreen(store: store),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     ),

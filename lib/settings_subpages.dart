@@ -68,19 +68,7 @@ class SettingsSection extends StatelessWidget {
             ),
             child: ListTileTheme(
               data: settingsListTheme,
-              child: Column(
-                children: [
-                  for (var index = 0; index < children.length; index++) ...[
-                    if (index > 0)
-                      Divider(
-                        height: 1,
-                        endIndent: AppSpacing.l,
-                        color: colors.outlineVariant.withValues(alpha: .55),
-                      ),
-                    children[index],
-                  ],
-                ],
-              ),
+              child: Column(children: children),
             ),
           ),
         ],

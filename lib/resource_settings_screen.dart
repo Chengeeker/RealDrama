@@ -37,9 +37,7 @@ class DownloadPreferencesScreen extends StatelessWidget {
                   ),
                   child: Column(
                     children: [
-                      ListTile(
-                        title: const Text('默认画质'),
-                      ),
+                      ListTile(title: const Text('默认画质')),
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                         child: DropdownButtonFormField<int>(
@@ -67,14 +65,6 @@ class DownloadPreferencesScreen extends StatelessWidget {
                                   }
                                 },
                         ),
-                      ),
-                      Divider(
-                        height: 1,
-                        indent: 16,
-                        endIndent: 16,
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.outlineVariant.withValues(alpha: .55),
                       ),
                       SwitchListTile(
                         value: preferences.includeVip,

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -52,6 +53,7 @@ type subscriptionHTTPRequest struct {
 	Method            string            `json:"method"`
 	Headers           map[string]string `json:"headers"`
 	Body              string            `json:"body"`
+	BodyBase64        string            `json:"bodyBase64"`
 	Domains           []string          `json:"domains"`
 	Cookie            string            `json:"cookie"`
 	CredentialDomains []string          `json:"credentialDomains"`
@@ -64,7 +66,9 @@ func subscriptionHeaderAllowed(name, source, hostname string) bool {
 	case "user-agent", "accept", "accept-language", "referer", "origin", "content-type", "authorization", "x-gorgon", "x-khronos", "x-ss-req-ticket", "x-ss-stub", "sdk-version", "x-xs-from-web", "temp", "x-user-agent", "uifid":
 		return true
 	case "x-helios", "x-medusa", "x-ss-dp", "x-tt-store-region", "x-tt-store-region-src":
-		return source == sourceHongguo && hostname == "api5-normal-sinfonlineb.fqnovel.com"
+		return source == sourceHongguo && (hostname == "api5-normal-sinfonlineb.fqnovel.com" || hostname == "api5-normal-hl.fqnovel.com" || strings.EqualFold(name, "x-ss-dp") && hostname == "log5-applog-lf.fqnovel.com")
+	case "log-encode-type", "x-vc-bdturing-sdk-version", "lc", "passport-sdk-version", "x-neptune":
+		return source == sourceHongguo && hostname == "log5-applog-lf.fqnovel.com"
 	default:
 		return false
 	}
@@ -96,7 +100,11 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 		}
 		ctx = subscriptionBrowserContext(ctx, source)
 	}
-	request, err := http.NewRequestWithContext(ctx, command.Method, command.URL, strings.NewReader(command.Body))
+	bodyBytes, err := subscriptionRequestBody(command, address)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, command.Method, command.URL, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, errors.New("请求地址无效")
 	}
@@ -171,6 +179,20 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 		result["base64"] = base64.StdEncoding.EncodeToString(body)
 	}
 	return result, nil
+}
+
+func subscriptionRequestBody(command subscriptionHTTPRequest, address *url.URL) ([]byte, error) {
+	if command.BodyBase64 == "" {
+		return []byte(command.Body), nil
+	}
+	if command.Source != sourceHongguo || command.Method != "POST" || command.Body != "" || command.Cookie != "" || address.Hostname() != "log5-applog-lf.fqnovel.com" || address.Path != "/service/2/device_register/" || len(command.BodyBase64) > 32768 {
+		return nil, errors.New("订阅二进制请求不受支持")
+	}
+	body, err := base64.StdEncoding.DecodeString(command.BodyBase64)
+	if err != nil || len(body) < 54 || len(body) > 16384 || string(body[:6]) != "tc\x05\x10\x00\x00" || (len(body)-38)%16 != 0 {
+		return nil, errors.New("订阅二进制请求无效")
+	}
+	return body, nil
 }
 func (engine *nativeEngine) subscriptionPackage(id string) (subscriptionPackage, error) {
 	var result subscriptionPackage
@@ -402,6 +424,7 @@ func (engine *nativeEngine) subscriptionDownload(ctx context.Context, job native
 		}
 		var command struct {
 			Type, URL, Method string
+			BodyBase64        string
 			Headers           map[string]string
 			Body              any
 			Credential, Sign  bool
@@ -418,7 +441,7 @@ func (engine *nativeEngine) subscriptionDownload(ctx context.Context, job native
 				text = string(encoded)
 			}
 		}
-		commandRaw, _ := json.Marshal(subscriptionHTTPRequest{URL: command.URL, Method: command.Method, Headers: command.Headers, Body: text, Domains: packageValue.Domains, Background: true, Browser: packageValue.Browser})
+		commandRaw, _ := json.Marshal(subscriptionHTTPRequest{Source: job.Drama.Source, Operation: "resolve", URL: command.URL, Method: command.Method, Headers: command.Headers, Body: text, BodyBase64: command.BodyBase64, Domains: packageValue.Domains, Background: true, Browser: packageValue.Browser})
 		response, err := engine.subscriptionHTTP(ctx, commandRaw)
 		if err != nil {
 			if ctx.Err() != nil {

@@ -46,19 +46,7 @@ class PersonalizationScreen extends StatelessWidget {
                   color: colors.onSurfaceVariant,
                 ),
               ),
-              child: Column(
-                children: [
-                  for (var index = 0; index < children.length; index++) ...[
-                    if (index > 0)
-                      Divider(
-                        height: 1,
-                        endIndent: AppSpacing.l,
-                        color: colors.outlineVariant.withValues(alpha: .55),
-                      ),
-                    children[index],
-                  ],
-                ],
-              ),
+              child: Column(children: children),
             ),
           ),
         ],
@@ -194,10 +182,7 @@ class PersonalizationScreen extends StatelessWidget {
                     () => store.setHapticFeedback(value),
                   ),
                 ),
-                const ListTile(
-                  title: Text('字体粗细'),
-
-                ),
+                const ListTile(title: Text('字体粗细')),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                   child: Wrap(

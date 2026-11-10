@@ -510,7 +510,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
         await _waitForSourceJob(source, epoch);
       }
       if (mounted && epoch == widget.store.profileEpoch) {
-        final label = operation == 'update' ? '更新' : '检测';
+        final label = operation == 'update' ? '目录刷新' : '连接与播放检测';
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('已完成所有已开启站源的$label')));
@@ -686,10 +686,10 @@ class _SourcesScreenState extends State<SourcesScreen> {
           : paddingBottom;
       return Scaffold(
         appBar: AppBar(
-          title: const Text('当前站源'),
+          title: const Text('启用与维护'),
           actions: [
             IconButton(
-              tooltip: '一键更新',
+              tooltip: '刷新全部内容目录',
               onPressed:
                   _bulkOperation == null &&
                       widget.repository.supportsSourceManagement
@@ -698,7 +698,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
               icon: const Icon(Icons.refresh_rounded),
             ),
             IconButton(
-              tooltip: '一键检测',
+              tooltip: '检测全部站源连接与播放',
               onPressed:
                   _bulkOperation == null &&
                       widget.repository.supportsSourceManagement
@@ -724,15 +724,15 @@ class _SourcesScreenState extends State<SourcesScreen> {
                     child: const Padding(
                       padding: EdgeInsets.all(16),
                       child: Text(
-                        '顶栏可依次更新或检测所有已开启站源，卡片也可单独操作。更新会查找新剧、继续加载一页历史内容，并分批补齐资料；“加载后续所有页”会逐页低频请求，同一时间只运行一个站源，最多连续加载 1000 页或 30 分钟。遇到限流、超时或错误会停止并保留已加载内容，也可随时手动停止。',
+                        '在这里启用站源、刷新内容目录或检测连接与播放。刷新目录会查找新内容，不更新站源程序；程序更新请前往“订阅与更新”。',
                       ),
                     ),
                   ),
                   _expandableSection(
                     section: 'source-visibility',
                     icon: Icons.visibility_outlined,
-                    title: '显示的站源',
-                    subtitle: '已显示 $visibleGroups/$totalGroups · 点击选择隐藏',
+                    title: '启用站源',
+                    subtitle: '已启用 $visibleGroups/$totalGroups 组 · 展开调整开关',
                     children: [
                       for (final group in _orderedManagementGroups(
                         SourceSite.values,
@@ -948,7 +948,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '最近更新：${sourceTimestamp(status?.updatedAt)}',
+                    '目录刷新：${sourceTimestamp(status?.updatedAt)}',
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: colors.onSurfaceVariant,
                     ),
@@ -981,17 +981,17 @@ class _SourcesScreenState extends State<SourcesScreen> {
                     icon: const Icon(Icons.manage_accounts_outlined),
                     label: const Text('Cookie 设置'),
                   ),
-                IconButton.filledTonal(
+                FilledButton.tonalIcon(
                   key: ValueKey('update-${source.id}'),
-                  tooltip: '更新',
                   onPressed: enabled ? () => _run(source, 'update') : null,
                   icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('刷新目录'),
                 ),
-                IconButton.outlined(
+                OutlinedButton.icon(
                   key: ValueKey('check-${source.id}'),
-                  tooltip: '检测连接与播放',
                   onPressed: enabled ? () => _run(source, 'check') : null,
                   icon: const Icon(Icons.wifi_rounded),
+                  label: const Text('检测连接与播放'),
                 ),
                 if (status?.running == true)
                   TextButton(
@@ -1110,7 +1110,7 @@ class _SourcesScreenState extends State<SourcesScreen> {
                 ),
               ),
             if (health != null) ...[
-              const Divider(height: 28),
+              const SizedBox(height: 28),
               Row(
                 children: [
                   Expanded(

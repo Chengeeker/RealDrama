@@ -17,6 +17,31 @@ import 'models.dart';
 import 'source_subscriptions.dart';
 import 'source_status.dart';
 
+class PendingSourceRequests {
+  final _requests = <String, Future<Map<String, dynamic>>>{};
+
+  Future<Map<String, dynamic>> run(
+    String key,
+    Future<Map<String, dynamic>> Function() load,
+  ) {
+    final current = _requests[key];
+    if (current != null) return current;
+    final request = Future.sync(load);
+    _requests[key] = request;
+    void remove() {
+      if (identical(_requests[key], request)) _requests.remove(key);
+    }
+
+    unawaited(
+      request.then<void>(
+        (_) => remove(),
+        onError: (Object _, StackTrace _) => remove(),
+      ),
+    );
+    return request;
+  }
+}
+
 typedef _NativeRequest = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _Request = Pointer<Utf8> Function(Pointer<Utf8>);
 typedef _NativeFree = Void Function(Pointer<Utf8>);
@@ -203,6 +228,7 @@ class SubscriptionRuntime {
   }
 
   final _creatorRequests = <String, (DateTime, Future<Map<String, dynamic>>)>{};
+  final _pendingResolves = PendingSourceRequests();
 
   Future<Map<String, dynamic>> execute(
     String source,
@@ -210,6 +236,19 @@ class SubscriptionRuntime {
     Map<String, dynamic> payload, {
     bool configure = false,
   }) {
+    if (source == 'hongguo' && action == 'resolve' && !configure) {
+      _watch();
+      final package = SourceSubscriptions.instance.package(source);
+      if (package == null) {
+        return Future.error(const FormatException('请先导入此站源的订阅包'));
+      }
+      final epoch = store()?.profileEpoch;
+      _authorize(source, epoch, package.digest);
+      final scope = _identity(source);
+      final key =
+          '$scope:$epoch:${_generation[scope]}:${_actionGeneration['$scope:$action']}:${package.digest}:${jsonEncode(payload)}';
+      return _pendingResolves.run(key, () => _enqueue(source, action, payload));
+    }
     if (action != 'creator' ||
         configure ||
         SourceSubscriptions.instance.package(source)?.credentialGroup !=
@@ -371,7 +410,9 @@ class SubscriptionRuntime {
               _states[stateKey]?.remove('wbi');
             }
             if (status == 403 && package.credentialGroup == 'douyin') {
-              throw const FormatException('抖音风控拦截（HTTP 403）：请在代理软件中将 douyin.com 设为直连（规则模式），并更新包含 UIFID 的完整 Cookie');
+              throw const FormatException(
+                '抖音风控拦截（HTTP 403）：请在代理软件中将 douyin.com 设为直连（规则模式），并更新包含 UIFID 的完整 Cookie',
+              );
             }
             throw FormatException('站源请求失败（HTTP $status），请检查网络或更新站源');
           }
@@ -520,14 +561,20 @@ class SubscriptionRuntime {
       if ((cookie == null || cookie.isEmpty) &&
           package.document['credentialRequired'] == true)
         throw const FormatException('请在站源管理中配置账号 Cookie');
-      if (package.credentialGroup == 'douyin' && cookie != null && cookie.isNotEmpty) {
-        final match = RegExp(r'(?:^|;\s*)(?:uifid|uifid_temp)=([^;]+)', caseSensitive: false).firstMatch(cookie);
+      if (package.credentialGroup == 'douyin' &&
+          cookie != null &&
+          cookie.isNotEmpty) {
+        final match = RegExp(
+          r'(?:^|;\s*)(?:uifid|uifid_temp)=([^;]+)',
+          caseSensitive: false,
+        ).firstMatch(cookie);
         if (match != null && !requestHeaders.containsKey('uifid')) {
           requestHeaders['uifid'] = match.group(1)!.trim();
         }
       }
     }
-    if (command['sign'] == true && !uri.queryParameters.containsKey('a_bogus')) {
+    if (command['sign'] == true &&
+        !uri.queryParameters.containsKey('a_bogus')) {
       if (package.credentialGroup != 'douyin' ||
           !Platform.isAndroid ||
           !package.credentialDomains.contains(uri.host))
@@ -571,6 +618,7 @@ class SubscriptionRuntime {
         'method': command['method'] ?? 'GET',
         'headers': requestHeaders,
         'binary': command['binary'] == true,
+        'bodyBase64': command['bodyBase64'] ?? '',
         'body': body == null
             ? ''
             : body is String

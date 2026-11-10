@@ -62,6 +62,8 @@ class SourceFixtureRepository extends FixtureRepository {
 }
 
 void main() {
+  setUp(() => SourceSite.registerInstalled([SourceSite.hongguo]));
+  tearDown(() => SourceSite.registerInstalled([]));
   test(
     'source page summary includes known totals without guessing unknown ones',
     () {
@@ -182,11 +184,18 @@ void main() {
   );
 
   testWidgets(
-    'source manager requests only the current user permitted compiled sources',
+    'source manager requests only the current user permitted installed sources',
     (tester) async {
       SharedPreferences.setMockInitialValues({
+        ...await gatePreferences(),
         'profiles': jsonEncode([
-          const LocalProfile(id: 'default', name: '管理员', admin: true).toJson(),
+          LocalProfile(
+            id: 'default',
+            name: '管理员',
+            admin: true,
+            salt: '0' * 32,
+            pinHash: '1' * 64,
+          ).toJson(),
           const LocalProfile(
             id: 'viewer',
             name: '只看红果',
@@ -218,6 +227,9 @@ void main() {
     testWidgets(
       'source diagnostics remain collapsed through $operation polling and completion',
       (tester) async {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
         SharedPreferences.setMockInitialValues({});
         final store = testStore(await SharedPreferences.getInstance());
         SourceStatus status(String state, {bool running = false}) =>
@@ -367,10 +379,13 @@ void main() {
       expect(find.textContaining('HTTP 403'), findsNothing);
       final toggle = find.byKey(const ValueKey('health-toggle-hongguo'));
       await tester.ensureVisible(toggle);
+      await tester.pumpAndSettle();
       await tester.tap(toggle);
       await tester.pumpAndSettle();
       expect(find.textContaining('HTTP 403'), findsOneWidget);
       expect(find.textContaining('连接检测通过'), findsNothing);
+      await tester.ensureVisible(toggle);
+      await tester.pumpAndSettle();
       await tester.tap(toggle);
       await tester.pumpAndSettle();
       expect(find.textContaining('HTTP 403'), findsNothing);

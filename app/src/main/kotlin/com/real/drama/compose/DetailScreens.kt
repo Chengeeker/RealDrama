@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
@@ -63,7 +64,7 @@ fun PlayerScreen(drama: Drama, back: () -> Unit, payload: JSONObject = JSONObjec
         val playerHeight = minOf(maxWidth * 9 / 16, maxHeight * .56f)
         val wide = maxWidth >= 840.dp || maxWidth > maxHeight * 1.3f
         val panelWidth = if (maxWidth >= 840.dp) 312.dp else 210.dp
-        androidx.compose.ui.layout.Layout(modifier = Modifier.fillMaxSize(), content = {
+        androidx.compose.ui.layout.Layout(modifier = Modifier.fillMaxSize().clipToBounds(), content = {
             val loaded = detail
             if (loaded == null) {
                 Column { Row { IconAction("arrow_back_rounded", "返回", action = back) }; if (error != null) StatusPanel("暂时无法播放", error!!, onRetry = { generation++ }) else Loading() }
@@ -71,9 +72,9 @@ fun PlayerScreen(drama: Drama, back: () -> Unit, payload: JSONObject = JSONObjec
             } else if (!accepted) { Loading()
             } else {
                 PlayerPane(loaded, index, initialPosition = if (payload.optBoolean("resume", true)) null else 0.0, active = LocalScreenActive.current, handoff = incoming, localOnly = localOnly, localPlan = localPlan, mediaId = mediaId, selectedIndex = index, onIndexChanged = { index = it },
-                    modifier = Modifier.fillMaxSize(), onBack = back,
+                    modifier = Modifier.fillMaxSize().clipToBounds(), onBack = back,
                     onFullScreen = { fullscreen = it }, onCreator = { nav(Route("creator", loaded.drama)) })
-                Column {
+                Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface).clipToBounds()) {
                 if (!full) {
                     val tabs = playerSections(source?.kind.orEmpty(), loaded.episodes.size, source?.capabilities.orEmpty().toSet(), localOnly || localPlan != null, repo.store.canDownload)
                     val selectedTab = tab.takeIf { key -> tabs.any { it.first == key } } ?: tabs.first().first

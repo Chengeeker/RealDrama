@@ -117,6 +117,56 @@ class VisualAuditTest {
         compose.onNodeWithText("不喜欢").assertIsDisplayed()
     }
 
+    @Test fun playingFeedPairsAudioReceiverAcrossBackgroundAndResume() {
+        val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
+        runBlocking { repo.store.open() }
+        val detail = Detail(Drama(obj("id" to "synthetic:playing-resume", "title" to "播放恢复")),
+            listOf(Episode(obj("id" to "1"), 1)))
+        AuditNativeBridge.commands.clear()
+        AuditNativeBridge.playerCreations.set(0)
+        val application = org.robolectric.Shadows.shadowOf(RuntimeEnvironment.getApplication())
+        fun receiverCount() = application.registeredReceivers.count {
+            it.intentFilter.hasAction(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+        }
+        var manualTexture: AuditedSurfaceTexture? = null
+        try {
+            compose.setContent { CompositionLocalProvider(LocalRepository provides repo, LocalNavigate provides {}) {
+                DramaTheme(repo.store) {
+                    PlayerPane(detail, feed = true, localOnly = true,
+                        localPlan = obj("url" to "/synthetic.mp4", "local" to true), modifier = Modifier.fillMaxSize())
+                }
+            } }
+            compose.runOnIdle {
+                checkNotNull(videoTexture(compose.activity.window.decorView)).also {
+                    if (!it.isAvailable) {
+                        val texture = AuditedSurfaceTexture()
+                        manualTexture = texture
+                        it.surfaceTextureListener!!.onSurfaceTextureAvailable(texture, it.width, it.height)
+                    }
+                }
+            }
+            val load = listOf("loadfile", "/synthetic.mp4", "replace")
+            val play = listOf("set", "pause", "no")
+            val pause = listOf("set", "pause", "yes")
+            compose.waitUntil(10000) { receiverCount() == 1 && AuditNativeBridge.commands.contains(load) && AuditNativeBridge.commands.contains(play) }
+            val scenario = compose.activityRule.scenario
+            repeat(3) {
+                AuditNativeBridge.commands.clear()
+                scenario.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+                compose.waitUntil(10000) { receiverCount() == 0 && AuditNativeBridge.commands.contains(pause) }
+                AuditNativeBridge.commands.clear()
+                scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+                compose.waitUntil(10000) { receiverCount() == 1 && AuditNativeBridge.commands.contains(play) }
+                org.junit.Assert.assertEquals(1, AuditNativeBridge.playerCreations.get())
+                org.junit.Assert.assertFalse(AuditNativeBridge.commands.contains(load))
+            }
+        } finally {
+            compose.runOnIdle {
+                manualTexture?.let { videoTexture(compose.activity.window.decorView)?.surfaceTextureListener?.onSurfaceTextureDestroyed(it) }
+            }
+        }
+    }
+
     @Test fun fontSizeStartsAt100AndScalesTheThemeWhenCommitted() {
         val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
         runBlocking { repo.store.open() }
@@ -337,6 +387,24 @@ class VisualAuditTest {
             val exit = compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("退出全屏")).fetchSemanticsNodes()
                 .minBy { it.boundsInRoot.top }.boundsInRoot
             org.junit.Assert.assertTrue(exit.top >= largeCutout && exit.left >= 24f)
+            insets(24, 40)
+            AuditNativeBridge.snapshotDimensions = 1920.0 to 1080.0
+            compose.waitUntil(10000) {
+                settings.fetchSemanticsNode().boundsInRoot.top in 40f..48f
+            }
+            val landscapeTop = settings.fetchSemanticsNode().boundsInRoot.top
+            insets(0, 40)
+            org.junit.Assert.assertEquals(landscapeTop, settings.fetchSemanticsNode().boundsInRoot.top, .5f)
+            compose.waitUntil(10000) {
+                compose.activity.requestedOrientation == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
+            AuditNativeBridge.snapshotDimensions = 0.0 to 0.0
+            compose.waitUntil(10000) { compose.runOnIdle { video.alpha == 0f } }
+            org.junit.Assert.assertEquals(android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE, compose.activity.requestedOrientation)
+            AuditNativeBridge.snapshotDimensions = 900.0 to 1200.0
+            compose.waitUntil(10000) {
+                compose.activity.requestedOrientation == android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            }
             compose.mainClock.autoAdvance = false
             val root = compose.onRoot()
             root.performTouchInput { click(androidx.compose.ui.geometry.Offset(width * .25f, height * .52f)) }
@@ -712,11 +780,17 @@ class VisualAuditTest {
         val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
         runBlocking { repo.store.open() }
         val detail = Detail(Drama(obj("id" to "synthetic:player", "source" to "synthetic", "title" to "合成视频 · 控制层检查")), listOf(Episode(obj("id" to "1"), 1)))
+        val full = mutableStateOf(true)
+        val landscape = !largeText
+        if (landscape) AuditNativeBridge.snapshotDimensions = 1440.0 to 1080.0
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalRepository provides repo, LocalNavigate provides {}, LocalDensity provides Density(density.density, if (largeText) 1.3f else 1f)) {
                 DramaTheme(repo.store) {
-                    PlayerPane(detail, active = false, localOnly = true, localPlan = obj("url" to "/synthetic.mp4", "local" to true), externalFull = true, modifier = Modifier.fillMaxSize())
+                    Box(Modifier.fillMaxSize()) {
+                        PlayerPane(detail, active = false, warmFeed = landscape, localOnly = true, localPlan = obj("url" to "/synthetic.mp4", "local" to true),
+                            externalFull = full.value, modifier = if (full.value) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(180.dp))
+                    }
                 }
             }
         }
@@ -727,6 +801,49 @@ class VisualAuditTest {
         compose.onNodeWithContentDescription("开始播放").assertDoesNotExist()
         compose.onNodeWithContentDescription("解锁控制").performClick()
         compose.onNodeWithContentDescription("开始播放").assertExists()
+        fun bounds(label: String) = compose.onNodeWithContentDescription(label).fetchSemanticsNode().boundsInRoot
+        val root = compose.onRoot().fetchSemanticsNode().boundsInRoot
+        if (landscape) {
+            var texture: AuditedSurfaceTexture? = null
+            try {
+                val view = compose.runOnIdle {
+                    checkNotNull(videoTexture(compose.activity.window.decorView)).also {
+                        if (!it.isAvailable) {
+                            val surface = AuditedSurfaceTexture()
+                            texture = surface
+                            it.surfaceTextureListener!!.onSurfaceTextureAvailable(surface, it.width, it.height)
+                        }
+                    }
+                }
+                compose.waitUntil(10000) { compose.runOnIdle { view.alpha == 1f } }
+                compose.runOnIdle {
+                    val bars = androidx.core.view.WindowInsetsCompat.Type.statusBars()
+                    val insets = androidx.core.view.WindowInsetsCompat.Builder()
+                        .setInsetsIgnoringVisibility(bars, androidx.core.graphics.Insets.of(0, 40, 0, 0))
+                        .setVisible(bars, false)
+                        .build()
+                    androidx.core.view.ViewCompat.dispatchApplyWindowInsets(compose.activity.window.decorView, insets)
+                }
+                val side = (root.width - root.height * 4f / 3f) / 2
+                org.junit.Assert.assertTrue(side > 0f)
+                org.junit.Assert.assertTrue(bounds("播放设置").top < 40f)
+                org.junit.Assert.assertTrue(bounds("播放设置").right <= root.right - side)
+                org.junit.Assert.assertTrue(bounds("倍速").right <= root.right - side)
+                org.junit.Assert.assertTrue(bounds("锁定控制").left >= root.left + side)
+                org.junit.Assert.assertEquals(root.center.y, bounds("开始播放").center.y, 1f)
+            } finally {
+                compose.runOnIdle {
+                    texture?.let { videoTexture(compose.activity.window.decorView)?.surfaceTextureListener?.onSurfaceTextureDestroyed(it) }
+                }
+                AuditNativeBridge.snapshotDimensions = null
+            }
+        } else {
+            compose.runOnIdle { full.value = false }
+            org.junit.Assert.assertEquals(root.center.x, bounds("开始播放").center.x, 1f)
+            org.junit.Assert.assertTrue(bounds("开始播放").width >= 48f)
+            org.junit.Assert.assertTrue(bounds("全屏").height >= 48f)
+            org.junit.Assert.assertTrue(bounds("开始播放").bottom <= bounds("倍速").top)
+        }
         val output = File("../build/visual-audit/compose/player-$name.png").apply { parentFile?.mkdirs() }
         compose.runOnIdle {
             val decor = compose.activity.window.decorView

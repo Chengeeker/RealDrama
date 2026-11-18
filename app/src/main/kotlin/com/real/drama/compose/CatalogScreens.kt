@@ -21,6 +21,8 @@ import androidx.compose.ui.semantics.*
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
@@ -103,7 +105,9 @@ fun DiscoverScreen(compact: Boolean, onSelectionChanged: (Boolean) -> Unit, body
     val suggestionCache = remember(source?.id) { linkedMapOf<String, List<String>>() }
     LaunchedEffect(query) { if (searchText.text != query) searchText = androidx.compose.ui.text.input.TextFieldValue(query, androidx.compose.ui.text.TextRange(query.length)) }
     var submitted by rememberSaveable { mutableStateOf("") }
+    var recentSearches by remember { mutableStateOf(repo.store.list("recentSearches").strings()) }
     var search by rememberSaveable { mutableStateOf(false) }
+    val searchFocus = remember { FocusRequester() }
     var sourceMenu by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf(false) }
     var catalogView by remember { mutableStateOf(repo.store.json("catalogView")) }
@@ -111,6 +115,7 @@ fun DiscoverScreen(compact: Boolean, onSelectionChanged: (Boolean) -> Unit, body
     var page by remember { mutableIntStateOf(1) }
     var more by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableIntStateOf(0) }
     var selected by remember { mutableStateOf(setOf<String>()) }
@@ -123,12 +128,16 @@ fun DiscoverScreen(compact: Boolean, onSelectionChanged: (Boolean) -> Unit, body
     val sourcePages = remember { mutableMapOf<String, Catalog>() }
     val categoryRequests = remember { mutableMapOf<String, Map<String, String>>() }
     fun submit(value: String) {
-        query = value; submitted = value.trim()
-        if (submitted.isNotEmpty()) action { repo.store.set("recentSearches", JSONArray((listOf(submitted) + repo.store.list("recentSearches").strings().filter { normalizedSearchText(it) != normalizedSearchText(submitted) }).take(20))) }
+        query = value.trim(); submitted = query; suggestions = emptyList()
+        if (submitted.isNotEmpty()) {
+            recentSearches = (listOf(submitted) + recentSearches.filter { normalizedSearchText(it) != normalizedSearchText(submitted) }).take(20)
+            val snapshot = recentSearches.toList()
+            action { repo.store.set("recentSearches", JSONArray(snapshot)) }
+        }
     }
     fun load(next: Int, force: Boolean = false) {
         val current = source ?: return
-        request?.cancel(); val token = ++generation; loading = true; error = null
+        request?.cancel(); val token = ++generation; loading = true; refreshing = next == 1 && force; error = null
         request = scope.launch {
             try {
                 val fetchedPages = if (next == 1) linkedMapOf<String, Catalog>() else sourcePages.toMutableMap()
@@ -160,7 +169,7 @@ fun DiscoverScreen(compact: Boolean, onSelectionChanged: (Boolean) -> Unit, body
                 ensureActive()
                 if (token == generation) { sourcePages.clear(); sourcePages.putAll(fetchedPages); rows = interleaveDramas(fetchedPages.values.map { it.items }); page = next; more = fetchedPages.values.any { it.more }; error = failures.takeIf { it.isNotEmpty() }?.joinToString("\n") }
             } catch (cancel: CancellationException) { throw cancel } catch (failure: Exception) { if (token == generation) { error = failure.message; more = false } }
-            finally { if (token == generation) loading = false }
+            finally { if (token == generation) { loading = false; refreshing = false } }
         }
     }
     LaunchedEffect(source?.id) {
@@ -192,33 +201,25 @@ fun DiscoverScreen(compact: Boolean, onSelectionChanged: (Boolean) -> Unit, body
         }
         return
     }
-    SideEffect { onSelectionChanged(selection) }
+    SideEffect { onSelectionChanged(selection || search) }
     DisposableEffect(Unit) { onDispose { onSelectionChanged(false) } }
     fun cancelSelection() { selection = false; selected = emptySet() }
     androidx.activity.compose.BackHandler(selection) { cancelSelection() }
+    androidx.activity.compose.BackHandler(search || sourceMenu) {
+        if (sourceMenu) sourceMenu = false else { search = false; query = ""; submitted = ""; suggestions = emptyList() }
+    }
+    LaunchedEffect(search) { if (search) { delay(80); searchFocus.requestFocus() } }
     val selectionAction = {
         nav(Route("batchDownloads", payload = obj("dramas" to JSONArray(rows.filter { it.id in selected }.map { it.json }))))
         cancelSelection()
     }
     val frosted = compact && !selection
     val overlap = frosted && !search && category != "app:recommendations" && rows.isNotEmpty() && error == null
-    val searchControls: @Composable () -> Unit = {
-        OutlinedTextField(searchText, { searchText = it; query = it.text }, Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), singleLine = true, placeholder = { Text("搜索${if (catalogView.optBoolean("allSources")) "全部站源" else source?.name.orEmpty()}") }, trailingIcon = { IconAction("search_rounded", "搜索") { submit(query) } }, shape = RoundedCornerShape(16.dp), keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search), keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { submit(query) }), textStyle = MaterialTheme.typography.bodyLarge, colors = legacyTextFieldColors())
-        val recent = repo.store.list("recentSearches").strings()
-        if (query.isEmpty() && recent.isNotEmpty()) LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(recent) { value -> InputChip(false, hapticClick { submit(value) }, label = { Text(value) }) }
-            item { IconAction("delete_outline_rounded", "清空搜索记录") { action { repo.store.set("recentSearches", JSONArray()) } } }
-        }
-        if (suggestions.isNotEmpty()) LazyColumn(Modifier.heightIn(max = 240.dp)) { items(suggestions) { value -> SettingRow(value, icon = "search_rounded", onClick = { suggestions = emptyList(); submit(value) }) } }
-    }
     val header: @Composable ColumnScope.() -> Unit = {
         Row(Modifier.fillMaxWidth().height(if (selection) 56.dp else 44.dp).padding(start = 12.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (selection) Text("选择短剧", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
             else Box(Modifier.weight(1f)) {
-                Row(Modifier.height(44.dp).hapticClickable(enabled = sources.distinctBy { it.catalogGroup }.size > 1) { sourceMenu = true }, verticalAlignment = Alignment.CenterVertically) { Text(if (catalogView.optBoolean("allSources")) "全部站源" else source?.catalogName.orEmpty(), maxLines = 1, style = MaterialTheme.typography.titleLarge, fontWeight = appTextWeight(FontWeight.ExtraBold)); if (sources.distinctBy { it.catalogGroup }.size > 1) Glyph("expand_more_rounded") }
-                DropdownMenu(sourceMenu, { sourceMenu = false }) {
-                    sources.distinctBy { it.catalogGroup }.forEach { item -> DropdownMenuItem(text = { Text(item.catalogName) }, trailingIcon = { if (source?.catalogGroup == item.catalogGroup) Glyph("check_rounded", size = 20) }, onClick = hapticClick { sourceId = item.id; sourceMenu = false; catalogView = catalogView.copy().put("allSources", false); action { repo.store.set("source", item.id); repo.store.set("catalogView", catalogView) } }) }
-                }
+                Row(Modifier.height(44.dp).hapticClickable(enabled = sources.distinctBy { it.catalogGroup }.size > 1) { sourceMenu = !sourceMenu }, verticalAlignment = Alignment.CenterVertically) { Text(if (catalogView.optBoolean("allSources")) "全部站源" else source?.catalogName.orEmpty(), maxLines = 1, style = MaterialTheme.typography.titleLarge, fontWeight = appTextWeight(FontWeight.ExtraBold)); if (sources.distinctBy { it.catalogGroup }.size > 1) Glyph("expand_more_rounded") }
             }
             if (selection) {
                 TextButton(hapticClick { selected = emptySet() }, enabled = selected.isNotEmpty()) { Text("清空") }
@@ -228,16 +229,14 @@ fun DiscoverScreen(compact: Boolean, onSelectionChanged: (Boolean) -> Unit, body
                 if (catalogTools && category != "app:recommendations") IconAction("sort_rounded", "排序与筛选") { sortMenu = true }
                 if (catalogTools && sources.any { "rankings" in it.capabilities }) IconAction("leaderboard_outlined", "榜单") { nav(Route("rankings", source = source?.catalogGroup.orEmpty())) }
                 if (catalogTools && category != "app:recommendations" && repo.store.canDownload && source?.capabilities?.contains("download") == true) IconAction("checklist_rounded", "多选下载") { selection = true }
-                if (groupSources.any { "search" in it.capabilities }) IconAction(if (search) "search_off_rounded" else "search_rounded", if (search) "收起搜索" else "搜索") { search = !search; if (!search) { query = ""; submitted = "" }; if (category == "app:recommendations") category = "" }
+                if (groupSources.any { "search" in it.capabilities }) IconAction("search_rounded", "进入搜索") { search = true; sourceMenu = false; query = ""; submitted = ""; suggestions = emptyList(); if (category == "app:recommendations") category = "" }
                 if (androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp >= 400 && category != "app:recommendations") IconAction("refresh_rounded", "更新剧库", !loading) { load(1, true) }
             }
         }
-        if (search && !frosted) searchControls()
         CatalogCategoryBar(categories, category, taxonomy, format, { category = it }, { format = it }, trailing = { if (groupSources.any { it.id == "huangdou" }) IconAction("workspace_premium_rounded", if (repo.store.bool("hideVip", true)) "VIP：隐藏" else "VIP：显示") { action { repo.store.set("hideVip", !repo.store.bool("hideVip", true)) } } })
         if (!selection && !frosted) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
     }
     val body: @Composable (Dp) -> Unit = { headerInset -> Column(Modifier.fillMaxSize()) {
-        if (search && frosted) searchControls()
         if (category == "app:recommendations") Text("公开推荐 · 已加载 ${rows.size} 部", Modifier.padding(start = 16.dp, bottom = 12.dp), style = MaterialTheme.typography.bodySmall)
         if (error != null) Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) { Text(error!!, Modifier.weight(1f), color = MaterialTheme.colorScheme.error); TextButton(hapticClick { load(page) }) { Text("重试") } }
         Box(Modifier.weight(1f)) {
@@ -257,11 +256,11 @@ fun DiscoverScreen(compact: Boolean, onSelectionChanged: (Boolean) -> Unit, body
                 val display = ordered.drop(offset) + ordered.take(offset)
                 val refreshState = rememberPullToRefreshState()
                 PullToRefreshBox(
-                    isRefreshing = false,
+                    isRefreshing = refreshing,
                     onRefresh = { if (!loading) { displayOffset = 0; load(1, true) } },
                     state = refreshState,
                     indicator = {
-                        PullToRefreshDefaults.Indicator(refreshState, isRefreshing = false,
+                        PullToRefreshDefaults.Indicator(refreshState, isRefreshing = refreshing,
                             modifier = Modifier.align(Alignment.TopCenter).offset(y = headerInset),
                             containerColor = MaterialTheme.colorScheme.surface, color = MaterialTheme.colorScheme.primary)
                     },
@@ -274,6 +273,124 @@ fun DiscoverScreen(compact: Boolean, onSelectionChanged: (Boolean) -> Unit, body
     Column(Modifier.fillMaxSize()) {
         Box(Modifier.weight(1f)) {
             FrostedCatalog(frosted, overlap, header, bodyModifier, headerVisible, body)
+            if (search) {
+                Column(Modifier.fillMaxSize().then(bodyModifier).background(MaterialTheme.colorScheme.surface)) {
+                    Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        IconAction("arrow_back_rounded", "返回发现页") {
+                            search = false; query = ""; submitted = ""; suggestions = emptyList()
+                        }
+                        OutlinedTextField(searchText, { searchText = it; query = it.text },
+                            Modifier.weight(1f).focusRequester(searchFocus), singleLine = true,
+                            placeholder = { Text("搜索" + if (catalogView.optBoolean("allSources")) "全部站源" else source?.catalogName.orEmpty()) },
+                            trailingIcon = {
+                                if (query.isNotEmpty()) IconAction("close_rounded", "清除输入") {
+                                    query = ""; submitted = ""; suggestions = emptyList()
+                                }
+                            }, shape = RoundedCornerShape(20.dp),
+                            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+                            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { submit(query) }),
+                            textStyle = MaterialTheme.typography.bodyLarge, colors = legacyTextFieldColors())
+                        TextButton(hapticClick { submit(query) }, enabled = query.isNotBlank()) { Text("搜索") }
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f))
+                    when {
+                        query.isBlank() && submitted.isBlank() -> {
+                            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+                                item {
+                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                        Text("搜索历史", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                                        if (recentSearches.isNotEmpty()) TextButton(hapticClick {
+                                            recentSearches = emptyList()
+                                            action { repo.store.set("recentSearches", JSONArray()) }
+                                        }) {
+                                            Glyph("delete_outline_rounded", size = 18)
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("清空全部")
+                                        }
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                    if (recentSearches.isEmpty()) Text("还没有搜索记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    else FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        recentSearches.forEach { value ->
+                                            InputChip(false, hapticClick { submit(value) }, label = { Text(value, maxLines = 1) })
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        query.trim() != submitted -> {
+                            LazyColumn(Modifier.fillMaxSize()) {
+                                item { SettingRow("搜索“" + query.trim() + "”", icon = "search_rounded", onClick = { submit(query) }) }
+                                items(suggestions) { value ->
+                                    SettingRow(value, icon = "search_rounded", onClick = { submit(value) })
+                                }
+                            }
+                        }
+                        else -> {
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text("“" + submitted + "”的搜索结果", Modifier.weight(1f),
+                                    style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            }
+                            if (error != null) Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text(error!!, Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                                TextButton(hapticClick { load(page) }) { Text("重试") }
+                            }
+                            Box(Modifier.weight(1f)) {
+                                if (rows.isEmpty()) {
+                                    if (loading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { LoadingRing() }
+                                    else StatusPanel("没有找到匹配内容", "可以尝试更换关键词", onRetry = { load(1, true) })
+                                } else DramaGrid(rows, more = more && error == null, loading = loading,
+                                    onMore = { load(page + 1) },
+                                    onOpen = { drama -> nav(Route("playback", drama)) },
+                                    onAction = { drama -> chosen = drama }, topPadding = 12)
+                            }
+                        }
+                    }
+                }
+            } else {
+                if (sourceMenu && !selection) {
+                    Box(Modifier.fillMaxSize().padding(top = 44.dp)
+                        .background(Color.Black.copy(alpha = .12f))
+                        .hapticClickable { sourceMenu = false })
+                }
+                Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().offset(y = 44.dp)) {
+                    if (sourceMenu && !selection) {
+                        Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface,
+                            shape = RoundedCornerShape(bottomStart = 22.dp, bottomEnd = 22.dp),
+                            shadowElevation = 10.dp) {
+                            Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 14.dp)) {
+                                Text("选择内容来源", style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Spacer(Modifier.height(8.dp))
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    sources.distinctBy { it.catalogGroup }.forEach { item ->
+                                        FilterChip(
+                                            selected = source?.catalogGroup == item.catalogGroup,
+                                            onClick = hapticClick {
+                                                sourceId = item.id; sourceMenu = false
+                                                catalogView = catalogView.copy().put("allSources", false)
+                                                action {
+                                                    repo.store.set("source", item.id)
+                                                    repo.store.set("catalogView", catalogView)
+                                                }
+                                            },
+                                            label = { Text(item.catalogName, maxLines = 1) },
+                                            leadingIcon = if (source?.catalogGroup == item.catalogGroup) {
+                                                { Glyph("check_rounded", size = 18) }
+                                            } else null,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
         if (selection) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -465,12 +582,13 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
         }
     }
     fun unavailable(drama: Drama) {
+        if (drama.id in sessionUnavailable) return
+        consecutiveUnavailable++
         if (!sessionUnavailable.add(drama.id)) return
         val removed = rows.indexOfFirst { it.id == drama.id }
         if (removed < 0) return
         val selectedPage = pager.settledPage
         val nextPage = selectedPage - if (removed < selectedPage) 1 else 0
-        consecutiveUnavailable++
         rows = rows.filterNot { it.id == drama.id }
         if (rows.isNotEmpty()) pager.requestScrollToPage(nextPage.coerceIn(0, rows.lastIndex))
         repo.recommendations.forget(drama)
@@ -658,7 +776,7 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
             if (drama != null) {
                 var detail by remember(drama.id, generation) { mutableStateOf<Detail?>(null) }
                 var failed by remember(drama.id, generation) { mutableStateOf(false) }
-                val previewBitmap by rememberCoverBitmap(drama)
+                            val previewBitmap by rememberCoverBitmap(drama)
                 val preview: @Composable (Modifier) -> Unit = { modifier ->
                     DramaCover(drama, modifier) { CoverImage(previewBitmap, it, poster = true) }
                 }
@@ -703,7 +821,7 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
                                 if (value != null && rows.getOrNull(pager.settledPage)?.id == drama.id) pageControls = drama.id to value
                                 else if (value == null && pageControls?.first == drama.id) pageControls = null
                             }, onFullScreen = ::setFullscreen,
-                            onUnavailable = { failed = true },
+                            onUnavailable = { _ -> failed = true },
                             onAvailable = {
                                 if (rows.getOrNull(pager.settledPage)?.id == drama.id) {
                                     firstPlayback = true

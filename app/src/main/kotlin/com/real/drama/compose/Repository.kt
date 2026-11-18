@@ -39,10 +39,10 @@ class Repository(val context: Context) {
     private val resolveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private data class Pending(val task: Deferred<JSONObject>, var readers: Int)
     private val pending = mutableMapOf<String, Pending>()
-    private suspend fun resolvedData(drama: Drama, episode: Episode, quality: Int): JSONObject {
-        val key = "${store.epoch}:${source(drama.source)?.digest}:${drama.id}:${episode.id}:$quality"
+    private suspend fun resolvedData(drama: Drama, episode: Episode, quality: Int, force: Boolean = false): JSONObject {
+        val key = "${store.epoch}:${source(drama.source)?.digest}:${drama.id}:${episode.id}:$quality:$force"
         val entry = resolving.withLock {
-            pending.getOrPut(key) { Pending(resolveScope.async { runtime.execute(drama.source, "resolve", obj("drama" to drama.json, "chapter" to episode.json, "index" to episode.number, "quality" to quality)) }, 0) }.also { it.readers++ }
+            pending.getOrPut(key) { Pending(resolveScope.async { runtime.execute(drama.source, "resolve", obj("drama" to drama.json, "chapter" to episode.json, "index" to episode.number, "quality" to quality, "force" to force)) }, 0) }.also { it.readers++ }
         }
         try { return entry.task.await().copy() }
         finally { withContext(NonCancellable) { resolving.withLock { entry.readers--; if (entry.readers == 0) { entry.task.cancel(); if (pending[key] === entry) pending.remove(key) } } } }
@@ -138,7 +138,7 @@ class Repository(val context: Context) {
             val local = NativeBridge.call(obj("action" to "localPlayback", "drama" to drama.json, "index" to episode.number))
             if (local.text("url").isNotBlank()) return local
         }
-        val data = resolvedData(drama, episode, quality)
+        val data = resolvedData(drama, episode, quality, force = online && source(drama.source)?.group == "douyin")
         check(epoch == store.epoch && store.allowed(drama.source))
         var plan: JSONObject? = null
         try {

@@ -1,9 +1,12 @@
 package core
 
 import (
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -17,6 +20,9 @@ const diagnosticLogBytes = 5 * 1024 * 1024
 const diagnosticLogBackups = 2
 
 type diagnosticEvent struct {
+	Code               string    `json:"code,omitempty"`
+	Operation          string    `json:"operation,omitempty"`
+	Stage              string    `json:"stage,omitempty"`
 	HTTPStatus         int       `json:"httpStatus,omitempty"`
 	Client             string    `json:"client,omitempty"`
 	Protocol           string    `json:"protocol,omitempty"`
@@ -41,6 +47,29 @@ type diagnosticEvent struct {
 	Quality            int       `json:"quality,omitempty"`
 	AvailableQualities []int     `json:"availableQualities,omitempty"`
 	Message            string    `json:"message"`
+}
+
+func diagnosticNetworkCode(err error) string {
+	if errors.Is(err, context.Canceled) {
+		return "canceled"
+	}
+	var timeout net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &timeout) && timeout.Timeout() {
+		return "timeout"
+	}
+	var dns *net.DNSError
+	if errors.As(err, &dns) {
+		return "dns"
+	}
+	var certificate *tls.CertificateVerificationError
+	if errors.As(err, &certificate) {
+		return "tls_certificate"
+	}
+	var network *net.OpError
+	if errors.As(err, &network) {
+		return "connection"
+	}
+	return "request_failed"
 }
 
 type diagnosticLog struct {

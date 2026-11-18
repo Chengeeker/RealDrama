@@ -88,10 +88,14 @@ class SourceRuntime(private val context: Context, val subscriptions: Subscriptio
                         error("站源单次请求次数过多")
                     }
                 } catch (error: Exception) {
-                    if (error !is CancellationException) withContext(NonCancellable) { (context.applicationContext as DramaApplication).repository.diagnostics.record("source_error", obj("source" to source, "operation" to action, "code" to ((error as? NativeFailure)?.code ?: "source_error"), "exceptionType" to error.javaClass.simpleName)) }
                     if (error is TimeoutCancellationException) {
                         currentCoroutineContext().ensureActive()
+                        withContext(NonCancellable) { (context.applicationContext as DramaApplication).repository.diagnostics.record("source_error", obj("source" to source, "operation" to action, "code" to "source_timeout")) }
                         throw NativeFailure("source_timeout", "站源请求超时")
+                    }
+                    if (error !is CancellationException) withContext(NonCancellable) {
+                        val fields = (error as? NativeFailure)?.diagnosticFields() ?: obj("code" to "source_error", "exceptionType" to error.javaClass.simpleName)
+                        (context.applicationContext as DramaApplication).repository.diagnostics.record("source_error", fields.put("source", source).put("operation", action))
                     }
                     throw error
                 } finally {

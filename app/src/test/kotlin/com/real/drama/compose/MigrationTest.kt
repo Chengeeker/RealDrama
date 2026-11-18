@@ -6,6 +6,14 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MigrationTest {
+    @Test fun nativeFailurePreservesOnlySafeDiagnostics() {
+        val fields = NativeFailure("source_http", "private message", obj("httpStatus" to 403, "exceptionType" to "TypeError", "scriptLine" to 25, "url" to "https://private.test/?token=secret")).diagnosticFields()
+        assertEquals(403, fields.getInt("httpStatus"))
+        assertEquals("TypeError", fields.getString("exceptionType"))
+        assertEquals(25, fields.getInt("scriptLine"))
+        assertFalse(fields.toString().contains("private"))
+        assertFalse(NativeFailure("core_error", "private message").diagnosticFields().has("httpStatus"))
+    }
     @Test fun subscriptionControlsFeedSeekingAndDanmakuWindow() {
         fun source(id: String = "sample", kind: String = "drama", feedSeek: Boolean = false, window: Int? = null): SourcePackage {
             val capabilities = JSONArray().apply { if (feedSeek) put("feedSeek") }

@@ -83,6 +83,9 @@ func newNativeCoverCache(directory string, downloader *Downloader) *nativeCoverC
 }
 
 func nativeCoverReferer(downloader *Downloader, source, address string) string {
+	if source == "tiktok" {
+		return "https://www.tikwm.com/"
+	}
 	if source == sourceBilibili {
 		return "https://www.bilibili.com/"
 	}
@@ -160,9 +163,10 @@ func (cache *nativeCoverCache) fetch(key string, drama nativeDrama, referer, fal
 	}
 	var data []byte
 	var err error
+	var status int
 	select {
 	case cache.slots <- struct{}{}:
-		data, err = cache.download(ctx, drama.Cover, referer)
+		data, status, err = cache.download(ctx, drama.Cover, referer)
 		<-cache.slots
 	case <-ctx.Done():
 		err = ctx.Err()
@@ -190,14 +194,19 @@ func (cache *nativeCoverCache) fetch(key string, drama nativeDrama, referer, fal
 	delete(cache.pending, key)
 	close(call.done)
 	if err != nil {
-		cache.downloader.recordDiagnostic(diagnosticEvent{Event: "cover_failed", Source: drama.Source, DramaID: drama.ID, Message: err.Error()})
+		address, _ := url.Parse(drama.Cover)
+		host := ""
+		if address != nil {
+			host = address.Hostname()
+		}
+		cache.downloader.recordDiagnostic(diagnosticEvent{Event: "cover_failed", Source: drama.Source, DramaID: drama.ID, Host: host, HTTPStatus: status, Code: diagnosticNetworkCode(err), Message: err.Error()})
 	}
 }
 
-func (cache *nativeCoverCache) download(ctx context.Context, address, referer string) ([]byte, error) {
+func (cache *nativeCoverCache) download(ctx context.Context, address, referer string) ([]byte, int, error) {
 	request, err := http.NewRequestWithContext(context.WithValue(ctx, nativeCoverNetworkKey{}, true), http.MethodGet, address, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	request.Header.Set("User-Agent", userAgent)
 	request.Header.Set("Referer", referer)
@@ -219,27 +228,27 @@ func (cache *nativeCoverCache) download(ctx context.Context, address, referer st
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("海报请求失败：HTTP %d", response.StatusCode)
+		return nil, response.StatusCode, fmt.Errorf("海报请求失败：HTTP %d", response.StatusCode)
 	}
 	if response.ContentLength > nativeCoverMaxBytes {
-		return nil, errors.New("海报文件过大")
+		return nil, response.StatusCode, errors.New("海报文件过大")
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, nativeCoverMaxBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, response.StatusCode, err
 	}
 	if len(data) > nativeCoverMaxBytes {
-		return nil, errors.New("海报文件过大")
+		return nil, response.StatusCode, errors.New("海报文件过大")
 	}
 	data = nativeDecodeCover(data)
 	if !nativeIsCoverImage(data) {
-		return nil, errors.New("站源未返回有效海报")
+		return nil, response.StatusCode, errors.New("站源未返回有效海报")
 	}
-	return data, nil
+	return data, response.StatusCode, nil
 }
 
 func nativeDecodeCover(data []byte) []byte {

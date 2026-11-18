@@ -144,8 +144,11 @@ public class FlutterSecureStorageConfig {
 
     private boolean getBooleanOption(Map<String, Object> options, String key, boolean defaultValue) {
         Object value = options.get(key);
-        if (value instanceof String) {
-            return Boolean.parseBoolean((String) value);
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue;
+        }
+        if (value instanceof String stringValue) {
+            return Boolean.parseBoolean(stringValue);
         }
 
         return defaultValue;

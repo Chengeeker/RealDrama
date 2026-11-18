@@ -140,6 +140,7 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return errors.New("订阅请求不允许重定向") }
 	response, err := client.Do(request)
 	if err != nil {
+		engine.downloader.recordDiagnostic(diagnosticEvent{Event: "subscription_network", Source: command.Source, Operation: command.Operation, Host: address.Hostname(), Stage: "connect", Code: diagnosticNetworkCode(err)})
 		return nil, errors.New("站源连接失败或已取消")
 	}
 	defer response.Body.Close()
@@ -154,7 +155,7 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 		case "catalog", "categories", "search", "detail", "resolve", "live", "creator", "comments", "danmaku":
 			operation = command.Operation
 		}
-		engine.downloader.recordDiagnostic(diagnosticEvent{Event: "subscription_http", Source: source, Host: address.Hostname(), HTTPStatus: response.StatusCode, Message: "站源接口请求被拒绝，操作：" + operation})
+		engine.downloader.recordDiagnostic(diagnosticEvent{Event: "subscription_http", Source: source, Operation: operation, Host: address.Hostname(), HTTPStatus: response.StatusCode, ResponseType: response.Header.Get("Content-Type"), Message: "站源接口请求被拒绝，操作：" + operation})
 	}
 	limit := int64(8 << 20)
 	if command.Binary {
@@ -162,6 +163,11 @@ func (engine *nativeEngine) subscriptionHTTP(ctx context.Context, raw json.RawMe
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil || int64(len(body)) > limit {
+		code := "response_size"
+		if err != nil {
+			code = diagnosticNetworkCode(err)
+		}
+		engine.downloader.recordDiagnostic(diagnosticEvent{Event: "subscription_network", Source: command.Source, Operation: command.Operation, Host: address.Hostname(), Stage: "read", HTTPStatus: response.StatusCode, Code: code})
 		return nil, errors.New("站源响应过大或超时")
 	}
 	cookies := []string{}

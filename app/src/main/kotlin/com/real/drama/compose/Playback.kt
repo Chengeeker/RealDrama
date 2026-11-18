@@ -100,12 +100,12 @@ fun LegacySlider(
     modifier: Modifier = Modifier, buffered: Float = 0f, feed: Boolean = false, trackOffsetY: Dp = 0.dp,
 ) {
     val range = maximum.coerceAtLeast(1f)
-    val thumbSize = if (feed) 10.dp else 12.dp
+    val thumbSize = 10.dp
     Slider(value.coerceIn(0f, range), change, modifier, enabled = maximum > 0, onValueChangeFinished = finish, valueRange = 0f..range,
         thumb = { Spacer(Modifier.size(thumbSize)) },
         track = { slider -> Canvas(Modifier.fillMaxWidth().height(thumbSize)) {
             val y = size.height / 2 + trackOffsetY.toPx()
-            val stroke = (if (feed) 2.dp else 3.dp).toPx()
+            val stroke = 2.dp.toPx()
             val thumb = androidx.compose.ui.geometry.Offset(size.width * slider.value / range, y)
             drawLine(Color.White.copy(alpha = if (feed) .38f else .25f), androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = stroke)
             drawLine(Color.White.copy(alpha = .38f), androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width * (buffered / range).coerceIn(0f, 1f), y), strokeWidth = stroke)
@@ -116,21 +116,25 @@ fun LegacySlider(
 
 @Composable
 internal fun PlaybackTool(
-    label: String, width: Int = 36, enabled: Boolean = true, onClick: () -> Unit, content: @Composable () -> Unit,
+    label: String, width: Int = 36, enabled: Boolean = true, onClick: () -> Unit, compact: Boolean = false,
+    content: @Composable () -> Unit,
 ) {
-    val shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp)
+    val height = if (compact) 30 else 36
+    val shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
     Box(
-        Modifier.size((if (width < 40) 48 else width + 8).dp, 48.dp)
+        Modifier.size(maxOf(48, width + 8).dp, 48.dp)
             .semantics { contentDescription = label }.hapticClickable(enabled = enabled, role = androidx.compose.ui.semantics.Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            Modifier.size(width.dp, 36.dp).background(Color.Black.copy(alpha = .22f), shape)
+            Modifier.size(width.dp, height.dp).background(Color.Black.copy(alpha = if (compact) .38f else .22f), shape)
                 .border(1.dp, Color.White.copy(alpha = .08f), shape),
             contentAlignment = Alignment.Center,
         ) {
             CompositionLocalProvider(LocalContentColor provides Color.White.copy(alpha = if (enabled) .92f else .36f)) {
-                ProvideTextStyle(TextStyle(fontSize = 13.5.sp, lineHeight = 13.5.sp, fontWeight = appTextWeight(FontWeight.Bold)), content)
+                val fontSize = if (compact) 12.sp else 13.5.sp
+                ProvideTextStyle(TextStyle(fontSize = fontSize, lineHeight = fontSize,
+                    fontWeight = appTextWeight(if (compact) FontWeight.Medium else FontWeight.Bold)), content)
             }
         }
     }
@@ -362,7 +366,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
     warmFeed: Boolean = false, onMediaOpened: () -> Unit = {},
     commentsProgress: State<Float>? = null, commentsVideoHeight: Dp = 0.dp,
     onVideoAspectRatio: (Double) -> Unit = {},
-    onControls: (PlayerActions?) -> Unit = {}, onClean: (Boolean) -> Unit = {}, onBoost: (Boolean) -> Unit = {}, onFullScreen: (Boolean) -> Unit = {}, onComments: () -> Unit = {}, onCreator: () -> Unit = {}, onNext: () -> Unit = {}, onBack: () -> Unit = {}, onUnavailable: () -> Unit = {}, onAvailable: () -> Unit = {}) {
+    onControls: (PlayerActions?) -> Unit = {}, onClean: (Boolean) -> Unit = {}, onBoost: (Boolean) -> Unit = {}, onFullScreen: (Boolean) -> Unit = {}, onComments: () -> Unit = {}, onCreator: () -> Unit = {}, onNext: () -> Unit = {}, onBack: () -> Unit = {}, onUnavailable: (String) -> Unit = {}, onAvailable: () -> Unit = {}) {
     val repo = LocalRepository.current; val action = rememberAction(); val context = LocalContext.current; val nav = LocalNavigate.current
     val rawPreferences = repo.store.text("playback", "{}")
     val preferences = remember(rawPreferences) { JSONObject(rawPreferences) }
@@ -456,7 +460,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
     val shouldPlay = active && foreground && audioAllowed && !pausedByUser
     val showBuffering = shouldPlay && state.buffering
     val feedWaiting = feed && active && foreground && failure == null && (loading || shouldPlay && !state.completed && state.error == null &&
-        (showBuffering || !videoFrameReady && state.width == 0.0))
+        (showBuffering || !videoFrameReady))
     var feedLoadingVisible by remember { mutableStateOf(false) }
     var feedLoadingTimedOut by remember(plan, reload) { mutableStateOf(false) }
     LaunchedEffect(feedWaiting) {
@@ -467,11 +471,14 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             feedLoadingVisible = false
         }
     }
-    LaunchedEffect(feedWaiting, plan, reload, state.position) {
+    LaunchedEffect(feedWaiting, plan, reload, loading) {
         feedLoadingTimedOut = false
-        if (feedWaiting) {
+        if (feedWaiting && !loading && plan != null) {
             delay(12000)
-            feedLoadingTimedOut = true
+            if (feedWaiting && !loading) {
+                feedLoadingTimedOut = true
+                failure = "本条视频准备超时，可重试或刷新播放地址"
+            }
         }
     }
     val playbackFailure = failure ?: if (feedLoadingTimedOut) "本条视频加载超时" else null
@@ -493,6 +500,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         } else setPaused(!pausedByUser && (audioAllowed || currentState.playing))
     }
     DisposableEffect(active, foreground, player) {
+        if (!active || !foreground) return@DisposableEffect onDispose {}
         val manager = context.getSystemService(android.media.AudioManager::class.java)
         val focus = android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_MOVIE).build())
@@ -503,12 +511,14 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         val receiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(c: android.content.Context?, intent: android.content.Intent?) { pausedByUser = true; scope.launch { player.play(false) } }
         }
-        if (active && foreground) {
-            requestFocus = { manager.requestAudioFocus(focus) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED }
-            audioAllowed = manager.requestAudioFocus(focus) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-            androidx.core.content.ContextCompat.registerReceiver(context, receiver, android.content.IntentFilter(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        requestFocus = { manager.requestAudioFocus(focus) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED }
+        audioAllowed = manager.requestAudioFocus(focus) == android.media.AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        androidx.core.content.ContextCompat.registerReceiver(context, receiver, android.content.IntentFilter(android.media.AudioManager.ACTION_AUDIO_BECOMING_NOISY), androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose {
+            requestFocus = null
+            manager.abandonAudioFocusRequest(focus)
+            context.unregisterReceiver(receiver)
         }
-        onDispose { if (active && foreground) { requestFocus = null; manager.abandonAudioFocusRequest(focus); context.unregisterReceiver(receiver) } }
     }
     val view = LocalView.current
     val touchFeedback = rememberTouchFeedback()
@@ -530,13 +540,17 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
     }
     val aspectRatio = if (state.width > 0 && state.height > 0) state.width / state.height else 0.0
     LaunchedEffect(feed, active, aspectRatio) { if (feed && active && aspectRatio.isFinite()) onVideoAspectRatio(aspectRatio) }
-    DisposableEffect(full, active, orientation, feed) {
+    DisposableEffect(full, active, feed) {
         val activity = context as? android.app.Activity
         val original = activity?.requestedOrientation
-        if (!feed && full && active && activity != null) activity.requestedOrientation = orientation
         onDispose {
             if (!feed && full && active && activity != null && original != null) activity.requestedOrientation = original
         }
+    }
+    LaunchedEffect(full, active, orientation, feed) {
+        val activity = context as? android.app.Activity
+        if (!feed && full && active && activity != null && orientation != android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED &&
+            activity.requestedOrientation != orientation) activity.requestedOrientation = orientation
     }
     ImmersiveBars(full && active && !feed)
     DisposableEffect(player, episode, active) {
@@ -629,19 +643,19 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             if (index + 1 < detail.episodes.size) index++ else if (feed) onNext()
         }
     }
-    LaunchedEffect(feed, active, openedEpisode, loading, failure) {
-        if (feed && active && openedEpisode != null && !loading && failure == null) onMediaOpened()
+    LaunchedEffect(feed, active, openedEpisode, loading, failure, videoFrameReady) {
+        if (feed && active && videoFrameReady && openedEpisode != null && !loading && failure == null) onMediaOpened()
     }
     LaunchedEffect(failure, active) {
         if (feed && active && failure != null) {
             if (failedWhileWarming) {
                 failure = null
                 reload++
-            } else onUnavailable()
+            } else onUnavailable(failure.orEmpty())
         }
     }
-    LaunchedEffect(active, state.playing, state.buffering, aspectRatio > 0) {
-        if (feed && active && !state.buffering && (state.playing || aspectRatio > 0)) onAvailable()
+    LaunchedEffect(active, videoFrameReady, state.error) {
+        if (feed && active && videoFrameReady && state.error == null) onAvailable()
     }
     LaunchedEffect(state.error, !feed || active) {
         if ((!feed || active) && state.error != null && plan != null) {
@@ -688,13 +702,22 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         val videoTop = if (aspectRatio > 0.0 && aspectRatio.isFinite()) {
             ((maxHeight - maxWidth / aspectRatio.toFloat()) / 2).coerceAtLeast(0.dp)
         } else 0.dp
+        val landscapeFull = full && maxWidth > maxHeight
+        val landscapeVideo = aspectRatio.isFinite() && aspectRatio > 1.0
+        val videoSide = if (landscapeFull && aspectRatio > 0.0 && aspectRatio.isFinite()) {
+            ((maxWidth - maxHeight * aspectRatio.toFloat()) / 2).coerceIn(0.dp, ((maxWidth - 360.dp) / 2).coerceAtLeast(0.dp))
+        } else 0.dp
+        val detailSides = WindowInsets.displayCutout.union(WindowInsets.navigationBars)
+            .union(WindowInsets(left = videoSide, right = videoSide)).only(WindowInsetsSides.Horizontal)
         val detailToolbar = Modifier.align(Alignment.TopCenter).fillMaxWidth().then(
             if (!feed && full && !television) {
-                val insets = WindowInsets.displayCutout.union(WindowInsets.statusBarsIgnoringVisibility)
-                    .only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+                val topInsets = if (landscapeFull || landscapeVideo) WindowInsets.displayCutout
+                    else WindowInsets.displayCutout.union(WindowInsets.statusBarsIgnoringVisibility)
+                val insets = detailSides.union(topInsets.only(WindowInsetsSides.Top))
                 Modifier.windowInsetsPadding(insets).layout { measurable, constraints ->
                     val bar = measurable.measure(constraints)
-                    val top = maxOf(2.dp.roundToPx(), videoTop.roundToPx() - insets.getTop(this) - bar.height - 16.dp.roundToPx())
+                    val targetVideoTop = if (landscapeFull || landscapeVideo) 0.dp else videoTop
+                    val top = maxOf(2.dp.roundToPx(), targetVideoTop.roundToPx() - insets.getTop(this) - bar.height - 16.dp.roundToPx())
                         .coerceAtMost((constraints.maxHeight - bar.height).coerceAtLeast(0))
                     layout(bar.width, bar.height + top) { bar.placeRelative(0, top) }
                 }
@@ -792,17 +815,23 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                 if (!full || !loading && failure == null) Row(detailToolbar, verticalAlignment = Alignment.CenterVertically) {
                     val exitLabel = if (full) "退出全屏" else "返回"
                     IconButton(hapticClick { if (full) toggleFullscreen() else onBack() }, Modifier.size(48.dp)) {
-                        Glyph(if (full) "arrow_back_rounded" else "arrow_back_ios_new_rounded", exitLabel)
+                        Glyph("arrow_back_rounded", exitLabel, size = 20)
                     }
                     Text(playbackTitle, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    IconAction("settings_rounded", "播放设置") { menu = "settings" }
+                    IconButton(hapticClick { menu = "settings" }) { Glyph("settings_rounded", "播放设置", size = 20) }
                 }
-                if (maxHeight >= 168.dp && enabled && !showBuffering && dragging == null) Row(Modifier.align(androidx.compose.ui.BiasAlignment(0f, -.15f)), verticalAlignment = Alignment.CenterVertically) {
-                    if (episodic) IconAction("skip_previous_rounded", "上一集", index > 0) { index-- }
-                    Spacer(Modifier.width(12.dp))
-                    FilledIconButton(hapticClick { togglePlayback() }, modifier = Modifier.size(54.dp), colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White.copy(alpha = .18f), contentColor = Color.White)) { Glyph(if (state.completed) "replay_rounded" else if (shouldPlay) "pause_rounded" else "play_arrow_rounded", if (state.completed) "重新播放" else if (shouldPlay) "暂停播放" else "开始播放", size = 38) }
-                    Spacer(Modifier.width(12.dp))
-                    if (episodic) IconAction("skip_next_rounded", "下一集", index + 1 < detail.episodes.size) { index++ }
+                val transportAlignment = if (landscapeFull) Alignment.Center else androidx.compose.ui.BiasAlignment(0f, -.15f)
+                if (maxHeight >= 168.dp && enabled && !showBuffering && dragging == null) Row(
+                    Modifier.align(transportAlignment), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (episodic) IconButton(hapticClick { index-- }, enabled = index > 0) { Glyph("skip_previous_rounded", "上一集", size = 22) }
+                    val playIcon = if (state.completed) "replay_rounded" else if (shouldPlay) "pause_rounded" else "play_arrow_rounded"
+                    val playLabel = if (state.completed) "重新播放" else if (shouldPlay) "暂停播放" else "开始播放"
+                    FilledIconButton(hapticClick { togglePlayback() }, modifier = Modifier.size(if (full) 52.dp else 48.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = Color.White.copy(alpha = .18f), contentColor = Color.White)) {
+                        Glyph(playIcon, playLabel, size = 30)
+                    }
+                    if (episodic) IconButton(hapticClick { index++ }, enabled = index + 1 < detail.episodes.size) { Glyph("skip_next_rounded", "下一集", size = 22) }
                 }
             }
             val position = dragging ?: state.position.toFloat().coerceIn(0f, state.duration.toFloat().coerceAtLeast(1f))
@@ -861,25 +890,37 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                     }
                 }
             } else {
-                val controlsWidth = maxWidth - 24.dp
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().then(if (full) Modifier.navigationBarsPadding() else Modifier).padding(horizontal = 12.dp)) {
-                    LegacySlider(
-                        position, seek, finishSeek, state.duration.toFloat(), Modifier.fillMaxWidth().height(24.dp),
-                        buffered = state.buffered.toFloat(), trackOffsetY = if (full) 0.dp else 4.dp,
-                    )
-                    Row(Modifier.horizontalScroll(rememberScrollState()).widthIn(min = controlsWidth), verticalAlignment = Alignment.CenterVertically) {
-                        Text("${formatPosition(position.toDouble())} / ${formatPosition(state.duration)}", Modifier.widthIn(min = 96.dp).padding(end = 8.dp), fontSize = 12.sp, maxLines = 1, color = Color.White.copy(alpha = .82f), style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
-                        Spacer(Modifier.weight(1f))
-                        if (full && !localOnly && plan?.optBoolean("local") != true && source?.capabilities?.contains("danmaku") == true) {
-                            PlaybackTool(if (danmaku) "关闭弹幕" else "开启弹幕", 42, onClick = { repo.danmaku.value = !danmaku }) { Text(if (danmaku) "弹" else "弹×") }
-                        }
-                        PlaybackTool("倍速", 50, enabled, { menu = "speed" }) { Text("${speed}x") }
-                        if (plan?.optBoolean("local") == false && plan?.array("qualities")?.length()?.let { it > 0 } == true) PlaybackTool("清晰度", 52, enabled, { menu = "quality" }) {
-                            Text(if (plan?.optBoolean("local") == true) "本地原画" else if (quality == 0) "自动" else "${quality}P", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
-                        if (full && episodic) PlaybackTool("选集", enabled = enabled, onClick = { menu = "episodes" }) { Glyph("grid_view_rounded", size = 22) }
-                        PlaybackTool(if (full) "退出全屏" else "全屏", enabled = enabled, onClick = toggleFullscreen) {
-                            Glyph(if (full) "fullscreen_exit_rounded" else "fullscreen_rounded", size = 22)
+                BoxWithConstraints(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                    .then(if (full) Modifier.windowInsetsPadding(detailSides.union(
+                        WindowInsets.navigationBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Bottom),
+                    )) else Modifier).padding(horizontal = 12.dp)) {
+                    val controlsWidth = maxWidth
+                    Column {
+                        LegacySlider(
+                            position, seek, finishSeek, state.duration.toFloat(), Modifier.fillMaxWidth().height(24.dp),
+                            buffered = state.buffered.toFloat(), trackOffsetY = 4.dp,
+                        )
+                        Row(Modifier.horizontalScroll(rememberScrollState()).widthIn(min = controlsWidth), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${formatPosition(position.toDouble())} / ${formatPosition(state.duration)}",
+                                Modifier.widthIn(min = 96.dp).padding(end = 8.dp), fontSize = 12.sp, maxLines = 1,
+                                color = Color.White.copy(alpha = .82f), style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
+                            Spacer(Modifier.weight(1f))
+                            if (full && !localOnly && plan?.optBoolean("local") != true && source?.capabilities?.contains("danmaku") == true) {
+                                PlaybackTool(if (danmaku) "关闭弹幕" else "开启弹幕", 38,
+                                    onClick = { repo.danmaku.value = !danmaku }, compact = true) { Text(if (danmaku) "弹" else "弹×") }
+                            }
+                            PlaybackTool("倍速", 44, enabled, { menu = "speed" }, compact = true) { Text("${speed}x", maxLines = 1) }
+                            if (plan?.optBoolean("local") == false && plan?.array("qualities")?.length()?.let { it > 0 } == true) {
+                                PlaybackTool("清晰度", 48, enabled, { menu = "quality" }, compact = true) {
+                                    Text(if (quality == 0) "自动" else "${quality}P", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                            }
+                            if (full && episodic) PlaybackTool("选集", 30, enabled, { menu = "episodes" }, compact = true) {
+                                Glyph("grid_view_rounded", size = 20)
+                            }
+                            PlaybackTool(if (full) "退出全屏" else "全屏", 30, enabled, toggleFullscreen, compact = true) {
+                                Glyph(if (full) "fullscreen_exit_rounded" else "fullscreen_rounded", size = 20)
+                            }
                         }
                     }
                 }
@@ -889,10 +930,10 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .78f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(horizontal = 20.dp, vertical = 12.dp),
             color = Color.White, style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"))
         if (!feed && full && !television && (locked && lockVisible || !locked && controlsVisible)) {
-            Box(Modifier.align(Alignment.CenterStart).padding(12.dp)) {
-                PlaybackTool(if (locked) "解锁控制" else "锁定控制", onClick = {
+            Box(Modifier.align(Alignment.CenterStart).windowInsetsPadding(detailSides.only(WindowInsetsSides.Start)).padding(start = 8.dp)) {
+                PlaybackTool(if (locked) "解锁控制" else "锁定控制", 30, onClick = {
                     locked = !locked; lockVisible = true; interaction++; setClean(locked)
-                }) { Glyph(if (locked) "lock_rounded" else "lock_open_rounded", size = 22) }
+                }, compact = true) { Glyph(if (locked) "lock_rounded" else "lock_open_rounded", size = 20) }
             }
         }
         val portraitBoost = boost && full && state.width > 0 && state.width < state.height

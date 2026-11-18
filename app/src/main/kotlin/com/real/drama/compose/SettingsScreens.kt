@@ -310,18 +310,39 @@ fun SourcesScreen(back: () -> Unit) {
     val installed by repo.subscriptions.installed.collectAsState()
     val statuses by repo.maintenance.states.collectAsState(); val storageErrors by repo.storageErrors.collectAsState()
     var expanded by remember { mutableStateOf(false) }
+    var cookieExpanded by remember { mutableStateOf(true) }
     var pendingEnable by remember { mutableStateOf<Pair<Set<String>, String?>?>(null) }
     val active = LocalScreenActive.current
-    LaunchedEffect(active) { if (active) pendingEnable?.let { (ids, family) -> pendingEnable = null; if (repo.secrets.read("cookie.douyin.${repo.store.active}").isNotEmpty()) repo.store.enableSources(ids, true, family) } }
     val authorized = repo.subscriptions.sources
+    // Credential groups come only from subscriptions that explicitly allow credentials.
+    val credentialGroups = authorized.filter { it.credentials.isNotEmpty() || it.id == "hanime" }.groupBy { it.group }
+    var configuredCookies by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
+    LaunchedEffect(active, installed, repo.store.active) {
+        if (active) {
+            configuredCookies = credentialGroups.keys.associateWith {
+                repo.secrets.read("cookie.$it.${repo.store.active}").isNotEmpty()
+            }
+            pendingEnable?.let { (ids, family) ->
+                pendingEnable = null
+                val required = authorized.filter { it.id in ids && it.document.optBoolean("credentialRequired") }.map { it.group }.distinct()
+                if (required.all { configuredCookies[it] == true }) repo.store.enableSources(ids, true, family)
+            }
+        }
+    }
     val managementGroups = authorized.groupBy { source ->
         if (source.group in setOf("douyin", "bilibili")) "${source.group}${if (source.id.endsWith("-test")) "-test" else ""}-family"
         else source.catalogGroup
     }
 
     fun enable(sources: List<SourcePackage>, visible: Boolean, family: String? = null) = action {
-        if (visible && sources.any { it.group == "douyin" } && repo.secrets.read("cookie.douyin.${repo.store.active}").isEmpty()) { pendingEnable = sources.map { it.id }.toSet() to family; nav(Route("sourceSettings", source = sources.first().id)) }
-        else repo.store.enableSources(sources.map { it.id }.toSet(), visible, family)
+        val needed = if (visible) sources.firstOrNull {
+            it.document.optBoolean("credentialRequired") &&
+                repo.secrets.read("cookie.${it.group}.${repo.store.active}").isEmpty()
+        } else null
+        if (needed != null) {
+            pendingEnable = sources.map { it.id }.toSet() to family
+            nav(Route("sourceSettings", source = needed.id))
+        } else repo.store.enableSources(sources.map { it.id }.toSet(), visible, family)
     }
     LaunchedEffect(installed, repo.store.epoch) { repo.available().forEach { repo.maintenance.refresh(it.id) } }
     fun familyName(id: String, members: List<SourcePackage>) = when {
@@ -343,6 +364,49 @@ fun SourcesScreen(back: () -> Unit) {
                         Text("在这里启用站源、刷新内容目录或检测连接与播放。刷新目录会查找新内容，不更新站源程序；程序更新请前往“订阅与更新”。", Modifier.padding(16.dp))
                     }
                     Spacer(Modifier.height(16.dp))
+                    SourceSection(
+                        "账号与 Cookie 管理",
+                        "已安装 ${credentialGroups.size} 组支持 Cookie 的站源 · 点击填写或更新",
+                        "manage_accounts_outlined",
+                        cookieExpanded,
+                        { cookieExpanded = !cookieExpanded },
+                    ) {
+                        if (credentialGroups.isEmpty()) {
+                            Text("当前安装的订阅源均未声明 Cookie 权限。", Modifier.padding(16.dp))
+                        }
+                        credentialGroups.forEach { (group, sources) ->
+                            val representative = sources.first()
+                            val label = when (group) {
+                                "douyin" -> "抖音 · 短视频、直播、短剧"
+                                "bilibili" -> "Bilibili"
+                                else -> representative.name
+                            }
+                            val required = sources.any { it.document.optBoolean("credentialRequired") }
+                            val status = when (configuredCookies[group]) {
+                                true -> "已保存 Cookie"
+                                false -> "尚未配置 Cookie"
+                                null -> "可填写 Cookie"
+                            }
+                            SettingRow(
+                                label,
+                                "$status · ${if (required) "启用前必填" else "可选登录"} · 同组站源共用",
+                                "manage_accounts_outlined",
+                                onClick = { nav(Route("sourceSettings", source = representative.id)) },
+                                trailing = {
+                                    TextButton(hapticClick { nav(Route("sourceSettings", source = representative.id)) }) {
+                                        Text("填写 / 更新")
+                                    }
+                                },
+                            )
+                        }
+                    }
+                    Text(
+                        "仅已声明 Cookie 权限的订阅源会显示在上方；其它订阅源不能读取登录 Cookie，以保护账号安全。",
+                        Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Spacer(Modifier.height(12.dp))
                     SourceSection("启用站源", "已启用 ${groups.count { (_, members) -> members.any { repo.store.allowed(it.id) } }}/${groups.size} 组 · 展开调整开关",
                         "visibility_outlined", expanded, { expanded = !expanded }) {
                         groups.forEach { (family, members) ->
@@ -468,8 +532,12 @@ private fun SourceMaintenanceCard(
             Spacer(Modifier.height(12.dp))
             val buttonPadding = PaddingValues(start = 16.dp, end = 24.dp)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (source.id == "hanime") LegacyOutlinedButton({ nav(Route("sourceSettings", source = source.id)) }, enabled = enabled, contentPadding = buttonPadding) {
-                    Glyph("manage_accounts_outlined", size = 18); Spacer(Modifier.width(8.dp)); Text("Cookie 设置")
+                if (source.credentials.isNotEmpty() || source.id == "hanime") LegacyOutlinedButton(
+                    { nav(Route("sourceSettings", source = source.id)) },
+                    enabled = enabled,
+                    contentPadding = buttonPadding,
+                ) {
+                    Glyph("manage_accounts_outlined", size = 18); Spacer(Modifier.width(8.dp)); Text("填写 / 更新 Cookie")
                 }
                 FilledTonalButton(hapticClick { start("update") }, enabled = enabled, contentPadding = buttonPadding) {
                     Glyph("refresh_rounded", size = 18); Spacer(Modifier.width(8.dp)); Text("刷新目录")

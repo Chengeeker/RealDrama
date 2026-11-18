@@ -41,7 +41,18 @@ fun AccountSettings(sourceId: String, back: () -> Unit) {
     var busy by remember { mutableStateOf(true) }; var message by remember { mutableStateOf("") }
     val content = remember(source.group) { JSONObject(context.assets.open("account_ui.json").bufferedReader().use { it.readText() }).optJSONObject(source.group) ?: JSONObject() }
     fun valid() = epoch == repo.store.epoch && profile == repo.store.active && !repo.store.locked.value
-    LaunchedEffect(key) { try { cookie = repo.secrets.read(key); message = if (cookie.isNotEmpty()) "已保存 Cookie，可查看、复制或替换" else "尚未配置 Cookie" } catch (_: Exception) { message = "无法读取安全存储" } finally { busy = false } }
+    LaunchedEffect(key) {
+        try {
+            cookie = repo.secrets.read(key)
+            message = when {
+                repo.secrets.needsCredentialReentry(key) -> "旧版本加密凭据无法读取，原数据已保留。请重新粘贴 Cookie 并保存，然后返回启用站源。"
+                cookie.isNotEmpty() -> "已保存 Cookie，可查看、复制或替换"
+                else -> "尚未配置 Cookie"
+            }
+        } catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) { message = "无法读取安全存储，请检查设备密钥状态" }
+        finally { busy = false }
+    }
     fun run(operation: String) { if (!valid() || busy) return; scope.launch {
         busy = true; message = ""
         try {
@@ -67,10 +78,13 @@ fun AccountSettings(sourceId: String, back: () -> Unit) {
             }
         } catch (cancel: CancellationException) { throw cancel } catch (error: Exception) { if (valid()) message = error.message ?: "操作失败，请检查网络或设备安全存储" } finally { busy = false }
     } }
-    Page(content.text("title", source.name), back) { padding -> SettingsColumn(padding) {
+    val defaultInstructions = "在该站源的登录网页中复制请求头中的完整 Cookie，粘贴至下方并保存。" +
+        " 此 Cookie 只会在站源脚本明确请求身份凭据时，发送至订阅声明的域名：" +
+        source.credentials.joinToString("、") + "。"
+    Page(content.text("title", "${source.name} Cookie 设置"), back) { padding -> SettingsColumn(padding) {
         Surface(color = MaterialTheme.colorScheme.settingsCardColor(), shape = RoundedCornerShape(20.dp)) { Column(Modifier.padding(16.dp)) {
-            Text(if (source.group == "bilibili") "可选 Cookie 登录" else "Cookie 登录", style = MaterialTheme.typography.titleMedium, fontWeight = appTextWeight(FontWeight.SemiBold))
-            Spacer(Modifier.height(12.dp)); Text(content.text("instructions"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if (source.document.optBoolean("credentialRequired")) "需要 Cookie 登录" else "Cookie 登录（可选）", style = MaterialTheme.typography.titleMedium, fontWeight = appTextWeight(FontWeight.SemiBold))
+            Spacer(Modifier.height(12.dp)); Text(content.text("instructions", defaultInstructions), color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(16.dp))
             TextField(cookie, { cookie = it }, Modifier.fillMaxWidth(), enabled = !busy, singleLine = true, visualTransformation = if (obscured) PasswordVisualTransformation() else VisualTransformation.None,
                 label = { Text("粘贴请求头 Cookie 的完整值") }, supportingText = { Text("字段名=字段值；多项用英文分号分隔。不要手动解码或修改字段值。") }, trailingIcon = { IconAction(if (obscured) "visibility_outlined" else "visibility_off_outlined", if (obscured) "显示 Cookie" else "隐藏 Cookie") { obscured = !obscured } })

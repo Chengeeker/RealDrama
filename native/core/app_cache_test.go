@@ -37,6 +37,36 @@ func syntheticNativeCover(t *testing.T) ([]byte, []byte) {
 	return plain, encrypted
 }
 
+func TestTikTokCoverRefererAndFailureStatus(t *testing.T) {
+	plain, _ := syntheticNativeCover(t)
+	status := http.StatusOK
+	engine := sourceFixtureEngine(t, func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("Referer") != "https://www.tikwm.com/" {
+			t.Error("TikTok cover inherited an unrelated source referer")
+		}
+		return sourceFixtureResponse(request, status, string(plain)), nil
+	})
+	engine.ensureCoverCache()
+	drama := nativeDrama{ID: "tiktok:1234567890", Source: "tiktok", Cover: "https://cover.example.test/synthetic.png?signature=private"}
+	if _, err := engine.covers.loadAddress(context.Background(), drama, false); err != nil {
+		t.Fatal(err)
+	}
+	status = http.StatusForbidden
+	if _, err := engine.covers.loadAddress(context.Background(), drama, true); err == nil {
+		t.Fatal("HTTP failure was accepted")
+	}
+	engine.covers.mu.Lock()
+	defer engine.covers.mu.Unlock()
+	data, err := os.ReadFile(engine.downloader.diagnostics.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var event diagnosticEvent
+	if json.Unmarshal(bytes.TrimSpace(data), &event) != nil || event.HTTPStatus != 403 || event.Host != "cover.example.test" || event.Source != "tiktok" {
+		t.Fatalf("missing cover diagnostics: %s", data)
+	}
+}
+
 func TestNativeCoverDecryptsAndPersistsAcrossRestart(t *testing.T) {
 	plain, encrypted := syntheticNativeCover(t)
 	var calls atomic.Int32

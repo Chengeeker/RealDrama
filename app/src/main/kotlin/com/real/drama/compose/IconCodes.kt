@@ -117,6 +117,7 @@ val iconCodes = mapOf(
     "lan" to 0xf0534,
     "leaderboard_outlined" to 0xf158,
     "light" to 0xe379,
+    "my_location" to 0xe55c,
     "live_tv_outlined" to 0xf16f,
     "lock_outline" to 0xe3b1,
     "manage_accounts_outlined" to 0xf1ac,

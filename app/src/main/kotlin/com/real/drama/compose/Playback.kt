@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -318,7 +319,13 @@ internal suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectP
         if (!endedBeforeHold) {
             firstTap = null
             val restore = onHold()
-            try { waitForUpOrCancellation()?.consume() } finally { restore?.invoke() }
+            if (restore == null) waitForUpOrCancellation()?.consume() else try {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                    event.changes.forEach { it.consume() }
+                    if (event.changes.none { it.pressed }) break
+                }
+            } finally { restore() }
             return@awaitEachGesture
         }
         val tap = up
@@ -455,6 +462,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
     val currentEpisode by rememberUpdatedState(episode)
     val currentOpenedEpisode by rememberUpdatedState(openedEpisode)
     val currentState by rememberUpdatedState(state)
+    val currentBoost by rememberUpdatedState(boost)
     var pausedByUser by remember { mutableStateOf(false) }
     var audioAllowed by remember { mutableStateOf(true) }
     val shouldPlay = active && foreground && audioAllowed && !pausedByUser
@@ -786,12 +794,14 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             detectPlaybackScrub({ currentState }, { dragging = it }, { target -> interaction++; action { player.seek(target) } })
         }.pointerInput(player) {
             var left = false
-            try { detectVerticalDragGestures(onDragStart = { left = it.x < size.width / 2; adjusting = true },
-                onDragEnd = { adjusting = false; interaction++ }, onDragCancel = { adjusting = false }, onVerticalDrag = { change, amount ->
-                change.consume()
-                if (left) {
-                    (context as? android.app.Activity)?.let { activity -> val attrs = activity.window.attributes; val base = attrs.screenBrightness.takeIf { it >= 0 } ?: runCatching { android.provider.Settings.System.getInt(activity.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS) / 255f }.getOrDefault(.5f); attrs.screenBrightness = (base - amount / size.height * 1.2f).coerceIn(.02f, 1f); activity.window.attributes = attrs; hint = "亮度 ${(attrs.screenBrightness * 100).toInt()}%" }
-                } else { volume = (volume - amount / size.height * 100).coerceIn(0.0, 100.0); hint = "音量 ${volume.toInt()}%"; action { player.volume(volume) } }
+            try { detectVerticalDragGestures(onDragStart = { if (!currentBoost) { left = it.x < size.width / 2; adjusting = true } },
+                onDragEnd = { if (!currentBoost) { adjusting = false; interaction++ } }, onDragCancel = { if (!currentBoost) adjusting = false }, onVerticalDrag = { change, amount ->
+                if (!currentBoost) {
+                    change.consume()
+                    if (left) {
+                        (context as? android.app.Activity)?.let { activity -> val attrs = activity.window.attributes; val base = attrs.screenBrightness.takeIf { it >= 0 } ?: runCatching { android.provider.Settings.System.getInt(activity.contentResolver, android.provider.Settings.System.SCREEN_BRIGHTNESS) / 255f }.getOrDefault(.5f); attrs.screenBrightness = (base - amount / size.height * 1.2f).coerceIn(.02f, 1f); activity.window.attributes = attrs; hint = "亮度 ${(attrs.screenBrightness * 100).toInt()}%" }
+                    } else { volume = (volume - amount / size.height * 100).coerceIn(0.0, 100.0); hint = "音量 ${volume.toInt()}%"; action { player.volume(volume) } }
+                }
             }) } finally { adjusting = false }
         }))
         val playbackTitle = buildString {
@@ -820,7 +830,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                     Text(playbackTitle, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     IconButton(hapticClick { menu = "settings" }) { Glyph("settings_rounded", "播放设置", size = 20) }
                 }
-                val transportAlignment = if (landscapeFull) Alignment.Center else androidx.compose.ui.BiasAlignment(0f, -.15f)
+                val transportAlignment = if (full) Alignment.Center else androidx.compose.ui.BiasAlignment(0f, -.15f)
                 if (maxHeight >= 168.dp && enabled && !showBuffering && dragging == null) Row(
                     Modifier.align(transportAlignment), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {

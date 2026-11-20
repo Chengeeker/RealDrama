@@ -117,21 +117,29 @@ fun PlaybackMenu(
         return
     }
 
-    Dialog(onDismiss, DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(
+        onDismiss,
+        DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = screen.screenWidthDp <= screen.screenHeightDp,
+        ),
+    ) {
         FlutterDialogDim()
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val landscape = maxWidth > maxHeight
-            val width = if (landscape) minOf(440.dp, maxWidth * .6f) else 600.dp
+            val width = if (landscape) minOf(293.dp, maxWidth * .305f) else 600.dp
             val height = if (landscape) maxHeight else maxHeight * .72f
             Box(Modifier.matchParentSize().pointerInput(onDismiss) { detectTapGestures { onDismiss() } })
+            val panelModifier = if (landscape) Modifier.align(Alignment.CenterEnd).width(width).fillMaxHeight()
+                else Modifier.align(Alignment.BottomCenter).padding(12.dp).width(width)
+                    .then(if (section in setOf("speed", "quality")) Modifier.heightIn(max = height) else Modifier.height(height))
             Surface(
-                Modifier.align(if (landscape) Alignment.CenterEnd else Alignment.BottomCenter)
-                    .padding(12.dp).width(width).then(if (section in setOf("speed", "quality")) Modifier.heightIn(max = height) else Modifier.height(height))
-                    .pointerInput(Unit) { detectTapGestures {} },
-                shape = RoundedCornerShape(28.dp), color = colors.surface,
+                panelModifier.pointerInput(Unit) { detectTapGestures {} },
+                shape = if (landscape) RoundedCornerShape(topStart = 28.dp, topEnd = 0.dp, bottomEnd = 0.dp, bottomStart = 28.dp) else RoundedCornerShape(28.dp),
+                color = colors.surface,
             ) {
-                Column {
-                    Row(Modifier.padding(start = 18.dp, top = 8.dp, end = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.fillMaxSize().then(if (landscape) Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Vertical + WindowInsetsSides.End)) else Modifier)) {
+                    if (section != "episodes" || !landscape) Row(Modifier.padding(start = if (landscape) 10.dp else 18.dp, top = 8.dp, end = if (landscape) 8.dp else 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         val title = when (section) {
                             "episodes" -> episodesTitle
                             "speed" -> "播放倍速"
@@ -144,11 +152,13 @@ fun PlaybackMenu(
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().height(2.dp))
                     if (error) Text("未能保存设置，请检查存储空间后重试。", Modifier.padding(horizontal = 18.dp, vertical = 8.dp), color = Color(0xffffb4a8))
                     if (section == "episodes") {
-                        Box(Modifier.weight(1f)) { EpisodeGrid(episodes, index, compact = false, onSelect = ::choose) }
-                    } else Column(Modifier.weight(1f, fill = section == "settings").verticalScroll(rememberScrollState()).padding(start = 18.dp, top = 4.dp, end = 18.dp, bottom = 20.dp)) {
+                        Box(Modifier.weight(1f)) { EpisodeGrid(episodes, index, compact = false, compactCells = true, showEpisodeCount = false, playerSidebarHeader = landscape, onSelect = ::choose) }
+                    } else Column(Modifier.weight(1f, fill = section == "settings").verticalScroll(rememberScrollState()).padding(start = if (landscape) 12.dp else 18.dp, top = 4.dp, end = if (landscape) 12.dp else 18.dp, bottom = 20.dp)) {
                         if (section == "speed" || section == "settings") {
-                            Text("倍速")
-                            Spacer(Modifier.height(8.dp))
+                            if (section == "settings") {
+                                Text("倍速")
+                                Spacer(Modifier.height(8.dp))
+                            }
                             MenuChoices {
                                 menuSpeeds.forEach { value ->
                                     LegacyChip(speed == value, { run { onChange("speed", value); if (section == "speed") onDismiss() } }, label = { Text("${value}x") }, enabled = !busy)
@@ -157,8 +167,10 @@ fun PlaybackMenu(
                             Spacer(Modifier.height(20.dp))
                         }
                         if (section == "quality" || section == "settings") {
-                            Text("清晰度")
-                            Spacer(Modifier.height(8.dp))
+                            if (section == "settings") {
+                                Text("清晰度")
+                                Spacer(Modifier.height(8.dp))
+                            }
                             Text(
                                 when {
                                     local -> "本集正在播放本地原画，画质偏好用于后续在线播放。"

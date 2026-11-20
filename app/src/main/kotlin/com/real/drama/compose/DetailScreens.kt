@@ -18,6 +18,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
+import com.real.drama.R
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
@@ -108,26 +110,41 @@ fun PlayerScreen(drama: Drama, back: () -> Unit, payload: JSONObject = JSONObjec
 }
 
 @Composable
-fun EpisodeGrid(episodes: List<Episode>, current: Int = -1, selected: Set<Int>? = null, compact: Boolean = true, onSelect: (Int) -> Unit) {
-    val grid = rememberLazyGridState()
+fun EpisodeGrid(episodes: List<Episode>, current: Int = -1, selected: Set<Int>? = null, compact: Boolean = true, compactCells: Boolean = compact, showEpisodeCount: Boolean = true, playerSidebarHeader: Boolean = false, onSelect: (Int) -> Unit) {
+    val grid = rememberLazyGridState(initialFirstVisibleItemIndex = if (compact) 0 else (current % 50).coerceAtLeast(0))
+    val scope = rememberCoroutineScope()
     var jump by remember { mutableStateOf(false) }; var number by remember { mutableStateOf("") }; var error by remember { mutableStateOf(false) }
     var page by remember { mutableIntStateOf((current.coerceAtLeast(0) / 50).coerceAtMost(((episodes.size - 1).coerceAtLeast(0)) / 50)) }
     val pageCount = (episodes.size + 49) / 50
     val start = if (compact) 0 else page * 50
     val visible = if (compact) episodes else episodes.drop(start).take(50)
-    fun locate(index: Int) { if (!compact) page = index / 50; grid.requestScrollToItem(if (compact) index else index % 50) }
+    fun locate(index: Int) {
+        if (!compact) page = index / 50
+        scope.launch { androidx.compose.runtime.withFrameNanos { }; grid.scrollToItem(if (compact) index else index % 50) }
+    }
     LaunchedEffect(current) { if (current in episodes.indices) locate(current) }
     Column(Modifier.fillMaxSize()) {
-        if (!compact) Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+        if (!compact) Column(Modifier.padding(horizontal = if (playerSidebarHeader) 8.dp else 16.dp, vertical = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("选集 · ${episodes.size} 集", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                if (current in episodes.indices) TextButton(hapticClick { locate(current) }) { Text("定位当前") }
+                if (showEpisodeCount || playerSidebarHeader) Text(if (playerSidebarHeader) "共${episodes.size}集" else "选集 · ${episodes.size} 集", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                if (current in episodes.indices) {
+                    if (playerSidebarHeader) IconButton(onClick = hapticClick { locate(current) }) {
+                        Icon(painterResource(R.drawable.ic_my_location), contentDescription = "定位当前集")
+                    }
+                    else TextButton(hapticClick { locate(current) }) { Text("定位当前") }
+                }
                 IconAction("pin_outlined", "跳转集数", episodes.isNotEmpty()) { jump = true }
             }
             if (pageCount > 1) Row(verticalAlignment = Alignment.CenterVertically) {
-                IconAction("chevron_left_rounded", "上一组选集", page > 0) { locate((page - 1) * 50) }
-                Box(Modifier.weight(1f)) { SettingsDropdown(page.toString(), (0 until pageCount).map { it.toString() to "第 ${episodes[it * 50].number}–${episodes[minOf(it * 50 + 49, episodes.lastIndex)].number} 集" }, filled = false) { locate(it.toInt() * 50) } }
-                IconAction("chevron_right_rounded", "下一组选集", page + 1 < pageCount) { locate((page + 1) * 50) }
+                if (playerSidebarHeader) {
+                    IconAction("chevron_left_rounded", "上一组选集", page > 0) { locate((page - 1) * 50) }
+                    EpisodeGroupPicker(episodes, page, pageCount, Modifier.weight(1f)) { locate(it * 50) }
+                    IconAction("chevron_right_rounded", "下一组选集", page + 1 < pageCount) { locate((page + 1) * 50) }
+                } else {
+                    IconAction("chevron_left_rounded", "上一组选集", page > 0) { locate((page - 1) * 50) }
+                    Box(Modifier.weight(1f)) { SettingsDropdown(page.toString(), (0 until pageCount).map { it.toString() to "第 ${episodes[it * 50].number}–${episodes[minOf(it * 50 + 49, episodes.lastIndex)].number} 集" }, filled = false) { locate(it.toInt() * 50) } }
+                    IconAction("chevron_right_rounded", "下一组选集", page + 1 < pageCount) { locate((page + 1) * 50) }
+                }
             }
         }
         if (compact && pageCount > 1) LazyRow(Modifier.height(34.dp), contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 2.dp, bottom = 3.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -139,19 +156,20 @@ fun EpisodeGrid(episodes: List<Episode>, current: Int = -1, selected: Set<Int>? 
             }
         }
         BoxWithConstraints(Modifier.weight(1f)) {
-            val scaled = with(LocalDensity.current) { (if (compact) 14.sp else 20.sp).toDp().value }
+            val scaled = with(LocalDensity.current) { (if (compactCells) 14.sp else 20.sp).toDp().value }
             val television = televisionMode()
             val digits = visible.maxOfOrNull { it.number.toString().length } ?: 1
-            val columns = if (compact) ((maxWidth.value - 12) / maxOf(40f, scaled * digits * .62f + 22)).toInt().coerceIn(5, if (television) 12 else 10) else ((maxWidth.value - 36) / maxOf(if (television) 100f else 82f, scaled * digits * .65f + 40)).toInt().coerceIn(1, 12)
-            LazyVerticalGrid(GridCells.Fixed(columns), state = grid, contentPadding = if (compact) PaddingValues(start = 4.dp, top = 4.dp, end = 4.dp, bottom = 12.dp) else PaddingValues(start = 18.dp, top = 2.dp, end = 18.dp, bottom = 18.dp), horizontalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp)) {
+            val minCellWidth = maxOf(40f, scaled * digits * .62f + 22)
+            val columns = if (compactCells) ((maxWidth.value - 12) / minCellWidth).toInt().coerceIn(1, if (television) 12 else 10) else ((maxWidth.value - 36) / maxOf(if (television) 100f else 82f, scaled * digits * .65f + 40)).toInt().coerceIn(1, 12)
+            LazyVerticalGrid(GridCells.Fixed(columns), state = grid, contentPadding = if (compactCells) PaddingValues(start = 4.dp, top = 4.dp, end = 4.dp, bottom = 12.dp) else PaddingValues(start = 18.dp, top = 2.dp, end = 18.dp, bottom = 18.dp), horizontalArrangement = Arrangement.spacedBy(if (compactCells) 6.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (compactCells) 6.dp else 8.dp)) {
                 itemsIndexed(visible) { offset, ep ->
                     val index = start + offset; val chosen = selected?.contains(index) ?: (current == index)
                     var focused by remember { mutableStateOf(false) }
-                    Surface(onClick = hapticClick { onSelect(index) }, shape = RoundedCornerShape(if (compact) 8.dp else 14.dp), color = when { chosen -> MaterialTheme.colorScheme.primaryContainer; focused -> MaterialTheme.colorScheme.surfaceContainerHighest; else -> androidx.compose.ui.graphics.Color.Transparent },
-                        border = BorderStroke(if (compact) 1.2.dp else 2.dp, if (chosen || focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.height(if (compact) maxOf(34f, scaled + 18).dp else maxOf(56f, scaled + 30).dp).onFocusChanged { focused = it.hasFocus }.semantics { contentDescription = "第 ${ep.number} 集" + if (ep.json.optBoolean("vip")) "，VIP 试看" else "" }) {
+                    Surface(onClick = hapticClick { onSelect(index) }, shape = RoundedCornerShape(if (compactCells) 8.dp else 14.dp), color = when { chosen -> MaterialTheme.colorScheme.primaryContainer; focused -> MaterialTheme.colorScheme.surfaceContainerHighest; else -> androidx.compose.ui.graphics.Color.Transparent },
+                        border = BorderStroke(if (compactCells) 1.2.dp else 2.dp, if (chosen || focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.height(if (compactCells) maxOf(34f, scaled + 18).dp else maxOf(56f, scaled + 30).dp).onFocusChanged { focused = it.hasFocus }.semantics { contentDescription = "第 ${ep.number} 集" + if (ep.json.optBoolean("vip")) "，VIP 试看" else "" }) {
                         Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                            Text(ep.number.toString(), color = MaterialTheme.colorScheme.onSurface, fontSize = if (compact) 14.sp else 20.sp, fontWeight = appTextWeight(if (chosen) FontWeight.Bold else FontWeight.Medium))
-                            if (ep.json.optBoolean("vip")) { Spacer(Modifier.width(if (compact) 2.dp else 4.dp)); Glyph("workspace_premium_rounded", size = if (compact) 15 else 18, color = MaterialTheme.colorScheme.tertiary) }
+                            Text(ep.number.toString(), color = MaterialTheme.colorScheme.onSurface, fontSize = if (compactCells) 14.sp else 20.sp, fontWeight = appTextWeight(if (chosen) FontWeight.Bold else FontWeight.Medium))
+                            if (ep.json.optBoolean("vip")) { Spacer(Modifier.width(if (compactCells) 2.dp else 4.dp)); Glyph("workspace_premium_rounded", size = if (compactCells) 15 else 18, color = MaterialTheme.colorScheme.tertiary) }
                         }
                     }
                 }
@@ -159,6 +177,29 @@ fun EpisodeGrid(episodes: List<Episode>, current: Int = -1, selected: Set<Int>? 
         }
     }
     if (jump) LegacyAlertDialog(onDismissRequest = { jump = false }, title = { Text("跳转到指定集数") }, text = { OutlinedTextField(number, { number = it.filter(Char::isDigit); error = false }, label = { Text("集数") }, isError = error, supportingText = { if (error) Text("没有找到这一集，请输入已有集数") }, keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number), textStyle = MaterialTheme.typography.bodyLarge, colors = legacyTextFieldColors(), shape = RoundedCornerShape(16.dp)) }, confirmButton = { Button(hapticClick { val target = episodes.indexOfFirst { it.number == number.toIntOrNull() }; if (target < 0) error = true else { jump = false; locate(target) } }) { Text("定位") } }, dismissButton = { TextButton(hapticClick { jump = false }) { Text("取消") } })
+}
+
+@Composable
+private fun EpisodeGroupPicker(episodes: List<Episode>, page: Int, pageCount: Int, modifier: Modifier = Modifier, onSelect: (Int) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier.height(48.dp)) {
+        Row(Modifier.fillMaxSize().hapticClickable { expanded = true }, verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "第 ${episodes[page * 50].number}–${episodes[minOf(page * 50 + 49, episodes.lastIndex)].number} 集",
+                Modifier.weight(1f), fontSize = 14.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Glyph("arrow_drop_down", size = 20)
+        }
+        DropdownMenu(expanded, { expanded = false }) {
+            (0 until pageCount).forEach { index ->
+                DropdownMenuItem(
+                    text = { Text("第 ${episodes[index * 50].number}–${episodes[minOf(index * 50 + 49, episodes.lastIndex)].number} 集") },
+                    onClick = hapticClick { expanded = false; onSelect(index) },
+                )
+            }
+        }
+    }
 }
 
 @Composable

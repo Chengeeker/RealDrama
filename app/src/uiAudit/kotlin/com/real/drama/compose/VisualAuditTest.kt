@@ -23,6 +23,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -34,6 +35,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.printToString
 import androidx.compose.runtime.remember
@@ -341,7 +343,9 @@ class VisualAuditTest {
         val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
         runBlocking { repo.store.open() }
         lateinit var hapticView: android.view.View
-        val detail = Detail(Drama(obj("id" to "synthetic:detail-input", "title" to "详情播放器合成视频")), listOf(Episode(obj("id" to "1"), 1)))
+        val detail = Detail(Drama(obj("id" to "synthetic:detail-input", "title" to "详情播放器合成视频")), listOf(
+            Episode(obj("id" to "1"), 1), Episode(obj("id" to "2"), 2),
+        ))
         AuditNativeBridge.snapshotDimensions = 900.0 to 1200.0
         AuditNativeBridge.commands.clear()
         var manualTexture: AuditedSurfaceTexture? = null
@@ -379,6 +383,13 @@ class VisualAuditTest {
             insets(24, 40)
             val settings = compose.onNodeWithContentDescription("播放设置")
             val before = settings.fetchSemanticsNode().boundsInRoot
+            val playNodes = compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("开始播放")).fetchSemanticsNodes()
+                .ifEmpty { compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("暂停播放")).fetchSemanticsNodes() }
+            val transportY = listOf("上一集", "下一集").map {
+                compose.onNodeWithContentDescription(it).fetchSemanticsNode().boundsInRoot.center.y
+            } + playNodes.single().boundsInRoot.center.y
+            val lockY = compose.onNodeWithContentDescription("锁定控制").fetchSemanticsNode().boundsInRoot.center.y
+            org.junit.Assert.assertTrue(transportY.all { kotlin.math.abs(it - lockY) <= 1f })
             org.junit.Assert.assertTrue("bar bottom ${before.bottom}, video top $videoTop", videoTop - before.bottom in 14f..24f)
             insets(0, 40)
             org.junit.Assert.assertEquals(before.top, settings.fetchSemanticsNode().boundsInRoot.top, .5f)
@@ -741,9 +752,11 @@ class VisualAuditTest {
     @get:Rule val compose = createAndroidComposeRule<androidx.activity.ComponentActivity>()
     @Test fun renderSettings() = render()
     @Test @Config(qualifiers = "w320dp-h640dp-night-mdpi")
-    fun renderNarrowDark() = render("narrowDark", listOf("settings", "personalization", "webdav", "downloadPicker", "actionsData", "playerSettings"))
+    fun renderNarrowDark() = render("narrowDark", listOf("settings", "personalization", "webdav", "downloadPicker", "actionsData", "playerSettings", "playerSpeed", "playerQuality", "playerEpisodes"))
     @Test @Config(qualifiers = "w960dp-h540dp-land-mdpi")
-    fun renderLandscapeAndTv() = render("landscape", listOf("playerSettings", "playerEpisodes", "tvSettings", "tvEpisodes"))
+    fun renderLandscapeAndTv() = render("landscape", listOf("playerSettings", "playerSpeed", "playerQuality", "playerEpisodes", "playerLongEpisodes", "playerEndEpisodes", "tvSettings", "tvEpisodes"))
+    @Test @Config(qualifiers = "w754dp-h347dp-land-xxxhdpi")
+    fun renderPhoneLandscapeEpisodeSidebar() = render("phoneLandscape", listOf("playerEndEpisodes"))
 
     @Test fun horizontalScrubCommitsOnceAndCancellationDoesNotSeek() {
         var preview: Float? = null
@@ -893,6 +906,36 @@ class VisualAuditTest {
         compose.mainClock.advanceTimeBy(400)
         compose.onRoot().performTouchInput { advanceEventTime(400); up() }
         compose.runOnIdle { org.junit.Assert.assertEquals(listOf("boost", "normal"), events) }
+    }
+
+    @Test fun heldSpeedConsumesVerticalSwipeUntilRelease() {
+        val events = mutableListOf<String>()
+        compose.setContent {
+            Box(Modifier.fillMaxSize()
+                .pointerInput(Unit) {
+                    detectPlaybackTaps(
+                        100f,
+                        onHold = {
+                            events.add("boost")
+                            val restore: () -> Unit = { events.add("normal") }
+                            restore
+                        },
+                        onTap = { true },
+                        onDoubleTap = {},
+                    )
+                }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(onVerticalDrag = { _, _ -> events.add("vertical") })
+                })
+        }
+        val root = compose.onRoot()
+        root.performTouchInput { down(center) }
+        compose.mainClock.advanceTimeBy(400)
+        root.performTouchInput { advanceEventTime(400); moveBy(androidx.compose.ui.geometry.Offset(0f, -120f)); up() }
+        compose.runOnIdle { org.junit.Assert.assertEquals(listOf("boost", "normal"), events) }
+
+        root.performTouchInput { down(center); moveBy(androidx.compose.ui.geometry.Offset(0f, -120f)); up() }
+        compose.runOnIdle { org.junit.Assert.assertTrue(events.contains("vertical")) }
     }
 
     @Test fun feedPreparationSharesDetailsAndTransfersOneWarmSession() = runBlocking {
@@ -1187,7 +1230,7 @@ class VisualAuditTest {
     )) {
         AuditNativeBridge.populated = false
         val repo = (RuntimeEnvironment.getApplication() as DramaApplication).repository
-        runBlocking { repo.store.open(); repo.store.set("dynamicColor", false, true) }
+        runBlocking { repo.store.open(); repo.store.set("dynamicColor", false, true); if (profile in setOf("landscape", "phoneLandscape")) repo.store.set("themeMode", "dark", true) }
         org.junit.Assert.assertFalse(repo.store.forceLogin)
         val page = mutableStateOf("settings")
         compose.setContent {
@@ -1197,14 +1240,14 @@ class VisualAuditTest {
                 LocalDensity provides if (profile == "narrowDark") Density(density.density, 1.3f) else density,
             ) { DramaTheme(repo.store) {
             Surface { Box(Modifier.fillMaxSize()) { androidx.compose.runtime.key(page.value) { when (page.value) {
-                "playerSettings", "playerSpeed", "playerQuality", "playerLocalQuality", "playerEpisodes", "playerLongEpisodes", "tvSettings", "tvEpisodes" -> {
+                "playerSettings", "playerSpeed", "playerQuality", "playerLocalQuality", "playerEpisodes", "playerLongEpisodes", "playerEndEpisodes", "tvSettings", "tvEpisodes" -> {
                     val open = remember { mutableStateOf(false) }
                     val speed = remember { mutableStateOf(1.25) }
                     val name = page.value
                     val section = when (name) {
                         "playerSpeed" -> "speed"
                         "playerQuality", "playerLocalQuality" -> "quality"
-                        "playerEpisodes", "playerLongEpisodes", "tvEpisodes" -> "episodes"
+                        "playerEpisodes", "playerLongEpisodes", "playerEndEpisodes", "tvEpisodes" -> "episodes"
                         else -> "settings"
                     }
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1212,10 +1255,11 @@ class VisualAuditTest {
                     }
                     val episodes = remember(name) {
                         if (name == "playerLongEpisodes") (1..72).map { Episode(obj("id" to "$it", "title" to "第${it}集", "vip" to (it > 64)), it) }
+                        else if (name == "playerEndEpisodes") (1..87).map { Episode(obj("id" to "$it", "title" to "第${it}集", "vip" to (it > 64)), it) }
                         else auditData().getJSONArray("chapters").objects().map { Episode(it, it.getInt("currentEpisode")) }
                     }
                     if (open.value) PlaybackMenu(
-                        section, episodes, if (name == "playerLongEpisodes") 59 else 2, speed.value, 1440, listOf(1080, 720), 1080, name == "playerLocalQuality",
+                        section, episodes, when (name) { "playerLongEpisodes" -> 59; "playerEndEpisodes" -> 86; else -> 2 }, speed.value, 1440, listOf(1080, 720), 1080, name == "playerLocalQuality",
                         true, true, true, false, "下一集已预加载", name.startsWith("tv"), rememberCoroutineScope(),
                         onDismiss = { open.value = false }, onEpisode = {},
                         onChange = { key, value -> if (key == "speed") speed.value = value as Double }, onFavorite = {},
@@ -1338,12 +1382,46 @@ class VisualAuditTest {
             if (name == "actionsData") compose.onNodeWithText("打开操作").performClick()
             if (name == "webdavUpload") compose.onNodeWithText("上传备份").performClick()
             if (name.startsWith("player") || name.startsWith("tv")) compose.onNodeWithText("打开播放菜单").performClick()
+            if (name == "playerEpisodes") {
+                if (profile == "landscape") {
+                    compose.onNodeWithText("共12集").assertExists()
+                    compose.onNodeWithContentDescription("定位当前集").assertIsDisplayed()
+                    compose.onNodeWithContentDescription("跳转集数").assertIsDisplayed()
+                    compose.onNodeWithContentDescription("关闭菜单").assertDoesNotExist()
+                } else {
+                    compose.onNodeWithText("选集 · 共 12 集").assertExists()
+                    compose.onNodeWithText("选集 · 12 集").assertDoesNotExist()
+                    val titleLeft = compose.onNodeWithText("选集 · 共 12 集").fetchSemanticsNode().boundsInRoot.left
+                    val locateLeft = compose.onNodeWithText("定位当前").fetchSemanticsNode().boundsInRoot.left
+                    org.junit.Assert.assertTrue(kotlin.math.abs(titleLeft - locateLeft) <= 16f)
+                }
+            }
             if (name == "playerLongEpisodes") {
+                compose.onNodeWithText("共72集").assertExists()
                 compose.onNodeWithText("第 51–72 集").assertExists()
                 compose.onNodeWithContentDescription("上一组选集").performClick()
                 compose.onNodeWithText("第 1–50 集").assertExists()
-                compose.onNodeWithText("定位当前").performClick()
+                compose.onNodeWithContentDescription("定位当前集").performClick()
                 compose.onNodeWithText("第 51–72 集").assertExists()
+            }
+            if (name == "playerEndEpisodes") {
+                compose.onNodeWithText("共87集").assertExists()
+                compose.onNodeWithContentDescription("定位当前集").assertIsDisplayed()
+                compose.onNodeWithContentDescription("跳转集数").assertIsDisplayed()
+                compose.onNodeWithContentDescription("关闭菜单").assertDoesNotExist()
+                compose.onNodeWithText("第 51–87 集").assertExists()
+                compose.onNodeWithText("87").assertIsDisplayed()
+            }
+            if (name == "playerSettings") {
+                org.junit.Assert.assertEquals(1, compose.onAllNodesWithText("倍速", substring = false).fetchSemanticsNodes().size)
+                org.junit.Assert.assertEquals(1, compose.onAllNodesWithText("清晰度", substring = false).fetchSemanticsNodes().size)
+            }
+            if (name == "playerSpeed") {
+                compose.onNodeWithText("播放倍速").assertExists()
+                org.junit.Assert.assertEquals(0, compose.onAllNodesWithText("倍速", substring = false).fetchSemanticsNodes().size)
+            }
+            if (name == "playerQuality") {
+                org.junit.Assert.assertEquals(1, compose.onAllNodesWithText("清晰度", substring = false).fetchSemanticsNodes().size)
             }
             if (name == "playerQuality") compose.onNodeWithText("已保存 1440P 偏好，本集暂无此画质。").assertExists()
             if (name == "playerLocalQuality") compose.onNodeWithText("本集正在播放本地原画，画质偏好用于后续在线播放。").assertExists()

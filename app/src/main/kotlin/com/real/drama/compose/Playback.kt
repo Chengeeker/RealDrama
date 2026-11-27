@@ -305,7 +305,7 @@ data class PlayerActions(val episode: Int, val episodes: () -> Unit)
 
 internal suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectPlaybackTaps(
     doubleTapSlop: Float,
-    onHold: () -> (() -> Unit)? = { null },
+    onHold: () -> Pair<(androidx.compose.ui.geometry.Offset) -> Unit, () -> Unit>? = { null },
     onTap: () -> Boolean,
     onDoubleTap: (androidx.compose.ui.geometry.Offset) -> Unit,
 ) {
@@ -318,14 +318,15 @@ internal suspend fun androidx.compose.ui.input.pointer.PointerInputScope.detectP
         val endedBeforeHold = withTimeoutOrNull(350) { up = waitForUpOrCancellation(); true } == true
         if (!endedBeforeHold) {
             firstTap = null
-            val restore = onHold()
-            if (restore == null) waitForUpOrCancellation()?.consume() else try {
+            val hold = onHold()
+            if (hold == null) waitForUpOrCancellation()?.consume() else try {
                 while (true) {
                     val event = awaitPointerEvent(PointerEventPass.Initial)
+                    event.changes.firstOrNull { it.id == down.id && it.pressed }?.let { hold.first(it.position - down.position) }
                     event.changes.forEach { it.consume() }
                     if (event.changes.none { it.pressed }) break
                 }
-            } finally { restore() }
+            } finally { hold.second() }
             return@awaitEachGesture
         }
         val tap = up
@@ -400,6 +401,8 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         if (externalClean == null) localClean = value else onClean(value)
     }
     var boost by remember { mutableStateOf(false) }
+    var boostLocked by remember { mutableStateOf(false) }
+    val latestBoostLocked by rememberUpdatedState(boostLocked)
     var localFull by remember(television) { mutableStateOf(television) }
     val full = externalFull ?: localFull
     var locked by remember(player) { mutableStateOf(false) }
@@ -445,6 +448,12 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
     LaunchedEffect(selectedIndex) { selectedIndex?.let { index = it.coerceIn(0, (detail.episodes.size - 1).coerceAtLeast(0)) } }
     LaunchedEffect(index) { onIndexChanged(index) }
     LaunchedEffect(boost) { onBoost(boost) }
+    var boostCue by remember { mutableStateOf("") }
+    var lockCue by remember { mutableStateOf("") }
+    var boostHintVisible by remember { mutableStateOf(false) }
+    var lockHintVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(boost, boostCue) { boostHintVisible = boost || boostCue.isNotEmpty(); if (boostHintVisible) { delay(900); boostHintVisible = false } }
+    LaunchedEffect(lockCue) { lockHintVisible = lockCue.isNotEmpty(); if (lockHintVisible) { delay(900); lockHintVisible = false } }
     DisposableEffect(active, episode) {
         if (active) onControls(PlayerActions(episode?.number ?: 1, { menu = "episodes" }))
         onDispose { if (active) onControls(null) }
@@ -536,7 +545,7 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
         onDispose { if (active && window != null && brightness != null) { val attributes = window.attributes; attributes.screenBrightness = brightness; window.attributes = attributes } }
     }
     LaunchedEffect(active, clean, menu, commentsProgress) { if (active && commentsProgress == null && menu.isEmpty() && (clean || !television)) rootFocus.requestFocus() }
-    DisposableEffect(active) { onDispose { keyboardHold?.cancel(); keyboardHold = null; keyboardHeld = false; if (boost) { boost = false; action { player.rate(speed) } } } }
+    DisposableEffect(active) { onDispose { keyboardHold?.cancel(); keyboardHold = null; keyboardHeld = false; if (boost || boostLocked) { boost = false; boostLocked = false; action { player.rate(speed) } } } }
     DisposableEffect(active, state.playing) {
         if (active && state.playing) view.keepScreenOn = true
         onDispose { if (active) view.keepScreenOn = false }
@@ -752,14 +761,28 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
             var wasPaused = false
             detectPlaybackTaps(android.view.ViewConfiguration.get(context).scaledDoubleTapSlop.toFloat(),
                 onHold = {
-                    if (!currentState.playing || currentState.completed || pausedByUser) null else {
+                    if (!currentState.playing || currentState.completed || pausedByUser || holdSpeed <= 1.0) null else {
                         boost = true
+                        var lockOnRelease = false
+                        var unlockOnRelease = false
+                        boostCue = if (latestBoostLocked) "${holdSpeed.toInt()} 倍速已锁定" else "${holdSpeed.toInt()} 倍速 · 下滑锁定"
+                        lockCue = ""
                         action { player.rate(if (boost) holdSpeed else speed) }
-                        val restore: () -> Unit = {
-                            boost = false
-                            action { player.rate(speed) }
+                        val move: (androidx.compose.ui.geometry.Offset) -> Unit = { offset ->
+                            val threshold = 48.dp.toPx()
+                            lockOnRelease = !latestBoostLocked && offset.y >= threshold
+                            unlockOnRelease = latestBoostLocked && offset.y <= -threshold
+                            lockCue = when { lockOnRelease -> "松开锁定倍速"; unlockOnRelease -> "松开恢复原速"; else -> "" }
                         }
-                        restore
+                        val restore: () -> Unit = {
+                            val lockedAfterRelease = if (unlockOnRelease) false else lockOnRelease || latestBoostLocked
+                            boostLocked = lockedAfterRelease
+                            boost = false
+                            action { player.rate(if (lockedAfterRelease) holdSpeed else speed) }
+                            boostCue = ""
+                            lockCue = when { lockOnRelease -> "${holdSpeed.toInt()} 倍速已锁定"; unlockOnRelease -> "已恢复原速"; else -> "" }
+                        }
+                        move to restore
                     }
                 },
                 onTap = {
@@ -790,7 +813,9 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                     }
                 },
             )
-        }.then(if (feed || locked || !active || loading || failure != null) Modifier else Modifier.pointerInput(player) {
+        }.then(if (feed && source?.feedSeek != true && !locked && active && !loading && failure == null) Modifier.pointerInput(player) {
+            detectPlaybackScrub({ currentState }, { dragging = it }, { target -> interaction++; action { player.seek(target) } })
+        } else if (feed || locked || !active || loading || failure != null) Modifier else Modifier.pointerInput(player) {
             detectPlaybackScrub({ currentState }, { dragging = it }, { target -> interaction++; action { player.seek(target) } })
         }.pointerInput(player) {
             var left = false
@@ -883,7 +908,9 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                     if (source?.feedSeek == true) {
                         LegacySlider(position, seek, finishSeek, state.duration.toFloat(), Modifier.align(Alignment.BottomCenter).padding(horizontal = 16.dp).fillMaxWidth().height(30.dp), feed = true)
                         if (dragging != null) Text("${formatPosition(position.toDouble())} / ${formatPosition(state.duration)}",
-                            Modifier.align(Alignment.BottomCenter).padding(bottom = 32.dp).background(Color.Black.copy(alpha = .72f), androidx.compose.foundation.shape.RoundedCornerShape(16.dp)).padding(horizontal = 10.dp, vertical = 5.dp),
+                            Modifier.align(if (videoTop >= 144.dp) Alignment.TopCenter else androidx.compose.ui.BiasAlignment(0f, -.5f))
+                                .then(if (videoTop >= 144.dp) Modifier.height(videoTop).padding(top = 56.dp) else Modifier)
+                                .background(Color.Black.copy(alpha = .87f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(horizontal = 16.dp, vertical = 10.dp),
                             color = Color.White, fontSize = 12.sp, style = LocalTextStyle.current.copy(fontFeatureSettings = "tnum"))
                     } else Canvas(Modifier.align(Alignment.BottomCenter).padding(start = 16.dp, end = 16.dp, bottom = 12.dp).fillMaxWidth().height(2.dp)) {
                         drawRect(Color.White.copy(alpha = .38f))
@@ -936,8 +963,10 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                 }
             }
         }
-        if (!feed && dragging != null) Text("${formatPosition(dragging!!.toDouble())} / ${formatPosition(state.duration)}",
-            Modifier.align(Alignment.Center).background(Color.Black.copy(alpha = .78f), androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(horizontal = 20.dp, vertical = 12.dp),
+        if (dragging != null) Text("${formatPosition(dragging!!.toDouble())} / ${formatPosition(state.duration)}",
+            Modifier.align(if (videoTop >= 144.dp) Alignment.TopCenter else androidx.compose.ui.BiasAlignment(0f, -.5f))
+                .then(if (videoTop >= 144.dp) Modifier.height(videoTop).padding(top = 56.dp) else Modifier)
+                .background(Color.Black.copy(alpha = .87f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(horizontal = 16.dp, vertical = 10.dp),
             color = Color.White, style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"))
         if (!feed && full && !television && (locked && lockVisible || !locked && controlsVisible)) {
             Box(Modifier.align(Alignment.CenterStart).windowInsetsPadding(detailSides.only(WindowInsetsSides.Start)).padding(start = 8.dp)) {
@@ -946,16 +975,18 @@ fun PlayerPane(detail: Detail, initialIndex: Int = 0, active: Boolean = true, fe
                 }, compact = true) { Glyph(if (locked) "lock_rounded" else "lock_open_rounded", size = 20) }
             }
         }
-        val portraitBoost = boost && full && state.width > 0 && state.width < state.height
-        val topLetterbox = if (portraitBoost) videoTop else 0.dp
-        val feedback = if (boost) "${holdSpeed.toInt()} 倍速 · 松开恢复" else hint
-        if (feedback.isNotEmpty() && !(boost && feed) && (!portraitBoost || topLetterbox >= 48.dp)) {
+        val feedback = when {
+            lockHintVisible && lockCue.isNotEmpty() -> lockCue
+            boost && boostHintVisible -> boostCue
+            else -> hint
+        }
+        if (feedback.isNotEmpty()) {
             Box(
-                if (portraitBoost) Modifier.align(Alignment.TopCenter).height(topLetterbox)
+                if (videoTop >= 144.dp) Modifier.align(Alignment.TopCenter).height(videoTop).padding(top = 56.dp)
                 else Modifier.align(androidx.compose.ui.BiasAlignment(0f, -.5f)).padding(16.dp),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(feedback, Modifier.background(Color.Black.copy(alpha = if (boost) .18f else .87f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(horizontal = 16.dp, vertical = 10.dp), color = Color.White)
+                Text(feedback, Modifier.background(Color.Black.copy(alpha = .87f), androidx.compose.foundation.shape.RoundedCornerShape(10.dp)).padding(horizontal = 16.dp, vertical = 10.dp), color = Color.White)
             }
         }
         val showLoading = if (feed) feedWaiting && feedLoadingVisible else loading || showBuffering && !state.completed

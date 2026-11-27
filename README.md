@@ -7,7 +7,9 @@ An Android video app built with Jetpack Compose, a Go core, and libmpv.
 - Themes, dynamic colors, and font controls.
 - Independently updatable content subscriptions.
 
-Version 2.3.23 (4286) · Android 8.0+ · ARM64 · Android TV support
+Version 2.3.25 (4288) · Android 8.0+ · ARM64 · Android TV support
+
+Version 2.3.25 accompanies a separately updated content subscription.
 
 Version 2.3.23 aligns the landscape episode sidebar header and group selector in single rows, removes the close button, and avoids applying the screen's left safe inset inside the right-side panel.
 
@@ -36,3 +38,14 @@ Version 2.3.14 makes the Cookie entry visible in "启用与维护": an expanded 
 Content sources are imported separately. Available features and playback depend on the imported subscriptions and their services.
 
 [Subscription guide](https://github.com/Chengeeker/RealDrama-Subscription#usage) · [Build script](tools/build_release.py)
+
+
+## 2026-11-27 播放器锁速与提示位置（正式发布 2.3.25）
+
+- 长按期间垂直拖动锁定为倍速操作：向下至少 48dp，提示「松开锁定倍速」，松手后保持倍速；再次长按向上至少 48dp，提示「松开恢复原速」，松手后恢复用户选择速度。释放手指前不会调节亮度/音量。
+- 速度、亮度、音量和拖动定位提示按画面顶部黑边空间放置，统一为紧凑胶囊；黑边至少 144dp 时居中显示在黑边安全区，否则放在视频视口上方四分之一处。提示最多 900ms，提前松手立即消失。
+- `:app:assembleRelease` 成功，当前源码版本 `2.3.25+4288` ARM64 APK 12,849,761 字节，SHA-256 `8700e85545c2f8fa56c91fadc50f14e919154a4fbcd134eddd331296f9fb5f3f`。按项目约定本轮没有运行测试；没有连接设备，真实播放器手势仍未验收。
+
+## 2026-11-27 长按锁速实现复核
+
+- `detectPlaybackTaps` 将长按、移动回调和抬手恢复放在同一输入循环，并在加速期间消费手势；亮度/音量回调仅在未加速时执行。播放器手势与信息流倍速提示已同步到 2.3.25 正式版；静态核验不等于设备手势验收。

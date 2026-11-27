@@ -720,10 +720,6 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
             Text(if (danmaku) "弹" else "弹×", fontSize = 18.sp, color = if (full) Color.White else MaterialTheme.colorScheme.onSurface)
         }
     }
-    val boostHint: @Composable () -> Unit = {
-        Text("倍速播放中 · 松开恢复", Modifier.background(Color.Black.copy(alpha = .42f), RoundedCornerShape(20.dp)).padding(horizontal = 14.dp, vertical = 7.dp),
-            color = Color.White, style = MaterialTheme.typography.labelLarge.copy(fontWeight = appTextWeight(FontWeight.SemiBold)))
-    }
     androidx.activity.compose.BackHandler(active && (full || clean)) {
         if (clean) onClean(false) else setFullscreen(false)
     }
@@ -732,8 +728,7 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
     val landscape = maxWidth > maxHeight
     Column(Modifier.fillMaxSize()) {
         if (!full) Box(Modifier.fillMaxWidth().height(56.dp).background(if (clean || boost || commentsProgress != null) Color.Black else MaterialTheme.colorScheme.surfaceContainerLow), contentAlignment = Alignment.Center) {
-            if (boost) boostHint()
-            else if (!clean && commentsProgress == null) {
+            if (!boost && !clean && commentsProgress == null) {
                 Row(Modifier.width(feedWidth).fillMaxHeight().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text("推荐", Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp, fontWeight = appTextWeight(FontWeight.Bold))
                     IconAction("refresh_rounded", "刷新推荐") { refresh++ }
@@ -847,7 +842,6 @@ fun FeedScreen(active: Boolean, full: Boolean, clean: Boolean, onClean: (Boolean
             }
         }
         if (clean && rows.isEmpty()) FeedCleanExit { onClean(false) }
-        if (full && boost) Box(Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).padding(top = 8.dp)) { boostHint() }
         if (full && !clean && !boost && commentsProgress == null) {
             val position = Modifier.align(if (landscape) Alignment.TopStart else Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)).padding(top = 8.dp, start = 8.dp, end = 12.dp)

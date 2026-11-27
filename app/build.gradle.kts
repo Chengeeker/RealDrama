@@ -17,8 +17,8 @@ android {
         applicationId = "com.real.drama"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4287
-        versionName = "2.3.24"
+        versionCode = 4288
+        versionName = "2.3.25"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON" } }
     }
